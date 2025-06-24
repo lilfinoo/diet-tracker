@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diet Tracker - Controle de Dieta e Evolução</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <!-- Tela de Login -->
+    <div id="loginScreen" class="screen">
+        <div class="login-container">
+            <div class="login-card">
+                <h1><i class="fas fa-chart-line"></i> Diet Tracker</h1>
+                <p>Controle sua dieta e evolução com IA</p>
+                
+                <div class="login-tabs">
+                    <button class="tab-btn active" onclick="showLogin()">Entrar</button>
+                    <button class="tab-btn" onclick="showRegister()">Criar Conta</button>
+                </div>
+                
+                <form id="loginForm" class="auth-form">
+                    <div class="form-group">
+                        <input type="text" id="loginUsername" placeholder="Nome de usuário" required>
+                        <i class="fas fa-user"></i>
+                    </div>
+                    <div class="form-group">
+                        <input type="password" id="loginPassword" placeholder="Senha" required>
+                        <i class="fas fa-lock"></i>
+                    </div>
+                    <button type="submit" class="btn-primary">Entrar</button>
+                </form>
+                
+                <form id="registerForm" class="auth-form hidden">
+                    <div class="form-group">
+                        <input type="text" id="registerUsername" placeholder="Nome de usuário" required>
+                        <i class="fas fa-user"></i>
+                    </div>
+                    <div class="form-group">
+                        <input type="password" id="registerPassword" placeholder="Senha" required>
+                        <i class="fas fa-lock"></i>
+                    </div>
+                    <div class="form-group">
+                        <input type="password" id="confirmPassword" placeholder="Confirmar senha" required>
+                        <i class="fas fa-lock"></i>
+                    </div>
+                    <button type="submit" class="btn-primary">Criar Conta</button>
+                </form>
+                
+                <div id="authMessage" class="message"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Perfil -->
+    <div id="profileModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Complete seu Perfil</h3>
+                <p>Para personalizar suas dicas de nutrição e treino</p>
+            </div>
+            <form id="profileForm">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Idade</label>
+                        <input type="number" id="profileAge" min="10" max="100">
+                    </div>
+                    <div class="form-group">
+                        <label>Gênero</label>
+                        <select id="profileGender">
+                            <option value="">Selecione...</option>
+                            <option value="masculino">Masculino</option>
+                            <option value="feminino">Feminino</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Objetivo Principal</label>
+                    <select id="profileGoal" required>
+                        <option value="">Selecione...</option>
+                        <option value="perder peso">Perder Peso</option>
+                        <option value="ganhar massa muscular">Ganhar Massa Muscular</option>
+                        <option value="manter peso">Manter Peso Atual</option>
+                        <option value="melhorar saude">Melhorar Saúde Geral</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Nível de Atividade</label>
+                    <select id="profileActivity">
+                        <option value="">Selecione...</option>
+                        <option value="sedentario">Sedentário (pouco ou nenhum exercício)</option>
+                        <option value="leve">Leve (exercício 1-3 dias/semana)</option>
+                        <option value="moderado">Moderado (exercício 3-5 dias/semana)</option>
+                        <option value="intenso">Intenso (exercício 6-7 dias/semana)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Restrições Alimentares (opcional)</label>
+                    <textarea id="profileRestrictions" rows="3" placeholder="Ex: vegetariano, intolerância à lactose, alergia a nozes..."></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" onclick="skipProfile()" class="btn-secondary">Pular por Agora</button>
+                    <button type="submit" class="btn-primary">Salvar Perfil</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Tela Principal -->
+    <div id="mainScreen" class="screen hidden">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1><i class="fas fa-chart-line"></i> Diet Tracker</h1>
+                <div class="user-info">
+                    <span id="welcomeUser">Bem-vindo!</span>
+                    <button onclick="logout()" class="btn-logout">
+                        <i class="fas fa-sign-out-alt"></i> Sair
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="nav-tabs">
+            <button class="nav-btn active" onclick="showTab('diet')">
+                <i class="fas fa-utensils"></i> Dieta
+            </button>
+            <button class="nav-btn" onclick="showTab('measurements')">
+                <i class="fas fa-weight"></i> Medidas
+            </button>
+            <button class="nav-btn" onclick="showTab('stats')">
+                <i class="fas fa-chart-bar"></i> Estatísticas
+            </button>
+            <button class="nav-btn" onclick="showTab('chat')">
+                <i class="fas fa-robot"></i> Assistente IA
+            </button>
+        </nav>
+
+        <!-- Chat Tab -->
+        <div id="chatTab" class="tab-content hidden">
+            <div class="content-header">
+                <h2><i class="fas fa-robot"></i> Assistente Fitness IA</h2>
+                <button onclick="clearChat()" class="btn-secondary">
+                    <i class="fas fa-trash"></i> Limpar Chat
+                </button>
+            </div>
+            
+            <div class="chat-container">
+                <div id="chatMessages" class="chat-messages">
+                    <div class="chat-message bot-message">
+                        <div class="message-avatar">
+                            <i class="fas fa-robot"></i>
+                        </div>
+                        <div class="message-content">
+                            <p>Olá! 👋 Sou seu assistente fitness pessoal. Posso ajudar com dicas de nutrição, treino e uso do site. Como posso ajudá-lo hoje?</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="chat-input-container">
+                    <div class="audio-controls">
+                        <button id="voiceButton" class="voice-btn" title="Falar com a IA">🎤</button>
+                        <button id="speakButton" class="speak-btn" title="Ouvir última resposta">🔊</button>
+                    </div>
+                    <input type="text" id="chatInput" placeholder="Digite sua mensagem ou use o microfone..." />
+                    <button onclick="sendChatMessage()" class="send-btn">Enviar</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Diet Tab -->
+        <div id="dietTab" class="tab-content">
+            <div class="content-header">
+                <h2><i class="fas fa-utensils"></i> Controle de Dieta</h2>
+                <button onclick="showAddDietModal()" class="btn-add">
+                    <i class="fas fa-plus"></i> Adicionar
+                </button>
+            </div>
+            
+            <div class="filters">
+                <input type="date" id="dietStartDate" onchange="loadDietEntries()">
+                <input type="date" id="dietEndDate" onchange="loadDietEntries()">
+                <button onclick="clearDietFilters()" class="btn-secondary">Limpar Filtros</button>
+            </div>
+            
+            <div class="table-container">
+                <table id="dietTable" class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Data</th>
+                            <th>Refeição</th>
+                            <th>Descrição</th>
+                            <th>Calorias</th>
+                            <th>Proteínas</th>
+                            <th>Carboidratos</th>
+                            <th>Gorduras</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dietTableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Measurements Tab -->
+        <div id="measurementsTab" class="tab-content hidden">
+            <div class="content-header">
+                <h2><i class="fas fa-weight"></i> Medidas Corporais</h2>
+                <button onclick="showAddMeasurementModal()" class="btn-add">
+                    <i class="fas fa-plus"></i> Adicionar
+                </button>
+            </div>
+            
+            <div class="filters">
+                <input type="date" id="measurementStartDate" onchange="loadMeasurements()">
+                <input type="date" id="measurementEndDate" onchange="loadMeasurements()">
+                <button onclick="clearMeasurementFilters()" class="btn-secondary">Limpar Filtros</button>
+            </div>
+            
+            <div class="table-container">
+                <table id="measurementTable" class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Data</th>
+                            <th>Peso (kg)</th>
+                            <th>Altura (cm)</th>
+                            <th>% Gordura</th>
+                            <th>Massa Muscular</th>
+                            <th>Cintura (cm)</th>
+                            <th>Peito (cm)</th>
+                            <th>Braço (cm)</th>
+                            <th>Coxa (cm)</th>
+                            <th>Observações</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="measurementTableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Stats Tab -->
+        <div id="statsTab" class="tab-content hidden">
+            <div class="content-header">
+                <h2><i class="fas fa-chart-bar"></i> Estatísticas</h2>
+            </div>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3>Última Medição</h3>
+                    <div id="latestMeasurement">Carregando...</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Total de Registros de Dieta</h3>
+                    <div id="totalDietEntries">Carregando...</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Registros dos Últimos 7 Dias</h3>
+                    <div id="recentDietEntries">Carregando...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para Adicionar/Editar Dieta -->
+    <div id="dietModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="dietModalTitle">Adicionar Registro de Dieta</h3>
+                <button onclick="closeDietModal()" class="btn-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="dietForm">
+                <input type="hidden" id="dietId">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Data</label>
+                        <input type="date" id="dietDate" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Refeição</label>
+                        <select id="dietMealType" required>
+                            <option value="">Selecione...</option>
+                            <option value="café">Café da Manhã</option>
+                            <option value="lanche_manha">Lanche da Manhã</option>
+                            <option value="almoço">Almoço</option>
+                            <option value="lanche_tarde">Lanche da Tarde</option>
+                            <option value="jantar">Jantar</option>
+                            <option value="ceia">Ceia</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Descreva o que você comeu</label>
+                    <textarea id="dietDescription" rows="3" placeholder="Ex: 2 ovos mexidos, 1 fatia de pão integral, 1 banana média, 1 copo de leite desnatado..." required></textarea>
+                    <small>A IA calculará automaticamente as calorias e nutrientes</small>
+                </div>
+                <div class="form-group">
+                    <label>Observações (opcional)</label>
+                    <textarea id="dietNotes" rows="2" placeholder="Como se sentiu, local da refeição, etc..."></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" onclick="closeDietModal()" class="btn-secondary">Cancelar</button>
+                    <button type="submit" class="btn-primary">Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal para Adicionar/Editar Medidas -->
+    <div id="measurementModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="measurementModalTitle">Adicionar Medidas</h3>
+                <button onclick="closeMeasurementModal()" class="btn-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="measurementForm">
+                <input type="hidden" id="measurementId">
+                <div class="form-group">
+                    <label>Data</label>
+                    <input type="date" id="measurementDate" required>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Peso (kg)</label>
+                        <input type="number" id="measurementWeight" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>Altura (cm)</label>
+                        <input type="number" id="measurementHeight" step="0.1">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>% Gordura Corporal</label>
+                        <input type="number" id="measurementBodyFat" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>Massa Muscular (kg)</label>
+                        <input type="number" id="measurementMuscleMass" step="0.1">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Cintura (cm)</label>
+                        <input type="number" id="measurementWaist" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>Peito (cm)</label>
+                        <input type="number" id="measurementChest" step="0.1">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Braço (cm)</label>
+                        <input type="number" id="measurementArm" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>Coxa (cm)</label>
+                        <input type="number" id="measurementThigh" step="0.1">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Observações</label>
+                    <textarea id="measurementNotes" rows="3"></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" onclick="closeMeasurementModal()" class="btn-secondary">Cancelar</button>
+                    <button type="submit" class="btn-primary">Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
+

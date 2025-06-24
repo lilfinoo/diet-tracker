@@ -1,0 +1,22 @@
+- [x] Definir a estrutura do banco de dados para usuários, dietas e medidas.
+- [x] Escolher um método de autenticação de usuário sem e-mail.
+- [x] Esboçar as principais funcionalidades do backend (API para dados).
+- [x] Criar a estrutura de pastas do projeto.
+- [x] Implementar modelos de dados (User, DietEntry, Measurement).
+- [x] Implementar rotas de autenticação (registro, login, logout).
+- [x] Implementar rotas para controle de dieta (CRUD).
+- [x] Implementar rotas para medidas corporais (CRUD).
+- [x] Configurar CORS e sessões.
+- [x] Desenvolver interface frontend responsiva.
+- [x] Implementar sistema de login no frontend.
+- [x] Criar interface de planilha para dieta.
+- [x] Criar interface de planilha para medidas.
+- [x] Implementar gráficos de evolução.
+- [x] Testar funcionalidades completas.
+- [x] Testar criação de conta sem email.
+- [x] Testar navegação entre abas.
+- [x] Verificar responsividade da interface.
+- [x] Fazer deploy da aplicação.
+- [x] Testar aplicação em produção.
+- [x] Verificar funcionamento completo no URL público.
+
