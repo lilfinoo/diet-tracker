@@ -9,7 +9,7 @@ from flask_migrate import Migrate
 from src.models.user import db
 from src.routes.user import user_bp
 
-app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'copilot'))
+app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'copilot', 'minha-pasta'))
 app.config['SECRET_KEY'] = 'asdf#FGSgvasgf$5$WGT'
 
 # Configuração CORS
