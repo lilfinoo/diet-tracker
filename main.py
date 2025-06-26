@@ -44,16 +44,13 @@ with app.app_context():
 @app.before_request
 def set_rls_user_id():
     if "user_id" in session:
-        # Define a variável de sessão do PostgreSQL
-        # Usamos text() para que o SQLAlchemy execute a string SQL diretamente
-        # e :user_id para passar o valor de forma segura
+        # Define a variável de sessão do PostgreSQL para o usuário logado
         db.session.execute(text("SET app.user_id = :user_id"), {"user_id": str(session["user_id"])})
-        db.session.commit() # Commit para garantir que a variável seja definida
+        db.session.commit()
     else:
-        # Se não houver usuário logado, defina como NULL ou um valor que não corresponda a nenhum user_id
+        # Se não houver usuário logado, defina a variável como NULL ou um valor que não corresponda a um user_id
         # Isso garante que usuários não logados não vejam dados
-        db.session.execute(text("SET app.user_id = ":user_id"), {"user_id": ""})
-
+        db.session.execute(text("SET app.user_id = :user_id"), {"user_id": ""})
         db.session.commit()
 
 @app.route('/', defaults={'path': ''})
