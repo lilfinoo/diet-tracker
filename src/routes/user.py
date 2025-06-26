@@ -2,6 +2,13 @@ from flask import Blueprint, jsonify, request, session
 from src.models.user import User, DietEntry, Measurement, UserProfile, ChatMessage, db
 from datetime import datetime, date, timedelta
 from functools import wraps
+import openai
+import os
+import json
+import re
+
+# Configure sua chave da API OpenAI
+# Defina esta variável de ambiente
 
 user_bp = Blueprint("user", __name__)
 
@@ -12,6 +19,232 @@ def login_required(f):
             return jsonify({"error": "Login necessário"}), 401
         return f(*args, **kwargs)
     return decorated_function
+    
+def calculate_nutrition_with_ai(food_description):
+    """
+    Calcula informações nutricionais usando ChatGPT-4o
+    """
+    try:
+        prompt = f"""
+Analise a seguinte descrição de alimentos e forneça as informações nutricionais aproximadas em formato JSON.
+
+Descrição: {food_description}
+
+Responda APENAS com um JSON válido no seguinte formato:
+{{
+    "calories": número_de_calorias,
+    "protein": gramas_de_proteína,
+    "carbs": gramas_de_carboidratos,
+    "fat": gramas_de_gordura
+}}
+
+Seja preciso e considere porções típicas mencionadas.
+"""
+
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",  # Modelo mais barato
+            messages=[
+                {"role": "system", "content": "Você é um nutricionista especializado em análise nutricional. Responda sempre com JSON válido."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=150,  # Limite para economizar
+            temperature=0.3
+        )
+        
+        # Extrair JSON da resposta
+        content = response.choices[0].message.content.strip()
+        
+        # Tentar extrair JSON usando regex
+        json_match = re.search(r'\{.*\}', content, re.DOTALL)
+        if json_match:
+            nutrition_data = json.loads(json_match.group())
+            return {
+                "calories": float(nutrition_data.get("calories", 0)),
+                "protein": float(nutrition_data.get("protein", 0)),
+                "carbs": float(nutrition_data.get("carbs", 0)),
+                "fat": float(nutrition_data.get("fat", 0))
+            }
+        else:
+            raise ValueError("Resposta não contém JSON válido")
+            
+    except Exception as e:
+        print(f"Erro ao calcular nutrição: {e}")
+        # Valores padrão em caso de erro
+        return {
+            "calories": 0,
+            "protein": 0,
+            "carbs": 0,
+            "fat": 0
+        }
+
+def generate_ai_response(message, user, profile):
+    """Gera resposta da IA usando ChatGPT-4o"""
+    
+    try:
+        # Contexto base
+        context = f"Você é um assistente fitness especializado em nutrição e treino. "
+        context += f"O usuário se chama {user.username}. "
+        
+        if profile:
+            if profile.age:
+                context += f"Tem {profile.age} anos. "
+            if profile.gender:
+                context += f"Gênero: {profile.gender}. "
+            if profile.goal:
+                context += f"Objetivo: {profile.goal}. "
+            if profile.activity_level:
+                context += f"Nível de atividade: {profile.activity_level}. "
+            if profile.dietary_restrictions:
+                context += f"Restrições alimentares: {profile.dietary_restrictions}. "
+        
+        context += "Responda de forma amigável, útil e personalizada. Use emojis quando apropriado."
+        
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": context},
+                {"role": "user", "content": message}
+            ],
+            max_tokens=300,
+            temperature=0.7
+        )
+        
+        return response.choices[0].message.content.strip()
+        
+    except Exception as e:
+        print(f"Erro na IA: {e}")
+        # Fallback para respostas pré-definidas
+        message_lower = message.lower()
+        
+        if any(word in message_lower for word in ["olá", "oi", "hello"]):
+            return f"Olá {user.username}! 👋 Como posso ajudá-lo hoje?"
+        elif any(word in message_lower for word in ["dieta", "alimentação"]):
+            return "🥗 Posso ajudar com dicas de alimentação! Qual é sua dúvida específica?"
+        elif any(word in message_lower for word in ["treino", "exercício"]):
+            return "💪 Vamos falar sobre treino! O que você gostaria de saber?"
+        else:
+            return "Desculpe, estou com dificuldades técnicas. Tente reformular sua pergunta."
+
+    
+    # Respostas baseadas em palavras-chave
+    message_lower = message.lower()
+    
+    if any(word in message_lower for word in ["olá", "oi", "hello", "começar"]):
+        if not profile:
+            return f"Olá {user.username}! 👋 Bem-vindo ao Diet Tracker! Sou seu assistente fitness pessoal. Para começar, que tal me contar um pouco sobre você? Qual é seu objetivo principal: perder peso, ganhar massa muscular ou manter o peso atual?"
+        else:
+            return f"Olá {user.username}! 👋 Como posso ajudá-lo hoje? Posso dar dicas sobre nutrição, ajudar com o planejamento de refeições ou tirar dúvidas sobre o uso do site!"
+    
+    elif any(word in message_lower for word in ["como usar", "tutorial", "ajuda", "como funciona"]):
+        return """📱 **Como usar o Diet Tracker:**
+
+1. **Aba Dieta**: Registre suas refeições diárias
+   - Clique em "Adicionar" para registrar uma refeição
+   - Escolha o tipo (café, almoço, jantar, etc.)
+   - Adicione o alimento, quantidade e calorias
+
+2. **Aba Medidas**: Acompanhe sua evolução física
+   - Registre peso, medidas corporais, % de gordura
+   - Use os filtros de data para ver seu progresso
+
+3. **Aba Estatísticas**: Veja seu resumo e evolução
+
+Precisa de ajuda com algo específico?"""
+    
+    elif any(word in message_lower for word in ["dieta", "alimentação", "comida", "calorias"]):
+        if profile and profile.goal:
+            if "perder peso" in profile.goal.lower():
+                return """🥗 **Dicas para Perda de Peso:**
+
+• Crie um déficit calórico de 300-500 kcal/dia
+• Priorize proteínas (1,6-2,2g por kg de peso)
+• Inclua vegetais em todas as refeições
+• Beba bastante água (35ml por kg de peso)
+• Evite alimentos ultraprocessados
+
+**Sugestão de refeição:**
+- Café: Ovos mexidos + aveia + frutas
+- Almoço: Peito de frango + arroz integral + salada
+- Jantar: Peixe + batata doce + legumes
+
+Quer que eu ajude a calcular suas necessidades calóricas?"""
+            
+            elif "ganhar massa" in profile.goal.lower():
+                return """💪 **Dicas para Ganho de Massa:**
+
+• Mantenha superávit calórico de 300-500 kcal/dia
+• Consuma 2-2,5g de proteína por kg de peso
+• Carboidratos: 4-6g por kg de peso
+• Faça 5-6 refeições por dia
+• Hidrate-se bem
+
+**Sugestão de refeição:**
+- Café: Aveia + whey + banana + pasta de amendoim
+- Almoço: Carne + arroz + feijão + salada
+- Jantar: Frango + macarrão integral + legumes
+
+Precisa de ajuda para calcular suas macros?"""
+        
+        return """🍎 **Dicas Gerais de Alimentação:**
+
+• Faça refeições regulares (3-5 por dia)
+• Inclua proteína em cada refeição
+• Consuma frutas e vegetais variados
+• Beba 2-3 litros de água por dia
+• Evite pular refeições
+
+Qual é seu objetivo principal? Assim posso dar dicas mais específicas!"""
+    
+    elif any(word in message_lower for word in ["treino", "exercício", "academia", "musculação"]):
+        if profile and profile.activity_level:
+            if "sedentario" in profile.activity_level.lower():
+                return """🏃‍♂️ **Começando a se Exercitar:**
+
+• Comece com 2-3x por semana
+• Foque em exercícios básicos (agachamento, flexão, prancha)
+• Caminhadas de 20-30 minutos
+• Aumente gradualmente a intensidade
+
+**Treino Iniciante (3x semana):**
+- Agachamento: 3x10
+- Flexão (joelhos se necessário): 3x8
+- Prancha: 3x30s
+- Caminhada: 20 min
+
+Quer um plano mais detalhado?"""
+            
+            else:
+                return """💪 **Dicas de Treino:**
+
+• Treine 3-5x por semana
+• Combine musculação + cardio
+• Descanse 48h entre treinos do mesmo grupo muscular
+• Foque em exercícios compostos
+• Progrida gradualmente
+
+**Divisão Sugerida:**
+- Segunda: Peito + Tríceps
+- Terça: Costas + Bíceps  
+- Quarta: Pernas + Glúteos
+- Quinta: Ombros + Abdômen
+- Sexta: Cardio
+
+Precisa de ajuda com algum exercício específico?"""
+        
+        return """🏋️‍♂️ **Dicas Gerais de Treino:**
+
+• Consistência é mais importante que intensidade
+• Aqueça sempre antes do treino
+• Foque na técnica correta
+• Descanse adequadamente
+• Alimentacao é importante e seja feliz
+
+
+
+"""
+
+
+
 
 # Rotas de Autenticação
 @user_bp.route("/register", methods=["POST"])
@@ -345,140 +578,4 @@ def chat_history():
     return jsonify({
         "messages": [msg.to_dict() for msg in reversed(messages)]
     }), 200
-
-def generate_ai_response(message, user, profile):
-    """Gera resposta da IA baseada na mensagem e perfil do usuário"""
-    
-    # Contexto base
-    context = f"Você é um assistente fitness especializado em nutrição e treino. "
-    context += f"O usuário se chama {user.username}. "
-    
-    if profile:
-        if profile.age:
-            context += f"Tem {profile.age} anos. "
-        if profile.gender:
-            context += f"Gênero: {profile.gender}. "
-        if profile.goal:
-            context += f"Objetivo: {profile.goal}. "
-        if profile.activity_level:
-            context += f"Nível de atividade: {profile.activity_level}. "
-        if profile.dietary_restrictions:
-            context += f"Restrições alimentares: {profile.dietary_restrictions}. "
-    
-    # Respostas baseadas em palavras-chave
-    message_lower = message.lower()
-    
-    if any(word in message_lower for word in ["olá", "oi", "hello", "começar"]):
-        if not profile:
-            return f"Olá {user.username}! 👋 Bem-vindo ao Diet Tracker! Sou seu assistente fitness pessoal. Para começar, que tal me contar um pouco sobre você? Qual é seu objetivo principal: perder peso, ganhar massa muscular ou manter o peso atual?"
-        else:
-            return f"Olá {user.username}! 👋 Como posso ajudá-lo hoje? Posso dar dicas sobre nutrição, ajudar com o planejamento de refeições ou tirar dúvidas sobre o uso do site!"
-    
-    elif any(word in message_lower for word in ["como usar", "tutorial", "ajuda", "como funciona"]):
-        return """📱 **Como usar o Diet Tracker:**
-
-1. **Aba Dieta**: Registre suas refeições diárias
-   - Clique em "Adicionar" para registrar uma refeição
-   - Escolha o tipo (café, almoço, jantar, etc.)
-   - Adicione o alimento, quantidade e calorias
-
-2. **Aba Medidas**: Acompanhe sua evolução física
-   - Registre peso, medidas corporais, % de gordura
-   - Use os filtros de data para ver seu progresso
-
-3. **Aba Estatísticas**: Veja seu resumo e evolução
-
-Precisa de ajuda com algo específico?"""
-    
-    elif any(word in message_lower for word in ["dieta", "alimentação", "comida", "calorias"]):
-        if profile and profile.goal:
-            if "perder peso" in profile.goal.lower():
-                return """🥗 **Dicas para Perda de Peso:**
-
-• Crie um déficit calórico de 300-500 kcal/dia
-• Priorize proteínas (1,6-2,2g por kg de peso)
-• Inclua vegetais em todas as refeições
-• Beba bastante água (35ml por kg de peso)
-• Evite alimentos ultraprocessados
-
-**Sugestão de refeição:**
-- Café: Ovos mexidos + aveia + frutas
-- Almoço: Peito de frango + arroz integral + salada
-- Jantar: Peixe + batata doce + legumes
-
-Quer que eu ajude a calcular suas necessidades calóricas?"""
-            
-            elif "ganhar massa" in profile.goal.lower():
-                return """💪 **Dicas para Ganho de Massa:**
-
-• Mantenha superávit calórico de 300-500 kcal/dia
-• Consuma 2-2,5g de proteína por kg de peso
-• Carboidratos: 4-6g por kg de peso
-• Faça 5-6 refeições por dia
-• Hidrate-se bem
-
-**Sugestão de refeição:**
-- Café: Aveia + whey + banana + pasta de amendoim
-- Almoço: Carne + arroz + feijão + salada
-- Jantar: Frango + macarrão integral + legumes
-
-Precisa de ajuda para calcular suas macros?"""
-        
-        return """🍎 **Dicas Gerais de Alimentação:**
-
-• Faça refeições regulares (3-5 por dia)
-• Inclua proteína em cada refeição
-• Consuma frutas e vegetais variados
-• Beba 2-3 litros de água por dia
-• Evite pular refeições
-
-Qual é seu objetivo principal? Assim posso dar dicas mais específicas!"""
-    
-    elif any(word in message_lower for word in ["treino", "exercício", "academia", "musculação"]):
-        if profile and profile.activity_level:
-            if "sedentario" in profile.activity_level.lower():
-                return """🏃‍♂️ **Começando a se Exercitar:**
-
-• Comece com 2-3x por semana
-• Foque em exercícios básicos (agachamento, flexão, prancha)
-• Caminhadas de 20-30 minutos
-• Aumente gradualmente a intensidade
-
-**Treino Iniciante (3x semana):**
-- Agachamento: 3x10
-- Flexão (joelhos se necessário): 3x8
-- Prancha: 3x30s
-- Caminhada: 20 min
-
-Quer um plano mais detalhado?"""
-            
-            else:
-                return """💪 **Dicas de Treino:**
-
-• Treine 3-5x por semana
-• Combine musculação + cardio
-• Descanse 48h entre treinos do mesmo grupo muscular
-• Foque em exercícios compostos
-• Progrida gradualmente
-
-**Divisão Sugerida:**
-- Segunda: Peito + Tríceps
-- Terça: Costas + Bíceps  
-- Quarta: Pernas + Glúteos
-- Quinta: Ombros + Abdômen
-- Sexta: Cardio
-
-Precisa de ajuda com algum exercício específico?"""
-        
-        return """🏋️‍♂️ **Dicas Gerais de Treino:**
-
-• Consistência é mais importante que intensidade
-• Aqueça sempre antes do treino
-• Foque na técnica correta
-• Descanse adequadamente
-• Vari
-
-
-
-"""
 
