@@ -1,3 +1,5 @@
+import openai
+from dotenv import load_dotenv
 import os
 import sys
 # DON'T CHANGE THIS !!!
@@ -8,6 +10,8 @@ from flask_cors import CORS
 from flask_migrate import Migrate
 from src.models.user import db
 from src.routes.user import user_bp
+
+load_dotenv()
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'copilot',))
 app.config['SECRET_KEY'] = 'asdf#FGSgvasgf$5$WGT'
@@ -30,6 +34,8 @@ db.init_app(app)
 
 # Configurar Flask-Migrate
 migrate = Migrate(app, db)
+
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 with app.app_context():
     db.create_all()
