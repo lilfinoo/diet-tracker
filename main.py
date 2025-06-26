@@ -5,11 +5,12 @@ import sys
 # DON'T CHANGE THIS !!!
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from flask import Flask, send_from_directory
+from flask import Flask, send_from_directory, g, session
 from flask_cors import CORS
 from flask_migrate import Migrate
 from src.models.user import db
 from src.routes.user import user_bp
+from sqlalchemy import text
 
 load_dotenv()
 
@@ -39,6 +40,20 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 
 with app.app_context():
     db.create_all()
+
+@app.before_request
+def set_rls_user_id():
+    if "user_id" in session:
+        # Define a variável de sessão do PostgreSQL
+        # Usamos text() para que o SQLAlchemy execute a string SQL diretamente
+        # e :user_id para passar o valor de forma segura
+        db.session.execute(text("SET app.user_id = :user_id"), {"user_id": str(session["user_id"])})
+        db.session.commit() # Commit para garantir que a variável seja definida
+    else:
+        # Se não houver usuário logado, defina como NULL ou um valor que não corresponda a nenhum user_id
+        # Isso garante que usuários não logados não vejam dados
+        db.session.execute(text("SET app.user_id = NULL"))
+        db.session.commit()
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
