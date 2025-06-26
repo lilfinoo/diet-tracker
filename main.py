@@ -52,7 +52,8 @@ def set_rls_user_id():
     else:
         # Se não houver usuário logado, defina como NULL ou um valor que não corresponda a nenhum user_id
         # Isso garante que usuários não logados não vejam dados
-        db.session.execute(text("SET app.user_id = NULL"))
+        db.session.execute(text("SET app.user_id = ":user_id"), {"user_id": ""})
+
         db.session.commit()
 
 @app.route('/', defaults={'path': ''})
