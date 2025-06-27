@@ -1,0 +1,26 @@
+import json
+
+json_path = r"c:\Users\PC-GAMER\Documents\projetos\diet-tracker\copilot\minha-pasta\alimentos.json"
+
+def corrigir(texto):
+    if not isinstance(texto, str):
+        return texto
+    try:
+        # Só corrige se tiver caracteres típicos do erro de encoding
+        if any(s in texto for s in ["Ã", "Â", "�"]):
+            return texto.encode('latin1').decode('utf-8')
+        return texto
+    except Exception:
+        return texto
+
+with open(json_path, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+for item in data:
+    if "descricao" in item:
+        item["descricao"] = corrigir(item["descricao"])
+
+with open(json_path, "w", encoding="utf-8") as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+
+print("Acentuação corrigida no alimentos.json!")

@@ -3,26 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel Administrativo - Diet Tracker Pro</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <title>Dashboard Administrativo</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        :root {
-            --primary-color: #2563eb;
-            --primary-dark: #1d4ed8;
-            --secondary-color: #64748b;
-            --success-color: #10b981;
-            --warning-color: #f59e0b;
-            --danger-color: #ef4444;
-            --background: #f8fafc;
-            --surface: #ffffff;
-            --border: #e2e8f0;
-            --text-primary: #1e293b;
-            --text-secondary: #64748b;
-            --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
-            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-        }
-
         * {
             margin: 0;
             padding: 0;
@@ -30,1047 +13,889 @@
         }
 
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: var(--background);
-            color: var(--text-primary);
-            line-height: 1.6;
-        }
-
-        .admin-layout {
-            display: flex;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
+            color: #333;
         }
 
-        /* Sidebar */
-        .sidebar {
-            width: 280px;
-            background: var(--surface);
-            border-right: 1px solid var(--border);
-            box-shadow: var(--shadow);
-            position: fixed;
-            height: 100vh;
-            overflow-y: auto;
-            z-index: 1000;
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
         }
 
-        .sidebar-header {
-            padding: 2rem 1.5rem;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .sidebar-title {
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: var(--primary-color);
+        /* Header */
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 20px 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
             display: flex;
-            align-items: center;
-            gap: 0.75rem;
-        }
-
-        .sidebar-subtitle {
-            font-size: 0.875rem;
-            color: var(--text-secondary);
-            margin-top: 0.25rem;
-        }
-
-        .sidebar-nav {
-            padding: 1rem 0;
-        }
-
-        .nav-item {
-            display: flex;
-            align-items: center;
-            padding: 0.75rem 1.5rem;
-            color: var(--text-secondary);
-            text-decoration: none;
-            transition: all 0.2s;
-            border: none;
-            background: none;
-            width: 100%;
-            cursor: pointer;
-            font-size: 0.875rem;
-            font-weight: 500;
-        }
-
-        .nav-item:hover {
-            background: #f1f5f9;
-            color: var(--text-primary);
-        }
-
-        .nav-item.active {
-            background: #eff6ff;
-            color: var(--primary-color);
-            border-right: 3px solid var(--primary-color);
-        }
-
-        .nav-item i {
-            width: 20px;
-            margin-right: 0.75rem;
-            font-size: 1rem;
-        }
-
-        /* Main Content */
-        .main-content {
-            flex: 1;
-            margin-left: 280px;
-            padding: 2rem;
-        }
-
-        .page-header {
-            margin-bottom: 2rem;
-        }
-
-        .page-title {
-            font-size: 2rem;
-            font-weight: 700;
-            color: var(--text-primary);
-            margin-bottom: 0.5rem;
-        }
-
-        .page-subtitle {
-            color: var(--text-secondary);
-            font-size: 1rem;
-        }
-
-        /* Cards */
-        .card {
-            background: var(--surface);
-            border-radius: 12px;
-            border: 1px solid var(--border);
-            box-shadow: var(--shadow);
-            overflow: hidden;
-        }
-
-        .card-header {
-            padding: 1.5rem;
-            border-bottom: 1px solid var(--border);
-            background: #fafbfc;
-        }
-
-        .card-title {
-            font-size: 1.125rem;
-            font-weight: 600;
-            color: var(--text-primary);
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .card-content {
-            padding: 1.5rem;
-        }
-
-        /* Stats Grid */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 2rem;
-        }
-
-        .stat-card {
-            background: var(--surface);
-            border-radius: 12px;
-            padding: 1.5rem;
-            border: 1px solid var(--border);
-            box-shadow: var(--shadow);
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-
-        .stat-card:hover {
-            transform: translateY(-2px);
-            box-shadow: var(--shadow-lg);
-        }
-
-        .stat-header {
-            display: flex;
-            align-items: center;
             justify-content: space-between;
-            margin-bottom: 1rem;
-        }
-
-        .stat-title {
-            font-size: 0.875rem;
-            font-weight: 500;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        .stat-icon {
-            width: 40px;
-            height: 40px;
-            border-radius: 8px;
-            display: flex;
             align-items: center;
-            justify-content: center;
-            font-size: 1.25rem;
         }
 
-        .stat-value {
-            font-size: 2.5rem;
+        .header h1 {
+            color: #2c3e50;
+            font-size: 2.2rem;
             font-weight: 700;
-            color: var(--text-primary);
-            margin-bottom: 0.25rem;
         }
 
-        .stat-change {
-            font-size: 0.875rem;
-            font-weight: 500;
+        .user-info {
             display: flex;
             align-items: center;
-            gap: 0.25rem;
+            gap: 15px;
         }
 
-        .stat-change.positive {
-            color: var(--success-color);
-        }
-
-        .stat-change.negative {
-            color: var(--danger-color);
-        }
-
-        /* Table */
-        .table-container {
-            overflow-x: auto;
-            border-radius: 12px;
-            border: 1px solid var(--border);
-        }
-
-        .table {
-            width: 100%;
-            border-collapse: collapse;
-            background: var(--surface);
-        }
-
-        .table th {
-            background: #f8fafc;
-            padding: 1rem;
-            text-align: left;
-            font-weight: 600;
-            color: var(--text-primary);
-            font-size: 0.875rem;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .table td {
-            padding: 1rem;
-            border-bottom: 1px solid var(--border);
-            font-size: 0.875rem;
-        }
-
-        .table tbody tr:hover {
-            background: #f8fafc;
-        }
-
-        .table tbody tr:last-child td {
-            border-bottom: none;
-        }
-
-        /* Badges */
-        .badge {
-            display: inline-flex;
-            align-items: center;
-            padding: 0.25rem 0.75rem;
-            border-radius: 9999px;
-            font-size: 0.75rem;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        .badge-success {
-            background: #dcfce7;
-            color: #166534;
-        }
-
-        .badge-warning {
-            background: #fef3c7;
-            color: #92400e;
-        }
-
-        .badge-danger {
-            background: #fee2e2;
-            color: #991b1b;
-        }
-
-        .badge-info {
-            background: #dbeafe;
-            color: #1e40af;
-        }
-
-        /* Buttons */
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.5rem 1rem;
-            border-radius: 8px;
-            font-size: 0.875rem;
-            font-weight: 500;
-            text-decoration: none;
-            border: none;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .btn-primary {
-            background: var(--primary-color);
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background: var(--primary-dark);
-        }
-
-        .btn-danger {
-            background: var(--danger-color);
-            color: white;
-        }
-
-        .btn-danger:hover {
-            background: #dc2626;
-        }
-
-        .btn-warning {
-            background: var(--warning-color);
-            color: white;
-        }
-
-        .btn-warning:hover {
-            background: #d97706;
-        }
-
-        .btn-success {
-            background: var(--success-color);
-            color: white;
-        }
-
-        .btn-success:hover {
-            background: #059669;
-        }
-
-        .btn-sm {
-            padding: 0.375rem 0.75rem;
-            font-size: 0.75rem;
-        }
-
-        /* Loading */
-        .loading {
+        .user-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: linear-gradient(45deg, #667eea, #764ba2);
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 3rem;
-            color: var(--text-secondary);
+            color: white;
+            font-size: 1.2rem;
+            font-weight: bold;
         }
 
-        .spinner {
-            width: 24px;
-            height: 24px;
-            border: 2px solid var(--border);
-            border-top: 2px solid var(--primary-color);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-right: 0.75rem;
+        /* Navigation Tabs */
+        .nav-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 10px;
         }
 
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        .nav-btn {
+            background: transparent;
+            border: none;
+            padding: 15px 25px;
+            border-radius: 12px;
+            color: white;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
 
-        /* Tabs */
+        .nav-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .nav-btn.active {
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Tab Content */
         .tab-content {
             display: none;
+            animation: fadeIn 0.5s ease-in-out;
         }
 
         .tab-content.active {
             display: block;
         }
 
-        /* Actions */
-        .actions {
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Dashboard Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+        }
+
+        .stat-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 15px;
             display: flex;
-            gap: 0.5rem;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            color: white;
+            margin-bottom: 20px;
+        }
+
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        .stat-label {
+            color: #7f8c8d;
+            font-size: 1rem;
+            font-weight: 500;
+        }
+
+        /* Content Sections */
+        .content-section {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Tables */
+        .table-container {
+            overflow-x: auto;
+            border-radius: 12px;
+            background: white;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
+
+        /* Buttons */
+        .btn {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #95a5a6;
+        }
+
+        .btn-danger {
+            background: #e74c3c;
+        }
+
+        /* Form Controls */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #ecf0f1;
+            border-radius: 10px;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        /* Loading States */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            color: #7f8c8d;
+            font-size: 1.1rem;
+        }
+
+        .loading i {
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        /* Activity Timeline */
+        .activity-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 15px 0;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+
+        .activity-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.9rem;
+        }
+
+        .activity-content {
+            flex: 1;
+        }
+
+        .activity-title {
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+
+        .activity-time {
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }
+
+        /* Status Badges */
+        .status-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-active {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-inactive {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        /* Charts */
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin: 20px 0;
+        }
+
+        /* Search Bar */
+        .search-bar {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            align-items: center;
+        }
+
+        .search-input {
+            flex: 1;
+            max-width: 300px;
         }
 
         /* Responsive */
         @media (max-width: 768px) {
-            .sidebar {
-                transform: translateX(-100%);
-                transition: transform 0.3s;
+            .container {
+                padding: 15px;
             }
 
-            .sidebar.open {
-                transform: translateX(0);
+            .header {
+                flex-direction: column;
+                gap: 20px;
+                text-align: center;
             }
 
-            .main-content {
-                margin-left: 0;
-                padding: 1rem;
+            .nav-tabs {
+                flex-wrap: wrap;
+                justify-content: center;
             }
 
             .stats-grid {
                 grid-template-columns: 1fr;
             }
 
-            .page-title {
-                font-size: 1.5rem;
+            .stat-card {
+                padding: 20px;
             }
-        }
 
-        /* Search and Filters */
-        .filters {
-            display: flex;
-            gap: 1rem;
-            margin-bottom: 1.5rem;
-            flex-wrap: wrap;
-        }
+            .search-bar {
+                flex-direction: column;
+                align-items: stretch;
+            }
 
-        .search-input {
-            flex: 1;
-            min-width: 250px;
-            padding: 0.75rem 1rem;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            font-size: 0.875rem;
-        }
-
-        .search-input:focus {
-            outline: none;
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 3px rgb(37 99 235 / 0.1);
-        }
-
-        .filter-select {
-            padding: 0.75rem 1rem;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            font-size: 0.875rem;
-            background: var(--surface);
-        }
-
-        /* Modal */
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.5);
-            z-index: 2000;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .modal.show {
-            display: flex;
-        }
-
-        .modal-content {
-            background: var(--surface);
-            border-radius: 12px;
-            padding: 2rem;
-            max-width: 500px;
-            width: 90%;
-            max-height: 90vh;
-            overflow-y: auto;
-        }
-
-        .modal-header {
-            margin-bottom: 1.5rem;
-        }
-
-        .modal-title {
-            font-size: 1.25rem;
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-
-        .modal-actions {
-            display: flex;
-            gap: 1rem;
-            justify-content: flex-end;
-            margin-top: 2rem;
+            .search-input {
+                max-width: 100%;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="admin-layout">
-        <!-- Sidebar -->
-        <nav class="sidebar">
-            <div class="sidebar-header">
-                <div class="sidebar-title">
-                    <i class="fas fa-chart-line"></i>
-                    Diet Tracker Pro
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1><i class="fas fa-tachometer-alt"></i> Dashboard Administrativo</h1>
+            <div class="user-info">
+                <div class="user-avatar">
+                    <i class="fas fa-user"></i>
                 </div>
-                <div class="sidebar-subtitle">Painel Administrativo</div>
+                <div>
+                    <div style="font-weight: 600;">Administrador</div>
+                    <div style="color: #7f8c8d; font-size: 0.9rem;">admin@sistema.com</div>
+                </div>
             </div>
-            
-            <div class="sidebar-nav">
-                <button class="nav-item active" onclick="showTab('dashboard')">
-                    <i class="fas fa-tachometer-alt"></i>
-                    Dashboard
-                </button>
-                <button class="nav-item" onclick="showTab('users')">
-                    <i class="fas fa-users"></i>
-                    Gerenciar Usuários
-                </button>
-                <button class="nav-item" onclick="showTab('analytics')">
-                    <i class="fas fa-chart-bar"></i>
-                    Análises Avançadas
-                </button>
-                <button class="nav-item" onclick="showTab('reports')">
-                    <i class="fas fa-file-alt"></i>
-                    Relatórios
-                </button>
-                <button class="nav-item" onclick="showTab('settings')">
-                    <i class="fas fa-cog"></i>
-                    Configurações
-                </button>
-            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="nav-tabs">
+            <button class="nav-btn active" data-tab="dashboard" onclick="showTab('dashboard')">
+                <i class="fas fa-chart-line"></i> Dashboard
+            </button>
+            <button class="nav-btn" data-tab="users" onclick="showTab('users')">
+                <i class="fas fa-users"></i> Usuários
+            </button>
+            <button class="nav-btn" data-tab="analytics" onclick="showTab('analytics')">
+                <i class="fas fa-chart-bar"></i> Analytics
+            </button>
+            <button class="nav-btn" data-tab="settings" onclick="showTab('settings')">
+                <i class="fas fa-cog"></i> Configurações
+            </button>
         </nav>
 
-        <!-- Main Content -->
-        <main class="main-content">
-            <!-- Dashboard Tab -->
-            <div id="dashboard" class="tab-content active">
-                <div class="page-header">
-                    <h1 class="page-title">Dashboard</h1>
-                    <p class="page-subtitle">Visão geral do sistema Diet Tracker</p>
+        <!-- Dashboard Tab -->
+        <div id="dashboardTab" class="tab-content active">
+            <!-- Dashboard Cards -->
+            <div id="dashboardStats" class="stats-grid">
+                <div class="loading">
+                    <i class="fas fa-spinner"></i>
+                    Carregando estatísticas...
                 </div>
+            </div>
+            <!-- /Dashboard Cards -->
 
-                <div class="stats-grid" id="statsGrid">
+            <!-- Recent Activity -->
+            <div class="content-section">
+                <h2 class="section-title">
+                    <i class="fas fa-clock"></i>
+                    Atividades Recentes
+                </h2>
+                <div id="recentActivity">
                     <div class="loading">
-                        <div class="spinner"></div>
-                        Carregando estatísticas...
-                    </div>
-                </div>
-
-                <div class="card">
-                    <div class="card-header">
-                        <h3 class="card-title">
-                            <i class="fas fa-chart-line"></i>
-                            Atividade Recente
-                        </h3>
-                    </div>
-                    <div class="card-content">
-                        <div id="recentActivity">
-                            <div class="loading">
-                                <div class="spinner"></div>
-                                Carregando atividades...
-                            </div>
-                        </div>
+                        <i class="fas fa-spinner"></i>
+                        Carregando atividades...
                     </div>
                 </div>
             </div>
-
-            <!-- Users Tab -->
-            <div id="users" class="tab-content">
-                <div class="page-header">
-                    <h1 class="page-title">Gerenciar Usuários</h1>
-                    <p class="page-subtitle">Administração completa de usuários do sistema</p>
-                </div>
-
-                <div class="card">
-                    <div class="card-header">
-                        <h3 class="card-title">
-                            <i class="fas fa-users"></i>
-                            Lista de Usuários
-                        </h3>
-                    </div>
-                    <div class="card-content">
-                        <div class="filters">
-                            <input type="text" class="search-input" id="userSearch" placeholder="Buscar usuários...">
-                            <select class="filter-select" id="statusFilter">
-                                <option value="">Todos os status</option>
-                                <option value="active">Ativos</option>
-                                <option value="banned">Banidos</option>
-                            </select>
-                            <button class="btn btn-primary" onclick="refreshUsers()">
-                                <i class="fas fa-sync-alt"></i>
-                                Atualizar
-                            </button>
-                        </div>
-
-                        <div class="table-container">
-                            <div id="usersTable">
-                                <div class="loading">
-                                    <div class="spinner"></div>
-                                    Carregando usuários...
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Analytics Tab -->
-            <div id="analytics" class="tab-content">
-                <div class="page-header">
-                    <h1 class="page-title">Análises Avançadas</h1>
-                    <p class="page-subtitle">Insights detalhados sobre o uso da plataforma</p>
-                </div>
-
-                <div class="stats-grid">
-                    <div class="card">
-                        <div class="card-header">
-                            <h3 class="card-title">
-                                <i class="fas fa-chart-pie"></i>
-                                Distribuição de Usuários
-                            </h3>
-                        </div>
-                        <div class="card-content">
-                            <div id="userDistribution">
-                                <div class="loading">
-                                    <div class="spinner"></div>
-                                    Carregando dados...
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card">
-                        <div class="card-header">
-                            <h3 class="card-title">
-                                <i class="fas fa-chart-area"></i>
-                                Crescimento Mensal
-                            </h3>
-                        </div>
-                        <div class="card-content">
-                            <div id="monthlyGrowth">
-                                <div class="loading">
-                                    <div class="spinner"></div>
-                                    Carregando dados...
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Reports Tab -->
-            <div id="reports" class="tab-content">
-                <div class="page-header">
-                    <h1 class="page-title">Relatórios</h1>
-                    <p class="page-subtitle">Geração e exportação de relatórios detalhados</p>
-                </div>
-
-                <div class="card">
-                    <div class="card-header">
-                        <h3 class="card-title">
-                            <i class="fas fa-file-export"></i>
-                            Exportar Dados
-                        </h3>
-                    </div>
-                    <div class="card-content">
-                        <div class="filters">
-                            <select class="filter-select">
-                                <option>Relatório de Usuários</option>
-                                <option>Relatório de Atividades</option>
-                                <option>Relatório de Estatísticas</option>
-                            </select>
-                            <button class="btn btn-primary">
-                                <i class="fas fa-download"></i>
-                                Exportar CSV
-                            </button>
-                            <button class="btn btn-success">
-                                <i class="fas fa-file-pdf"></i>
-                                Exportar PDF
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Settings Tab -->
-            <div id="settings" class="tab-content">
-                <div class="page-header">
-                    <h1 class="page-title">Configurações</h1>
-                    <p class="page-subtitle">Configurações do sistema e preferências</p>
-                </div>
-
-                <div class="card">
-                    <div class="card-header">
-                        <h3 class="card-title">
-                            <i class="fas fa-cogs"></i>
-                            Configurações Gerais
-                        </h3>
-                    </div>
-                    <div class="card-content">
-                        <p>Configurações do sistema em desenvolvimento...</p>
-                    </div>
-                </div>
-            </div>
-        </main>
-    </div>
-
-    <!-- Confirmation Modal -->
-    <div id="confirmModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 class="modal-title" id="modalTitle">Confirmar Ação</h3>
-            </div>
-            <div id="modalMessage">Tem certeza que deseja realizar esta ação?</div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-                <button class="btn btn-danger" id="confirmButton" onclick="confirmAction()">Confirmar</button>
-            </div>
+            <!-- /Recent Activity -->
         </div>
-    </div>
 
-    <script>
-        const API_BASE = '/api';
-        let currentAction = null;
-        let currentUserId = null;
-
-        // Tab Management
-        function showTab(tabName) {
-            // Hide all tabs
-            document.querySelectorAll('.tab-content').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            
-            // Remove active class from nav items
-            document.querySelectorAll('.nav-item').forEach(item => {
-                item.classList.remove('active');
-            });
-            
-            // Show selected tab
-            document.getElementById(tabName).classList.add('active');
-            
-            // Add active class to clicked nav item
-            event.target.classList.add('active');
-            
-            // Load tab-specific data
-            if (tabName === 'dashboard') {
-                loadDashboard();
-            } else if (tabName === 'users') {
-                loadUsers();
-            } else if (tabName === 'analytics') {
-                loadAnalytics();
-            }
-        }
-
-        // Dashboard Functions
-        async function loadDashboard() {
-            await Promise.all([loadStats(), loadRecentActivity()]);
-        }
-
-        async function loadStats() {
-            try {
-                const response = await fetch(`${API_BASE}/admin/stats`);
-                const stats = await response.json();
-
-                const statsGrid = document.getElementById('statsGrid');
-                statsGrid.innerHTML = `
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <div class="stat-title">Total de Usuários</div>
-                            <div class="stat-icon" style="background: #eff6ff; color: #2563eb;">
-                                <i class="fas fa-users"></i>
-                            </div>
-                        </div>
-                        <div class="stat-value">${stats.total_users}</div>
-                        <div class="stat-change positive">
-                            <i class="fas fa-arrow-up"></i>
-                            +${stats.recent_stats.new_users_30_days} este mês
-                        </div>
-                    </div>
-                    
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <div class="stat-title">Registros de Dieta</div>
-                            <div class="stat-icon" style="background: #f0fdf4; color: #10b981;">
-                                <i class="fas fa-utensils"></i>
-                            </div>
-                        </div>
-                        <div class="stat-value">${stats.total_diet_entries}</div>
-                        <div class="stat-change positive">
-                            <i class="fas fa-arrow-up"></i>
-                            +${stats.recent_stats.diet_entries_30_days} este mês
-                        </div>
-                    </div>
-                    
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <div class="stat-title">Medidas Corporais</div>
-                            <div class="stat-icon" style="background: #fef3c7; color: #f59e0b;">
-                                <i class="fas fa-weight"></i>
-                            </div>
-                        </div>
-                        <div class="stat-value">${stats.total_measurements}</div>
-                        <div class="stat-change positive">
-                            <i class="fas fa-arrow-up"></i>
-                            +${stats.recent_stats.measurements_30_days} este mês
-                        </div>
-                    </div>
-                    
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <div class="stat-title">Interações IA</div>
-                            <div class="stat-icon" style="background: #fce7f3; color: #ec4899;">
-                                <i class="fas fa-robot"></i>
-                            </div>
-                        </div>
-                        <div class="stat-value">${stats.total_chat_messages}</div>
-                        <div class="stat-change positive">
-                            <i class="fas fa-arrow-up"></i>
-                            Crescendo
-                        </div>
-                    </div>
-                `;
-            } catch (error) {
-                console.error('Erro ao carregar estatísticas:', error);
-                document.getElementById('statsGrid').innerHTML = '<p class="text-danger">Erro ao carregar estatísticas</p>';
-            }
-        }
-
-        async function loadRecentActivity() {
-            const activityDiv = document.getElementById('recentActivity');
-            activityDiv.innerHTML = `
-                <div style="display: flex; flex-direction: column; gap: 1rem;">
-                    <div style="display: flex; align-items: center; gap: 1rem; padding: 1rem; background: #f8fafc; border-radius: 8px;">
-                        <div style="width: 40px; height: 40px; background: #eff6ff; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #2563eb;">
-                            <i class="fas fa-user-plus"></i>
-                        </div>
-                        <div>
-                            <div style="font-weight: 500;">Novo usuário cadastrado</div>
-                            <div style="font-size: 0.875rem; color: #64748b;">Há 2 horas</div>
-                        </div>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 1rem; padding: 1rem; background: #f8fafc; border-radius: 8px;">
-                        <div style="width: 40px; height: 40px; background: #f0fdf4; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #10b981;">
-                            <i class="fas fa-chart-line"></i>
-                        </div>
-                        <div>
-                            <div style="font-weight: 500;">Sistema funcionando normalmente</div>
-                            <div style="font-size: 0.875rem; color: #64748b;">Última verificação: agora</div>
-                        </div>
-                    </div>
+        <!-- Users Tab -->
+        <div id="usersTab" class="tab-content">
+            <!-- Users Controls -->
+            <div class="content-section">
+                <div class="search-bar">
+                    <input type="text" id="userSearch" class="form-control search-input" placeholder="Buscar usuários...">
+                    <button id="refreshUsersBtn" class="btn">
+                        <i class="fas fa-sync-alt"></i> Atualizar
+                    </button>
+                    <button id="addUserBtn" class="btn">
+                        <i class="fas fa-plus"></i> Novo Usuário
+                    </button>
                 </div>
-            `;
-        }
+            </div>
+            <!-- /Users Controls -->
 
-        // Users Functions
-        async function loadUsers() {
-            try {
-                const response = await fetch(`${API_BASE}/admin/users`);
-                const users = await response.json();
-
-                const usersTable = document.getElementById('usersTable');
-                
-                if (users.length === 0) {
-                    usersTable.innerHTML = '<p>Nenhum usuário encontrado</p>';
-                    return;
-                }
-
-                usersTable.innerHTML = `
-                    <table class="table">
+            <!-- Users Table -->
+            <div class="content-section">
+                <h2 class="section-title">
+                    <i class="fas fa-users"></i>
+                    Lista de Usuários
+                </h2>
+                <div id="usersTable" class="table-container">
+                    <table>
                         <thead>
                             <tr>
                                 <th>ID</th>
-                                <th>Usuário</th>
+                                <th>Nome</th>
+                                <th>Email</th>
                                 <th>Status</th>
-                                <th>Cadastro</th>
-                                <th>Dieta</th>
-                                <th>Medidas</th>
-                                <th>Chat</th>
-                                <th>Perfil</th>
+                                <th>Último Acesso</th>
                                 <th>Ações</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            ${users.map(user => `
-                                <tr>
-                                    <td>${user.id}</td>
-                                    <td>
-                                        <div style="font-weight: 500;">${user.username}</div>
-                                    </td>
-                                    <td>
-                                        <span class="badge ${user.is_banned ? 'badge-danger' : 'badge-success'}">
-                                            ${user.is_banned ? 'Banido' : 'Ativo'}
-                                        </span>
-                                    </td>
-                                    <td>${user.created_at ? new Date(user.created_at).toLocaleDateString('pt-BR') : 'N/A'}</td>
-                                    <td>
-                                        <span class="badge badge-info">${user.diet_entries}</span>
-                                    </td>
-                                    <td>
-                                        <span class="badge badge-info">${user.measurements}</span>
-                                    </td>
-                                    <td>
-                                        <span class="badge badge-info">${user.chat_messages}</span>
-                                    </td>
-                                    <td>
-                                        <span class="badge ${user.has_profile ? 'badge-success' : 'badge-warning'}">
-                                            ${user.has_profile ? 'Completo' : 'Incompleto'}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <div class="actions">
-                                            ${user.is_banned ? 
-                                                `<button class="btn btn-success btn-sm" onclick="unbanUser(${user.id})">
-                                                    <i class="fas fa-unlock"></i>
-                                                    Desbanir
-                                                </button>` :
-                                                `<button class="btn btn-warning btn-sm" onclick="banUser(${user.id})">
-                                                    <i class="fas fa-ban"></i>
-                                                    Banir
-                                                </button>`
-                                            }
-                                            <button class="btn btn-danger btn-sm" onclick="deleteUser(${user.id})">
-                                                <i class="fas fa-trash"></i>
-                                                Deletar
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            `).join('')}
+                        <tbody id="usersTableBody">
+                            <tr>
+                                <td colspan="6" class="loading">
+                                    <i class="fas fa-spinner"></i>
+                                    Carregando usuários...
+                                </td>
+                            </tr>
                         </tbody>
                     </table>
-                `;
-            } catch (error) {
-                console.error('Erro ao carregar usuários:', error);
-                document.getElementById('usersTable').innerHTML = '<p class="text-danger">Erro ao carregar usuários</p>';
+                </div>
+            </div>
+            <!-- /Users Table -->
+        </div>
+
+        <!-- Analytics Tab -->
+        <div id="analyticsTab" class="tab-content">
+            <!-- Analytics Controls -->
+            <div class="content-section">
+                <div class="search-bar">
+                    <select id="periodSelect" class="form-control search-input">
+                        <option value="7">Últimos 7 dias</option>
+                        <option value="30">Últimos 30 dias</option>
+                        <option value="90">Últimos 90 dias</option>
+                    </select>
+                    <button id="refreshAnalyticsBtn" class="btn">
+                        <i class="fas fa-sync-alt"></i> Atualizar
+                    </button>
+                    <button id="exportAnalyticsBtn" class="btn btn-secondary">
+                        <i class="fas fa-download"></i> Exportar
+                    </button>
+                </div>
+            </div>
+            <!-- /Analytics Controls -->
+
+            <!-- Analytics Charts -->
+            <div class="content-section">
+                <h2 class="section-title">
+                    <i class="fas fa-chart-line"></i>
+                    Gráfico de Usuários
+                </h2>
+                <div class="chart-container">
+                    <canvas id="usersChart"></canvas>
+                </div>
+            </div>
+
+            <div class="content-section">
+                <h2 class="section-title">
+                    <i class="fas fa-chart-bar"></i>
+                    Gráfico de Atividades
+                </h2>
+                <div class="chart-container">
+                    <canvas id="activityChart"></canvas>
+                </div>
+            </div>
+            <!-- /Analytics Charts -->
+        </div>
+
+        <!-- Settings Tab -->
+        <div id="settingsTab" class="tab-content">
+            <!-- System Settings -->
+            <div class="content-section">
+                <h2 class="section-title">
+                    <i class="fas fa-cog"></i>
+                    Configurações do Sistema
+                </h2>
+                <div id="systemSettings">
+                    <div class="form-group">
+                        <label for="siteName">Nome do Site:</label>
+                        <input type="text" id="siteName" class="form-control" placeholder="Digite o nome do site">
+                    </div>
+                    <div class="form-group">
+                        <label for="adminEmail">Email do Administrador:</label>
+                        <input type="email" id="adminEmail" class="form-control" placeholder="Digite o email do administrador">
+                    </div>
+                    <div class="form-group">
+                        <label for="maxUsers">Máximo de Usuários:</label>
+                        <input type="number" id="maxUsers" class="form-control" placeholder="Digite o número máximo de usuários">
+                        <small class="input-hint">Você pode ajustar os valores manualmente.</small>
+                    </div>
+                    <button id="saveSettingsBtn" class="btn">
+                        <i class="fas fa-save"></i> Salvar Configurações
+                    </button>
+                </div>
+            </div>
+            <!-- /System Settings -->
+
+            <!-- Backup Settings -->
+            <div class="content-section">
+                <h2 class="section-title">
+                    <i class="fas fa-database"></i>
+                    Backup e Manutenção
+                </h2>
+                <div id="backupSettings">
+                    <p>Último backup: <span id="lastBackupDate">Carregando...</span></p>
+                    <div style="margin-top: 20px;">
+                        <button id="createBackupBtn" class="btn">
+                            <i class="fas fa-cloud-upload-alt"></i> Criar Backup
+                        </button>
+                        <button id="restoreBackupBtn" class="btn btn-secondary">
+                            <i class="fas fa-cloud-download-alt"></i> Restaurar Backup
+                        </button>
+                        <button id="clearCacheBtn" class="btn btn-danger">
+                            <i class="fas fa-trash"></i> Limpar Cache
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <!-- /Backup Settings -->
+        </div>
+
+        <button type="button" id="generateMacrosBtn">
+            <span id="generateMacrosBtnText">Gerar macros com IA</span>
+            <span id="generateMacrosLoading" class="hidden"><i class="fas fa-spinner fa-spin"></i></span>
+        </button>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        // Tab navigation functionality
+        function showTab(tabName) {
+            // Hide all tab contents
+            const tabContents = document.querySelectorAll('.tab-content');
+            tabContents.forEach(tab => {
+                tab.classList.remove('active');
+            });
+
+            // Remove active class from all nav buttons
+            const navButtons = document.querySelectorAll('.nav-btn');
+            navButtons.forEach(btn => {
+                btn.classList.remove('active');
+            });
+
+            // Show selected tab
+            const selectedTab = document.getElementById(tabName + 'Tab');
+            if (selectedTab) {
+                selectedTab.classList.add('active');
+            }
+
+            // Add active class to clicked nav button
+            const selectedButton = document.querySelector(`[data-tab="${tabName}"]`);
+            if (selectedButton) {
+                selectedButton.classList.add('active');
+            }
+
+            // Load tab-specific data
+            loadTabData(tabName);
+        }
+
+        // Load data for specific tab
+        function loadTabData(tabName) {
+            switch(tabName) {
+                case 'dashboard':
+                    loadDashboardData();
+                    break;
+                case 'users':
+                    loadUsersData();
+                    break;
+                case 'analytics':
+                    loadAnalyticsData();
+                    break;
+                case 'settings':
+                    loadSettingsData();
+                    break;
             }
         }
 
-        async function loadAnalytics() {
-            const userDistribution = document.getElementById('userDistribution');
-            const monthlyGrowth = document.getElementById('monthlyGrowth');
-            
-            userDistribution.innerHTML = `
-                <div style="text-align: center; padding: 2rem;">
-                    <div style="font-size: 2rem; font-weight: 700; color: #2563eb; margin-bottom: 0.5rem;">85%</div>
-                    <div style="color: #64748b;">Usuários Ativos</div>
-                </div>
-            `;
-            
-            monthlyGrowth.innerHTML = `
-                <div style="text-align: center; padding: 2rem;">
-                    <div style="font-size: 2rem; font-weight: 700; color: #10b981; margin-bottom: 0.5rem;">+24%</div>
-                    <div style="color: #64748b;">Crescimento este mês</div>
-                </div>
-            `;
-        }
-
-        // User Management Functions
-        function banUser(userId) {
-            currentAction = 'ban';
-            currentUserId = userId;
-            showConfirmModal('Banir Usuário', 'Tem certeza que deseja banir este usuário?', 'btn-warning');
-        }
-
-        function unbanUser(userId) {
-            currentAction = 'unban';
-            currentUserId = userId;
-            showConfirmModal('Desbanir Usuário', 'Tem certeza que deseja desbanir este usuário?', 'btn-success');
-        }
-
-        function deleteUser(userId) {
-            currentAction = 'delete';
-            currentUserId = userId;
-            showConfirmModal('Deletar Usuário', 'ATENÇÃO: Esta ação é irreversível! Todos os dados do usuário serão perdidos permanentemente.', 'btn-danger');
-        }
-
-        async function confirmAction() {
-            if (!currentAction || !currentUserId) return;
-
+        // Dashboard: Estatísticas e Atividades Recentes
+        async function loadDashboardData() {
+            // Estatísticas
             try {
-                let response;
-                if (currentAction === 'ban') {
-                    response = await fetch(`${API_BASE}/admin/users/${currentUserId}/ban`, { method: 'POST' });
-                } else if (currentAction === 'unban') {
-                    response = await fetch(`${API_BASE}/admin/users/${currentUserId}/unban`, { method: 'POST' });
-                } else if (currentAction === 'delete') {
-                    response = await fetch(`${API_BASE}/admin/users/${currentUserId}/delete`, { method: 'DELETE' });
-                }
-
-                if (response.ok) {
-                    closeModal();
-                    loadUsers(); // Reload users table
-                    loadStats(); // Reload stats
-                } else {
-                    const error = await response.json();
-                    alert('Erro: ' + error.error);
+                const res = await fetch('/api/admin_dashboard');
+                const data = await res.json();
+                const statsDiv = document.getElementById('dashboardStats');
+                if (statsDiv) {
+                    statsDiv.innerHTML = `
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: #667eea;"><i class="fas fa-users"></i></div>
+                            <div class="stat-number">${data.total_users}</div>
+                            <div class="stat-label">Usuários</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: #764ba2;"><i class="fas fa-user-shield"></i></div>
+                            <div class="stat-number">${data.total_admins}</div>
+                            <div class="stat-label">Admins</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: #e74c3c;"><i class="fas fa-user-slash"></i></div>
+                            <div class="stat-number">${data.total_banned}</div>
+                            <div class="stat-label">Banidos</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: #27ae60;"><i class="fas fa-utensils"></i></div>
+                            <div class="stat-number">${data.total_diet_entries}</div>
+                            <div class="stat-label">Dietas</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: #f39c12;"><i class="fas fa-ruler"></i></div>
+                            <div class="stat-number">${data.total_measurements}</div>
+                            <div class="stat-label">Medidas</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: #16a085;"><i class="fas fa-comments"></i></div>
+                            <div class="stat-number">${data.total_chat_messages}</div>
+                            <div class="stat-label">Mensagens Chat</div>
+                        </div>
+                    `;
                 }
             } catch (error) {
-                console.error('Erro na ação:', error);
-                alert('Erro de conexão');
+                document.getElementById('dashboardStats').innerHTML = '<div class="loading"><i class="fas fa-exclamation-triangle"></i> Erro ao carregar estatísticas</div>';
+            }
+
+            // Atividades Recentes
+            try {
+                const res = await fetch('/api/admin/recent_activity');
+                const activities = await res.json();
+                const activityDiv = document.getElementById('recentActivity');
+                if (activityDiv) {
+                    if (!activities.length) {
+                        activityDiv.innerHTML = '<div class="loading">Nenhuma atividade recente.</div>';
+                        return;
+                    }
+                    activityDiv.innerHTML = activities.map(act => {
+                        let icon = '';
+                        let color = '';
+                        let desc = '';
+                        if (act.type === 'user') {
+                            icon = 'fa-user-plus'; color = '#667eea';
+                            desc = `Novo usuário: <strong>${act.username}</strong>`;
+                        } else if (act.type === 'diet') {
+                            icon = 'fa-utensils'; color = '#27ae60';
+                            desc = `Nova dieta de <strong>${act.username}</strong>: ${act.description}`;
+                        } else if (act.type === 'measurement') {
+                            icon = 'fa-ruler'; color = '#f39c12';
+                            desc = `Nova medição de <strong>${act.username}</strong>`;
+                        } else if (act.type === 'chat') {
+                            icon = 'fa-comments'; color = '#16a085';
+                            desc = `Nova mensagem no chat de <strong>${act.username}</strong>`;
+                        }
+                        const date = new Date(act.created_at).toLocaleString('pt-BR');
+                        return `
+                            <div class="activity-item">
+                                <div class="activity-icon" style="background:${color};"><i class="fas ${icon}"></i></div>
+                                <div class="activity-content">
+                                    <div class="activity-title">${desc}</div>
+                                    <div class="activity-time">${date}</div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+            } catch (error) {
+                document.getElementById('recentActivity').innerHTML = '<div class="loading"><i class="fas fa-exclamation-triangle"></i> Erro ao carregar atividades</div>';
             }
         }
 
-        // Modal Functions
-        function showConfirmModal(title, message, buttonClass) {
-            document.getElementById('modalTitle').textContent = title;
-            document.getElementById('modalMessage').textContent = message;
-            document.getElementById('confirmButton').className = `btn ${buttonClass}`;
-            document.getElementById('confirmModal').classList.add('show');
-        }
-
-        function closeModal() {
-            document.getElementById('confirmModal').classList.remove('show');
-            currentAction = null;
-            currentUserId = null;
-        }
-
-        // Utility Functions
-        function refreshUsers() {
-            loadUsers();
-        }
-
-        // Search and Filter Functions
-        document.getElementById('userSearch').addEventListener('input', function() {
-            const searchTerm = this.value.toLowerCase();
-            const rows = document.querySelectorAll('#usersTable tbody tr');
-            
-            rows.forEach(row => {
-                const username = row.cells[1].textContent.toLowerCase();
-                if (username.includes(searchTerm)) {
-                    row.style.display = '';
-                } else {
-                    row.style.display = 'none';
+        // Usuários
+        async function loadUsersData() {
+            try {
+                const res = await fetch('/api/users');
+                const users = await res.json();
+                const tbody = document.getElementById('usersTableBody');
+                if (tbody) {
+                    if (!users.length) {
+                        tbody.innerHTML = `<tr><td colspan="6" class="loading">Nenhum usuário encontrado.</td></tr>`;
+                        return;
+                    }
+                    tbody.innerHTML = users.map(user => `
+                        <tr>
+                            <td>${user.id}</td>
+                            <td>${user.username}</td>
+                            <td>${user.email || '-'}</td>
+                            <td>
+                                <span class="status-badge ${user.is_banned ? 'status-inactive' : 'status-active'}">
+                                    ${user.is_banned ? 'Banido' : 'Ativo'}
+                                </span>
+                                ${user.is_admin ? '<span class="status-badge status-pending" style="margin-left:5px;">Admin</span>' : ''}
+                            </td>
+                            <td>${user.last_login ? new Date(user.last_login).toLocaleString('pt-BR') : '-'}</td>
+                            <td>
+                                <button class="btn btn-secondary" onclick="editUser(${user.id})"><i class="fas fa-edit"></i></button>
+                                <button class="btn btn-danger" onclick="banUser(${user.id})"><i class="fas fa-user-slash"></i></button>
+                            </td>
+                        </tr>
+                    `).join('');
                 }
-            });
-        });
+            } catch (error) {
+                document.getElementById('usersTableBody').innerHTML = `<tr><td colspan="6" class="loading">Erro ao carregar usuários.</td></tr>`;
+            }
+        }
 
-        document.getElementById('statusFilter').addEventListener('change', function() {
-            const filterValue = this.value;
-            const rows = document.querySelectorAll('#usersTable tbody tr');
-            
-            rows.forEach(row => {
-                const statusBadge = row.cells[2].querySelector('.badge');
-                const isActive = statusBadge.classList.contains('badge-success');
-                
-                if (filterValue === '') {
-                    row.style.display = '';
-                } else if (filterValue === 'active' && isActive) {
-                    row.style.display = '';
-                } else if (filterValue === 'banned' && !isActive) {
-                    row.style.display = '';
-                } else {
-                    row.style.display = 'none';
-                }
-            });
-        });
+        // Analytics (Gráficos)
+        async function loadAnalyticsData() {
+            // Exemplo: adapte conforme seu endpoint de analytics
+            try {
+                const period = document.getElementById('periodSelect').value || 30;
+                const res = await fetch(`/api/admin/analytics?period=${period}`);
+                const data = await res.json();
 
-        // Initialize
+                // Gráfico de usuários
+                const usersChartCtx = document.getElementById('usersChart').getContext('2d');
+                if (window.usersChartInstance) window.usersChartInstance.destroy();
+                window.usersChartInstance = new Chart(usersChartCtx, {
+                    type: 'line',
+                    data: {
+                        labels: data.users.labels,
+                        datasets: [{
+                            label: 'Novos Usuários',
+                            data: data.users.values,
+                            backgroundColor: 'rgba(102,126,234,0.2)',
+                            borderColor: '#667eea',
+                            borderWidth: 2,
+                            fill: true
+                        }]
+                    }
+                });
+
+                // Gráfico de atividades
+                const activityChartCtx = document.getElementById('activityChart').getContext('2d');
+                if (window.activityChartInstance) window.activityChartInstance.destroy();
+                window.activityChartInstance = new Chart(activityChartCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: data.activity.labels,
+                        datasets: [{
+                            label: 'Atividades',
+                            data: data.activity.values,
+                            backgroundColor: '#764ba2'
+                        }]
+                    }
+                });
+            } catch (error) {
+                document.getElementById('usersChart').parentElement.innerHTML = '<div class="loading">Erro ao carregar gráficos.</div>';
+                document.getElementById('activityChart').parentElement.innerHTML = '<div class="loading">Erro ao carregar gráficos.</div>';
+            }
+        }
+
+        // Settings (exemplo simples)
+        async function loadSettingsData() {
+            // Implemente conforme seu backend
+            // Exemplo: buscar e preencher configurações do sistema
+        }
+
+        // Initialize dashboard on page load
         document.addEventListener('DOMContentLoaded', function() {
-            loadDashboard();
+            loadDashboardData();
         });
 
-        // Auto-refresh every 30 seconds
-        setInterval(() => {
-            const activeTab = document.querySelector('.tab-content.active');
-            if (activeTab.id === 'dashboard') {
-                loadStats();
-            } else if (activeTab.id === 'users') {
-                loadUsers();
+        // Event listeners for buttons (to be implemented)
+        document.addEventListener('DOMContentLoaded', function() {
+            // Dashboard buttons
+            const refreshUsersBtn = document.getElementById('refreshUsersBtn');
+            const addUserBtn = document.getElementById('addUserBtn');
+            const refreshAnalyticsBtn = document.getElementById('refreshAnalyticsBtn');
+            const exportAnalyticsBtn = document.getElementById('exportAnalyticsBtn');
+            const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+            const createBackupBtn = document.getElementById('createBackupBtn');
+            const restoreBackupBtn = document.getElementById('restoreBackupBtn');
+            const clearCacheBtn = document.getElementById('clearCacheBtn');
+
+            // Add event listeners
+            if (refreshUsersBtn) {
+                refreshUsersBtn.addEventListener('click', function() {
+                    console.log('Refreshing users...');
+                    loadUsersData();
+                });
             }
-        }, 30000);
+
+            if (addUserBtn) {
+                addUserBtn.addEventListener('click', function() {
+                    console.log('Adding new user...');
+                    // Implement add user functionality
+                });
+            }
+
+            // Search functionality
+            const userSearch = document.getElementById('userSearch');
+            if (userSearch) {
+                userSearch.addEventListener('input', function() {
+                    console.log('Searching users:', this.value);
+                    // Implement search functionality
+                });
+            }
+
+            // Period selector
+            const periodSelect = document.getElementById('periodSelect');
+            if (periodSelect) {
+                periodSelect.addEventListener('change', function() {
+                    console.log('Period changed:', this.value);
+                    loadAnalyticsData();
+                });
+            }
+        });
     </script>
 </body>
 </html>
-

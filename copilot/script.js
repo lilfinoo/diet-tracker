@@ -1,65 +1,168 @@
+// script.js
+
 // Global variables
 let currentUser = null;
 let currentTab = 'diet';
 let dietEntries = [];
 let measurements = [];
+let dietPlans = []; // NOVO: Para armazenar planos de dieta
+let workoutPlans = []; // NOVO: Para armazenar planos de treino
 
 // API Base URL
 const API_BASE = '/api';
 
-/**
- * Função utilitária para buscar elementos DOM com verificação de existência
- * @param {string} id - ID do elemento
- * @returns {HTMLElement|null} - Elemento encontrado ou null
- */
+// Utilitário para buscar elementos DOM
 function getElement(id) {
     const element = document.getElementById(id);
     if (!element) {
         console.warn(`Elemento com ID '${id}' não encontrado`);
-    }
+    }    
     return element;
 }
-
-/**
- * Função utilitária para adicionar event listeners com verificação
- * @param {string} id - ID do elemento
- * @param {string} event - Tipo do evento
- * @param {function} handler - Função handler
- */
+// Adiciona um event listener apenas se o elemento existir
 function addEventListenerSafe(id, event, handler) {
-    const element = getElement(id);
-    if (element) {
-        element.addEventListener(event, handler);
+    const el = getElement(id);
+    if (el) {
+        el.addEventListener(event, handler);
     }
 }
+// Toast global para feedback visual
+function showToast(msg, tipo="success") {
+    let toast = document.createElement("div");
+    toast.className = "toast " + tipo;
+    toast.innerText = msg;
+    document.body.appendChild(toast);
+    setTimeout(() => {
+        toast.remove();
+    }, 3000);
+}
 
-// Initialize app
+// Mensagem para login/registro/perfil
+function showAuthMessage(message, type = 'info') {
+    const messageEl = getElement("authMessage");
+    if (!messageEl) return;
+    messageEl.textContent = message;
+    messageEl.className = `message ${type}`;
+    messageEl.style.display = "block";
+    setTimeout(() => {
+        messageEl.textContent = "";
+        messageEl.className = "message";
+        messageEl.style.display = "none";
+    }, 5000);
+}
+
+// Mensagem para modal de dieta/medidas
+function showDietMessage(msg, type="info") {
+    let el = getElement("dietMessage");
+    if (!el) {
+        el = document.createElement("div");
+        el.id = "dietMessage";
+        el.className = "modal-message";
+        // Adiciona ao modal de dieta, se existir
+        const dietModalContent = getElement("dietModal")?.querySelector(".modal-content");
+        if (dietModalContent) {
+            dietModalContent.prepend(el);
+        } else {
+            document.body.appendChild(el); // Fallback
+        }
+    }
+    el.textContent = msg;
+    el.className = "modal-message " + type;
+    setTimeout(() => { el.textContent = ""; }, 4000);
+}
+
+// Loading global
+function showGlobalLoading(msg="Carregando...") {
+    let loading = document.getElementById("globalLoading");
+    if (!loading) {
+        loading = document.createElement("div");
+        loading.id = "globalLoading";
+        loading.className = "toast info";
+        loading.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${msg}`;
+        document.body.appendChild(loading);
+    }
+}
+function hideGlobalLoading() {
+    let loading = document.getElementById("globalLoading");
+    if (loading) loading.remove();
+}
+
+// Adiciona listeners ao carregar a página
 document.addEventListener('DOMContentLoaded', function() {
-    checkAuthStatus();
-    setupEventListeners();
     setDefaultDates();
     initializeAudioFeatures();
-});
+    checkAuthStatus();
 
-// Setup event listeners
-function setupEventListeners() {
+    // Autocomplete local para descrição dos alimentos
+    const dietDescription = getElement("dietDescription");
+    if (dietDescription) {
+        let alimentosList = [];
+        let alimentosData = [];
+        // Verifique o caminho correto para seu arquivo JSON
+        fetch("minha-pasta/alimentos.json") 
+            .then(res => res.json())
+            .then(data => {
+                alimentosData = data.filter(item => item.descricao);
+                alimentosList = alimentosData.map(item => item.descricao);
+            })
+            .catch(error => console.error("Erro ao carregar alimentos.json:", error));
+
+        const awesomplete = new Awesomplete(dietDescription, {
+            minChars: 2,
+            maxItems: 10,
+            autoFirst: true
+        });
+
+        dietDescription.addEventListener("input", function() {
+            const query = dietDescription.value.trim().toLowerCase();
+            if (query.length < 2) return;
+            awesomplete.list = alimentosList.filter(desc =>
+                desc.toLowerCase().includes(query)
+            );
+        });
+
+        dietDescription.addEventListener("awesomplete-selectcomplete", function(evt) {
+            const selected = alimentosData.find(item => item.descricao === dietDescription.value);
+            if (selected) {
+                getElement("dietCalories").value = selected.calorias ?? "";
+                getElement("dietProtein").value = selected.proteina ?? "";
+                getElement("dietCarbs").value = selected.carboidrato ?? "";
+                getElement("dietFat").value = selected.gordura ?? "";
+                // A função updatePrecisionBadge não está definida no seu código,
+                // mas se você a tiver em outro lugar, ela pode ser chamada aqui.
+                // updatePrecisionBadge("manual"); 
+            }
+        });
+    }
+
+    // Formulário de dieta
+    const dietForm = document.getElementById("dietForm");
+    if (dietForm) {
+        dietForm.addEventListener("submit", async function(e) {
+            e.preventDefault();
+            await handleDietFormSubmit();
+        });
+    }
+
+    // Formulário de medidas
+    const measurementForm = document.getElementById("measurementForm");
+    if (measurementForm) {
+        measurementForm.addEventListener("submit", async function(e) {
+            e.preventDefault();
+            await handleMeasurementFormSubmit();
+        });
+    }
+
     // Auth forms
     addEventListenerSafe("loginForm", "submit", handleLogin);
     addEventListenerSafe("registerForm", "submit", handleRegister);
-    
-    // Diet form
-    addEventListenerSafe("dietForm", "submit", handleDietSubmit);
-    
-    // Measurement form
-    addEventListenerSafe("measurementForm", "submit", handleMeasurementSubmit);
-    
-    // Profile form
     addEventListenerSafe("profileForm", "submit", handleProfileSubmit);
-    
+
     // Chat functionality
-    // Certifique-se de que o elemento 'sendButton' existe no seu HTML
-    addEventListenerSafe("sendButton", "click", sendChatMessage);
-    
+    // O botão de enviar do chat não tem ID no HTML, vamos usar o onclick no HTML
+    // ou dar um ID a ele (ex: sendChatBtn) e usar addEventListenerSafe("sendChatBtn", "click", sendChatMessage);
+    // Por enquanto, o onclick no HTML é suficiente.
+
     // Chat input - Enter key
     const chatInput = getElement("chatInput");
     if (chatInput) {
@@ -71,10 +174,191 @@ function setupEventListeners() {
         });
     }
 
+    // Botões rápidos do chat (NOVO)
+    addEventListenerSafe("quickDietBtn", "click", function() {
+        sendChatMessageWithProfile("Gere um plano de dieta personalizado para mim, considerando meu perfil.");
+    });
+    addEventListenerSafe("quickWorkoutBtn", "click", function() {
+        sendChatMessageWithProfile("Gere um plano de treino personalizado para mim, considerando meu perfil.");
+    });
+
     // Modal close events
     setupModalEvents();
+    
+    // NOVO: Adiciona eventos para os novos modais de visualização de planos
+    setupPlanViewModals();
+
+    addEventListenerSafe("generateMacrosBtn", "click", async function() {
+        const btnText = getElement("generateMacrosBtnText");
+        const btnLoading = getElement("generateMacrosLoading");
+        if (btnText) btnText.classList.add("hidden");
+        if (btnLoading) btnLoading.classList.remove("hidden");
+        const description = getElement("dietDescription")?.value.trim();
+        if (!description) {
+            showDietMessage("Descreva os alimentos antes de gerar macros.", "error");
+            if (btnText) btnText.classList.remove("hidden");
+            if (btnLoading) btnLoading.classList.add("hidden");
+            return;
+        }
+        try {
+            const response = await fetch(`${API_BASE}/diet/ai_macros`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({ description })
+            });
+            const data = await response.json();
+            if (response.ok) {
+                getElement("dietCalories").value = data.calories || 0;
+                getElement("dietProtein").value = data.protein || 0;
+                getElement("dietCarbs").value = data.carbs || 0;
+                getElement("dietFat").value = data.fat || 0;
+                // Badge de precisão (se a função updatePrecisionBadge existir)
+                const badge = getElement('precisionBadge');
+                if (badge) {
+                    badge.textContent = data.precision === "alta" ? "Alta precisão"
+                        : data.precision === "moderada" ? "Precisão moderada"
+                        : "Baixa precisão";
+                    badge.className = data.precision === "alta" ? "precision-high"
+                        : data.precision === "moderada" ? "precision-moderate"
+                        : "precision-low";
+                }
+                if (data.precision === "baixa") {
+                    showDietMessage("Descrição vaga! Os valores são estimados. Edite se necessário.", "info");
+                }
+            } else {
+                showDietMessage(data.error || "Erro ao gerar macros", "error");
+            }
+        } catch (error) {
+            showDietMessage("Erro ao gerar macros", "error");
+        }
+        if (btnText) btnText.classList.remove("hidden");
+        if (btnLoading) btnLoading.classList.add("hidden");
+    });
+});
+
+// --- FUNÇÕES PRINCIPAIS ---
+
+async function handleDietFormSubmit() {
+    const btn = document.getElementById("dietSaveBtn");
+    const loading = document.getElementById("dietSaveLoading");
+    btn.disabled = true;
+    loading.classList.remove("hidden");
+
+    // Coleta os dados do formulário
+    const dietIdRaw = document.getElementById("dietId").value;
+    const dietId = Number(dietIdRaw);
+    const isEdit = Number.isInteger(dietId) && dietId > 0;
+
+    // Função auxiliar para converter campos numéricos
+    function parseNumber(val) {
+        return val && val !== "" ? Number(val) : null;
+    }
+
+    const payload = {
+        id: dietIdRaw,
+        date: document.getElementById("dietDate").value,
+        meal_type: document.getElementById("dietMealType").value,
+        description: document.getElementById("dietDescription").value,
+        calories: parseNumber(document.getElementById("dietCalories").value),
+        protein: parseNumber(document.getElementById("dietProtein").value),
+        carbs: parseNumber(document.getElementById("dietCarbs").value),
+        fat: parseNumber(document.getElementById("dietFat").value),
+        notes: document.getElementById("dietNotes").value
+    };
+
+    const url = isEdit ? `/api/diet/${dietId}` : "/api/diet";
+    const method = isEdit ? "PUT" : "POST";
+
+    try {
+        const response = await fetch(url, {
+            method,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+            showToast("Dieta salva com sucesso!", "success");
+            closeDietModal();
+            loadDietEntries();
+        } else {
+            const errorData = await response.json();
+            showToast(errorData.error || "Erro ao salvar dieta!", "error");
+        }
+    } catch (e) {
+        showToast("Erro de conexão!", "error");
+    } finally {
+        btn.disabled = false;
+        loading.classList.add("hidden");
+    }
 }
 
+// Atualiza o peso do perfil ao salvar uma nova medida
+async function handleMeasurementFormSubmit() {
+    const btn = document.getElementById("measurementSaveBtn");
+    const loading = document.getElementById("measurementSaveLoading");
+    btn.disabled = true;
+    loading.classList.remove("hidden");
+
+    function parseNumber(val) {
+        return val && val !== "" ? Number(val) : null;
+    }
+
+    const measurementIdRaw = document.getElementById("measurementId")?.value;
+    const measurementId = Number(measurementIdRaw);
+    const isEdit = Number.isInteger(measurementId) && measurementId > 0;
+
+    const payload = {
+        id: measurementIdRaw,
+        date: document.getElementById("measurementDate").value,
+        weight: parseNumber(document.getElementById("measurementWeight").value),
+        height: parseNumber(document.getElementById("measurementHeight").value),
+        body_fat: parseNumber(document.getElementById("measurementBodyFat").value),
+        muscle_mass: parseNumber(document.getElementById("measurementMuscleMass").value),
+        waist: parseNumber(document.getElementById("measurementWaist").value),
+        chest: parseNumber(document.getElementById("measurementChest").value),
+        arm: parseNumber(document.getElementById("measurementArm").value),
+        thigh: parseNumber(document.getElementById("measurementThigh").value),
+        notes: document.getElementById("measurementNotes").value
+    };
+
+    try {
+        const url = isEdit ? `/api/measurements/${measurementId}` : "/api/measurements";
+        const method = isEdit ? "PUT" : "POST";
+        const response = await fetch(url, {
+            method,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+            closeMeasurementModal();
+            loadMeasurements();
+            showToast(isEdit ? "Medidas atualizadas!" : "Medidas adicionadas!", "success");
+            // Atualiza o peso e altura do perfil com os últimos valores registrados
+            await fetch(`${API_BASE}/profile`, {
+                method: "POST", // Ou PUT, dependendo da sua API
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({ 
+                    weight: payload.weight,
+                    height: payload.height
+                })
+            });
+        } else {
+            const data = await response.json();
+            showToast(data.error || "Erro ao salvar", "error");
+        }
+    } catch (error) {
+        console.error("Measurement submit error:", error);
+        showToast("Erro de conexão", "error");
+    } finally {
+        btn.disabled = false;
+        loading.classList.add("hidden");
+    }
+}
+
+// Setup event listeners
 /**
  * Configura eventos de modais com verificação de existência
  */
@@ -96,6 +380,27 @@ function setupModalEvents() {
         }
     });
 }
+
+// NOVO: Configura eventos para os modais de visualização de planos
+function setupPlanViewModals() {
+    const viewDietPlanModal = getElement("viewDietPlanModal");
+    if (viewDietPlanModal) {
+        viewDietPlanModal.addEventListener("click", function(e) {
+            if (e.target === this) {
+                closeViewDietPlanModal();
+            }
+        });
+    }
+    const viewWorkoutPlanModal = getElement("viewWorkoutPlanModal");
+    if (viewWorkoutPlanModal) {
+        viewWorkoutPlanModal.addEventListener("click", function(e) {
+            if (e.target === this) {
+                closeViewWorkoutPlanModal();
+            }
+        });
+    }
+}
+
 
 // Set default dates
 function setDefaultDates() {
@@ -166,9 +471,28 @@ function showMainScreen() {
         if (welcomeUser) {
             welcomeUser.textContent = `Bem-vindo, ${currentUser.username}!`;
         }
+        // Mostra o botão admin se for admin
+        const adminBtn = getElement('adminPanelBtn');
+        if (adminBtn) {
+            if (currentUser && currentUser.is_admin) {
+                adminBtn.classList.remove('hidden');
+            } else {
+                adminBtn.classList.add('hidden');
+            }
+        }
     }
     
-    showTab('diet');
+    // NOVO: Define a visibilidade inicial da aba de chat
+    const chatNavBtn = document.querySelector(`[onclick="showTab('chat')"]`);
+    if (chatNavBtn) {
+        if (currentUser && currentUser.is_admin) {
+            chatNavBtn.style.display = ''; // Mostra
+        } else {
+            chatNavBtn.style.display = 'none'; // Oculta
+        }
+    }
+
+    showTab('diet'); // Sempre começa na aba de dieta
     checkUserProfile();
 }
 
@@ -177,22 +501,6 @@ function showMainScreen() {
  * @param {string} message - Mensagem a ser exibida
  * @param {string} type - Tipo da mensagem (success, error, info)
  */
-function showMessage(message, type = 'info') {
-    const messageEl = getElement("authMessage");
-    if (!messageEl) return;
-
-    messageEl.textContent = message;
-    messageEl.className = `message ${type}`;
-    messageEl.style.display = "block";
-    
-    // Auto-hide após 5 segundos
-    setTimeout(() => {
-        messageEl.textContent = "";
-        messageEl.className = "message";
-        messageEl.style.display = "none";
-    }, 5000);
-}
-
 // Chat functions
 let chatHistory = [];
 let isRecording = false;
@@ -231,9 +539,17 @@ async function sendChatMessage() {
             hideTypingIndicator();
             lastAIResponse = data.response; // Salva para reprodução de áudio
             addMessageToChat(data.response, "bot");
+            // NOVO: Se a resposta da IA indica que um plano foi salvo, recarregue as listas
+            if (data.response.includes("plano de dieta") && data.response.includes("salvo")) {
+                loadDietPlans();
+            }
+            if (data.response.includes("plano de treino") && data.response.includes("salvo")) {
+                loadWorkoutPlans();
+            }
         } else {
             hideTypingIndicator();
-            addMessageToChat("Desculpe, ocorreu um erro. Tente novamente.", "bot");
+            const errorData = await response.json();
+            addMessageToChat(errorData.error || "Desculpe, ocorreu um erro. Tente novamente.", "bot");
         }
     } catch (error) {
         console.error("Chat error:", error);
@@ -243,24 +559,55 @@ async function sendChatMessage() {
 }
 
 /**
- * Adiciona mensagem ao chat
+ * Envia mensagem para a IA com o perfil do usuário (usado pelos botões rápidos)
  */
+async function sendChatMessageWithProfile(message) {
+    const chatMessages = getElement("chatMessages");
+    if (!chatMessages) return;
+    addMessageToChat(message, "user");
+    showTypingIndicator();
+    
+    try {
+        const response = await fetch(`${API_BASE}/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ message })
+        });
+        const data = await response.json();
+        hideTypingIndicator();
+        if (response.ok && data.response) {
+            addMessageToChat(data.response, "bot");
+            lastAIResponse = data.response;
+            // NOVO: Se a resposta da IA indica que um plano foi salvo, recarregue as listas
+            if (data.response.includes("plano de dieta") && data.response.includes("salvo")) {
+                loadDietPlans();
+            }
+            if (data.response.includes("plano de treino") && data.response.includes("salvo")) {
+                loadWorkoutPlans();
+            }
+        } else {
+            const errorData = await response.json();
+            addMessageToChat(errorData.error || "Erro ao obter resposta da IA.", "bot");
+        }
+    } catch (e) {
+        hideTypingIndicator();
+        addMessageToChat("Erro de conexão com a IA.", "bot");
+    }
+}
+
+// Adiciona classe correta para mensagens do chat
 function addMessageToChat(message, sender) {
     const chatMessages = getElement("chatMessages");
     if (!chatMessages) return;
-
     const messageDiv = document.createElement("div");
-    messageDiv.className = `chat-message ${sender}-message`;
-    
+    messageDiv.className = `chat-message ${sender === "bot" ? "bot-message" : "user-message"}`;
     messageDiv.innerHTML = `
         <div class="message-avatar">
-            <i class="fas ${sender === 'user' ? 'fa-user' : 'fa-robot'}"></i>
+            <i class="fas ${sender === "bot" ? "fa-robot" : "fa-user"}"></i>
         </div>
-        <div class="message-content">
-            <p>${message}</p>
-        </div>
+        <div class="message-content">${message}</div>
     `;
-    
     chatMessages.appendChild(messageDiv);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
@@ -422,8 +769,15 @@ function speakLastResponse() {
 
 // Utility functions
 function formatDate(dateString) {
-    const date = new Date(dateString + 'T00:00:00');
+    if (!dateString) return '-';
+    const date = new Date(dateString + 'T00:00:00'); // Adiciona T00:00:00 para evitar problemas de fuso horário
     return date.toLocaleDateString('pt-BR');
+}
+
+function formatDateTime(dateTimeString) {
+    if (!dateTimeString) return '-';
+    const date = new Date(dateTimeString);
+    return date.toLocaleDateString('pt-BR') + ' ' + date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
 function getMealTypeLabel(mealType) {
@@ -445,7 +799,7 @@ async function handleLogin(e) {
     const password = getElement("loginPassword").value.trim();
 
     if (!username || !password) {
-        showMessage("Preencha todos os campos", "error");
+        showAuthMessage("Preencha todos os campos", "error");
         return;
     }
 
@@ -463,13 +817,13 @@ async function handleLogin(e) {
         if (response.ok) {
             currentUser = data.user;
             showMainScreen();
-            showMessage(data.message, "success");
+            showAuthMessage(data.message, "success");
         } else {
-            showMessage(data.error, "error");
+            showAuthMessage(data.error, "error");
         }
     } catch (error) {
         console.error("Login error:", error);
-        showMessage("Erro de conexão. Tente novamente.", "error");
+        showAuthMessage("Erro de conexão. Tente novamente.", "error");
     }
 }
 
@@ -480,17 +834,17 @@ async function handleRegister(e) {
     const confirmPassword = getElement("confirmPassword").value.trim();
 
     if (!username || !password || !confirmPassword) {
-        showMessage("Preencha todos os campos", "error");
+        showAuthMessage("Preencha todos os campos", "error");
         return;
     }
 
     if (password !== confirmPassword) {
-        showMessage("As senhas não coincidem", "error");
+        showAuthMessage("As senhas não coincidem", "error");
         return;
     }
 
     if (password.length < 6) {
-        showMessage("A senha deve ter pelo menos 6 caracteres", "error");
+        showAuthMessage("A senha deve ter pelo menos 6 caracteres", "error");
         return;
     }
 
@@ -508,13 +862,13 @@ async function handleRegister(e) {
         if (response.ok) {
             currentUser = data.user;
             showMainScreen();
-            showMessage(data.message, "success");
+            showAuthMessage(data.message, "success");
         } else {
-            showMessage(data.error, "error");
+            showAuthMessage(data.error, "error");
         }
     } catch (error) {
         console.error("Register error:", error);
-        showMessage("Erro de conexão. Tente novamente.", "error");
+        showAuthMessage("Erro de conexão. Tente novamente.", "error");
     }
 }
 
@@ -526,7 +880,7 @@ async function logout() {
         });
         currentUser = null;
         showLoginScreen();
-        showMessage("Logout realizado com sucesso", "success");
+        showAuthMessage("Logout realizado com sucesso", "success");
     } catch (error) {
         console.error("Logout error:", error);
         currentUser = null;
@@ -534,6 +888,7 @@ async function logout() {
     }
 }
 
+// Interface functions
 // Interface functions
 function showTab(tabName) {
     // Remove active class from all nav buttons
@@ -546,8 +901,22 @@ function showTab(tabName) {
         tab.classList.add('hidden');
     });
     
+    // Lógica para controlar a visibilidade da aba de chat
+    const chatNavBtn = document.querySelector(`[onclick="showTab('chat')"]`);
+    if (chatNavBtn) {
+        if (currentUser && currentUser.is_admin) {
+            chatNavBtn.style.display = ''; // Mostra o botão da aba
+        } else {
+            chatNavBtn.style.display = 'none'; // Oculta o botão da aba
+            if (tabName === 'chat') {
+                showTab('diet'); // Redireciona para aba padrão se não for admin
+                return;
+            }
+        }
+    }
+
     // Show selected tab
-    const selectedTab = getElement(`${tabName}Tab`);
+    const selectedTab = document.getElementById(`${tabName}Tab`);
     if (selectedTab) {
         selectedTab.classList.remove('hidden');
     }
@@ -560,16 +929,19 @@ function showTab(tabName) {
     
     currentTab = tabName;
     
-    // Load data for specific tabs
+    // Carrega os dados corretos para cada aba
     if (tabName === 'diet') {
         loadDietEntries();
     } else if (tabName === 'measurements') {
         loadMeasurements();
     } else if (tabName === 'stats') {
         loadStats();
+    } else if (tabName === 'diet_plans') { // Carrega planos de dieta
+        loadDietPlans();
+    } else if (tabName === 'workout_plans') { // Carrega planos de treino
+        loadWorkoutPlans();
     }
 }
-
 function showLogin() {
     const loginForm = getElement("loginForm");
     const registerForm = getElement("registerForm");
@@ -658,8 +1030,20 @@ function skipProfile() {
     closeProfileModal();
 }
 
+// NOVO: Funções para modais de visualização de planos
+function closeViewDietPlanModal() {
+    const modal = getElement("viewDietPlanModal");
+    if (modal) modal.style.display = "none";
+}
+
+function closeViewWorkoutPlanModal() {
+    const modal = getElement("viewWorkoutPlanModal");
+    if (modal) modal.style.display = "none";
+}
+
 // Data functions
 async function loadDietEntries() {
+    showGlobalLoading();
     const startDate = getElement("dietStartDate")?.value;
     const endDate = getElement("dietEndDate")?.value;
     
@@ -682,10 +1066,13 @@ async function loadDietEntries() {
         }
     } catch (error) {
         console.error('Error loading diet entries:', error);
+    } finally {
+        hideGlobalLoading();
     }
 }
 
 async function loadMeasurements() {
+    showGlobalLoading();
     const startDate = getElement("measurementStartDate")?.value;
     const endDate = getElement("measurementEndDate")?.value;
     
@@ -708,6 +1095,8 @@ async function loadMeasurements() {
         }
     } catch (error) {
         console.error('Error loading measurements:', error);
+    } finally {
+        hideGlobalLoading();
     }
 }
 
@@ -750,6 +1139,325 @@ async function loadStats() {
     }
 }
 
+async function loadDashboard() {
+    try {
+        const res = await fetch('/api/admin_dashboard');
+        if (!res.ok) throw new Error('Erro ao buscar dashboard');
+        const data = await res.json();
+
+        const dashboardStats = getElement('dashboardStats');
+        if (dashboardStats) {
+            dashboardStats.innerHTML = `
+                <div class="dashboard-grid">
+                    <div class="dashboard-card"><h2>${data.total_users}</h2><p>Usuários</p></div>
+                    <div class="dashboard-card"><h2>${data.total_admins}</h2><p>Admins</p></div>
+                    <div class="dashboard-card"><h2>${data.total_banned}</h2><p>Banidos</p></div>
+                    <div class="dashboard-card"><h2>${data.total_diet_entries}</h2><p>Dietas</p></div>
+                    <div class="dashboard-card"><h2>${data.total_measurements}</h2><p>Medidas</p></div>
+                    <div class="dashboard-card"><h2>${data.total_chat_messages}</h2><p>Mensagens Chat</p></div>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Erro ao carregar dashboard:', error);
+        const dashboardStats = getElement('dashboardStats');
+        if (dashboardStats) {
+            dashboardStats.innerHTML = '<p class="text-danger">Erro ao carregar estatísticas do dashboard</p>';
+        }
+    }
+}
+
+async function loadRecentActivity() {
+    try {
+        const res = await fetch('/api/admin/recent_activity');
+        if (!res.ok) throw new Error('Erro ao buscar atividades');
+        const activities = await res.json();
+
+        const activityDiv = getElement('recentActivity');
+        if (!activityDiv) return;
+
+        if (activities.length === 0) {
+            activityDiv.innerHTML = '<p>Nenhuma atividade recente.</p>';
+            return;
+        }
+
+        activityDiv.innerHTML = activities.map(act => {
+            let icon = '';
+            let desc = '';
+            if (act.type === 'user') {
+                icon = '<i class="fas fa-user-plus"></i>';
+                desc = `Novo usuário: <strong>${act.username}</strong>`;
+            } else if (act.type === 'diet') {
+                icon = '<i class="fas fa-utensils"></i>';
+                desc = `Nova dieta de <strong>${act.username}</strong>: ${act.description}`;
+            } else if (act.type === 'measurement') {
+                icon = '<i class="fas fa-ruler"></i>';
+                desc = `Nova medição de <strong>${act.username}</strong>`;
+            } else if (act.type === 'chat') {
+                icon = '<i class="fas fa-comments"></i>';
+                desc = `Nova mensagem no chat de <strong>${act.username}</strong>`;
+            }
+            const date = new Date(act.created_at).toLocaleString('pt-BR');
+            return `
+                <div style="display: flex; align-items: center; gap: 1rem; padding: 0.5rem 0;">
+                    <span style="font-size: 1.5rem;">${icon}</span>
+                    <span>${desc}</span>
+                    <span style="margin-left:auto; color:#64748b; font-size:0.9rem;">${date}</span>
+                </div>
+            `;
+        }).join('');
+    } catch (error) {
+        console.error('Erro ao carregar atividades:', error);
+        const activityDiv = document.getElementById('recentActivity');
+        if (activityDiv) activityDiv.innerHTML = '<p class="text-danger">Erro ao carregar atividades recentes</p>';
+    }
+}
+
+// NOVO: Funções para carregar e renderizar Planos de Dieta
+async function loadDietPlans() {
+    showGlobalLoading("Carregando planos de dieta...");
+    try {
+        const response = await fetch(`${API_BASE}/diet_plans`, {
+            credentials: 'include'
+        });
+        if (response.ok) {
+            dietPlans = await response.json();
+            renderDietPlansTable();
+        } else {
+            console.error('Failed to load diet plans');
+            showToast("Erro ao carregar planos de dieta.", "error");
+        }
+    } catch (error) {
+        console.error('Error loading diet plans:', error);
+        showToast("Erro de conexão ao carregar planos de dieta.", "error");
+    } finally {
+        hideGlobalLoading();
+    }
+}
+
+function renderDietPlansTable() {
+    const tbody = getElement("dietPlansTableBody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    if (dietPlans.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4">Nenhum plano de dieta encontrado. Peça um para a IA!</td></tr>';
+        return;
+    }
+
+    dietPlans.forEach(plan => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+            <td>${plan.title}</td>
+            <td>${plan.description || '-'}
+            <td>${formatDateTime(plan.created_at)}</td>
+            <td>
+                <button onclick="viewDietPlan(${plan.id})" class="btn-edit">
+                    <i class="fas fa-eye"></i> Ver
+                </button>
+                <button onclick="deleteDietPlan(${plan.id})" class="btn-delete">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+async function viewDietPlan(id) {
+    showGlobalLoading("Carregando detalhes do plano de dieta...");
+    try {
+        const response = await fetch(`${API_BASE}/diet_plans/${id}`, {
+            credentials: 'include'
+        });
+        if (response.ok) {
+            const plan = await response.json();
+            const modal = getElement("viewDietPlanModal");
+            const title = getElement("viewDietPlanTitle");
+            const detailsDiv = getElement("viewDietPlanDetails");
+
+            if (modal && title && detailsDiv) {
+                title.textContent = plan.title;
+                let htmlContent = `
+                    <p><strong>Descrição:</strong> ${plan.description || 'N/A'}</p>
+                    <p><strong>Criado em:</strong> ${formatDateTime(plan.created_at)}</p>
+                `;
+
+                if (plan.meals && plan.meals.length > 0) {
+                    const mealsByDay = plan.meals.reduce((acc, meal) => {
+                        const day = meal.day_of_week || 'Geral';
+                        if (!acc[day]) acc[day] = [];
+                        acc[day].push(meal);
+                        return acc;
+                    }, {});
+
+                    for (const day in mealsByDay) {
+                        htmlContent += `<div class="plan-details-section"><h4>${day}</h4><ul>`;
+                        mealsByDay[day].sort((a, b) => (a.order || 0) - (b.order || 0)).forEach(meal => {
+                            htmlContent += `
+                                <li>
+                                    <strong>${meal.meal_type}:</strong> ${meal.description}
+                                    <br>
+                                    (Cal: ${meal.calories || 0} | Prot: ${meal.protein || 0}g | Carb: ${meal.carbs || 0}g | Gord: ${meal.fat || 0}g)
+                                    ${meal.notes ? `<br><em>Obs: ${meal.notes}</em>` : ''}
+                                </li>
+                            `;
+                        });
+                        htmlContent += `</ul></div>`;
+                    }
+                } else {
+                    htmlContent += '<p>Nenhuma refeição detalhada para este plano.</p>';
+                }
+                detailsDiv.innerHTML = htmlContent;
+                modal.style.display = "flex"; // Usa flex para centralizar
+            }
+        } else {
+            console.error('Failed to load diet plan details');
+            showToast("Erro ao carregar detalhes do plano de dieta.", "error");
+        }
+    } catch (error) {
+        console.error('Error viewing diet plan:', error);
+        showToast("Erro de conexão ao ver plano de dieta.", "error");
+    } finally {
+        hideGlobalLoading();
+    }
+}
+
+async function deleteDietPlan(id) {
+    if (!confirm("Tem certeza que deseja excluir este plano de dieta?")) return;
+    showToast("Excluindo plano de dieta...", "info");
+    try {
+        const response = await fetch(`${API_BASE}/diet_plans/${id}`, { method: "DELETE", credentials: 'include' });
+        if (response.ok) {
+            showToast("Plano de dieta excluído!", "success");
+            loadDietPlans();
+        } else {
+            const errorData = await response.json();
+            showToast(errorData.error || "Erro ao excluir plano de dieta!", "error");
+        }
+    } catch (e) {
+        showToast("Erro de conexão ao excluir plano de dieta!", "error");
+    }
+}
+
+// NOVO: Funções para carregar e renderizar Planos de Treino
+async function loadWorkoutPlans() {
+    showGlobalLoading("Carregando planos de treino...");
+    try {
+        const response = await fetch(`${API_BASE}/workout_plans`, {
+            credentials: 'include'
+        });
+        if (response.ok) {
+            workoutPlans = await response.json();
+            renderWorkoutPlansTable();
+        } else {
+            console.error('Failed to load workout plans');
+            showToast("Erro ao carregar planos de treino.", "error");
+        }
+    } catch (error) {
+        console.error('Error loading workout plans:', error);
+        showToast("Erro de conexão ao carregar planos de treino.", "error");
+    } finally {
+        hideGlobalLoading();
+    }
+}
+
+function renderWorkoutPlansTable() {
+    const tbody = getElement("workoutPlansTableBody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    if (workoutPlans.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4">Nenhum plano de treino encontrado. Peça um para a IA!</td></tr>';
+        return;
+    }
+
+    workoutPlans.forEach(plan => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+            <td>${plan.title}</td>
+            <td>${plan.description || '-'}
+            <td>${formatDateTime(plan.created_at)}</td>
+            <td>
+                <button onclick="viewWorkoutPlan(${plan.id})" class="btn-edit">
+                    <i class="fas fa-eye"></i> Ver
+                </button>
+                <button onclick="deleteWorkoutPlan(${plan.id})" class="btn-delete">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+async function viewWorkoutPlan(id) {
+    showGlobalLoading("Carregando detalhes do plano de treino...");
+    try {
+        const response = await fetch(`${API_BASE}/workout_plans/${id}`, {
+            credentials: 'include'
+        });
+        if (response.ok) {
+            const plan = await response.json();
+            const modal = getElement("viewWorkoutPlanModal");
+            const title = getElement("viewWorkoutPlanTitle");
+            const detailsDiv = getElement("viewWorkoutPlanDetails");
+
+            if (modal && title && detailsDiv) {
+                title.textContent = plan.title;
+                let htmlContent = `
+                    <p><strong>Descrição:</strong> ${plan.description || 'N/A'}</p>
+                    <p><strong>Criado em:</strong> ${formatDateTime(plan.created_at)}</p>
+                `;
+
+                if (plan.exercises && plan.exercises.length > 0) {
+                    htmlContent += `<div class="plan-details-section"><h4>Exercícios</h4><ul>`;
+                    plan.exercises.sort((a, b) => (a.order || 0) - (b.order || 0)).forEach(exercise => {
+                        htmlContent += `
+                            <li>
+                                <strong>${exercise.name}:</strong> ${exercise.sets || 'N/A'} séries de ${exercise.reps || 'N/A'} repetições
+                                ${exercise.weight ? ` (${exercise.weight})` : ''}
+                                ${exercise.notes ? `<br><em>Obs: ${exercise.notes}</em>` : ''}
+                            </li>
+                        `;
+                    });
+                    htmlContent += `</ul></div>`;
+                } else {
+                    htmlContent += '<p>Nenhum exercício detalhado para este plano.</p>';
+                }
+                detailsDiv.innerHTML = htmlContent;
+                modal.style.display = "flex"; // Usa flex para centralizar
+            }
+        } else {
+            console.error('Failed to load workout plan details');
+            showToast("Erro ao carregar detalhes do plano de treino.", "error");
+        }
+    } catch (error) {
+        console.error('Error viewing workout plan:', error);
+        showToast("Erro de conexão ao ver plano de treino.", "error");
+    } finally {
+        hideGlobalLoading();
+    }
+}
+
+async function deleteWorkoutPlan(id) {
+    if (!confirm("Tem certeza que deseja excluir este plano de treino?")) return;
+    showToast("Excluindo plano de treino...", "info");
+    try {
+        const response = await fetch(`${API_BASE}/workout_plans/${id}`, { method: "DELETE", credentials: 'include' });
+        if (response.ok) {
+            showToast("Plano de treino excluído!", "success");
+            loadWorkoutPlans();
+        } else {
+            const errorData = await response.json();
+            showToast(errorData.error || "Erro ao excluir plano de treino!", "error");
+        }
+    } catch (e) {
+        showToast("Erro de conexão ao excluir plano de treino!", "error");
+    }
+}
+
+
 // Rendering and Form functions
 function renderDietTable() {
     const tbody = getElement("dietTableBody");
@@ -763,7 +1471,11 @@ function renderDietTable() {
             <td>${formatDate(entry.date)}</td>
             <td>${getMealTypeLabel(entry.meal_type)}</td>
             <td>${entry.description}</td>
-            <td>${entry.calories || 0}</td>
+            <td>
+              <span class="${entry.precision === 'alta' ? 'precision-high' : entry.precision === 'manual' ? 'precision-high' : entry.precision === 'moderada' ? 'precision-moderate' : 'precision-low'}">
+                ${entry.calories || 0}
+              </span>
+            </td>
             <td>${entry.protein || 0}g</td>
             <td>${entry.carbs || 0}g</td>
             <td>${entry.fat || 0}g</td>
@@ -790,15 +1502,15 @@ function renderMeasurementTable() {
         const row = document.createElement("tr");
         row.innerHTML = `
             <td>${formatDate(measurement.date)}</td>
-            <td>${measurement.weight || '-'}</td>
-            <td>${measurement.height || '-'}</td>
-            <td>${measurement.body_fat || '-'}</td>
-            <td>${measurement.muscle_mass || '-'}</td>
-            <td>${measurement.waist || '-'}</td>
-            <td>${measurement.chest || '-'}</td>
-            <td>${measurement.arm || '-'}</td>
-            <td>${measurement.thigh || '-'}</td>
-            <td>${measurement.notes || '-'}</td>
+            <td>${measurement.weight || '-'}
+            <td>${measurement.height || '-'}
+            <td>${measurement.body_fat || '-'}
+            <td>${measurement.muscle_mass || '-'}
+            <td>${measurement.waist || '-'}
+            <td>${measurement.chest || '-'}
+            <td>${measurement.arm || '-'}
+            <td>${measurement.thigh || '-'}
+            <td>${measurement.notes || '-'}
             <td>
                 <button onclick="editMeasurement(${measurement.id})" class="btn-edit">
                     <i class="fas fa-edit"></i>
@@ -812,119 +1524,18 @@ function renderMeasurementTable() {
     });
 }
 
-async function handleDietSubmit(e) {
-    e.preventDefault();
-    
-    const id = getElement("dietId")?.value;
-    const date = getElement("dietDate")?.value;
-    const mealType = getElement("dietMealType")?.value;
-    const description = getElement("dietDescription")?.value.trim();
-    const notes = getElement("dietNotes")?.value.trim();
-    
-    if (!date || !mealType || !description) {
-        showMessage("Preencha todos os campos obrigatórios", "error");
-        return;
-    }
-    
-    try {
-        const method = id ? "PUT" : "POST";
-        const url = id ? `${API_BASE}/diet/${id}` : `${API_BASE}/diet`;
-        
-        const response = await fetch(url, {
-            method: method,
-            headers: {
-                "Content-Type": "application/json"
-            },
-            credentials: "include",
-            body: JSON.stringify({
-                date: date,
-                meal_type: mealType,
-                description: description,
-                notes: notes
-            })
-        });
-        
-        if (response.ok) {
-            closeDietModal();
-            loadDietEntries();
-            showMessage(id ? "Registro atualizado!" : "Registro adicionado!", "success");
-        } else {
-            const data = await response.json();
-            showMessage(data.error || "Erro ao salvar", "error");
-        }
-    } catch (error) {
-        console.error("Diet submit error:", error);
-        showMessage("Erro de conexão", "error");
-    }
-}
-
-async function handleMeasurementSubmit(e) {
-    e.preventDefault();
-    
-    const id = getElement("measurementId")?.value;
-    const date = getElement("measurementDate")?.value;
-    const weight = getElement("measurementWeight")?.value;
-    const height = getElement("measurementHeight")?.value;
-    const bodyFat = getElement("measurementBodyFat")?.value;
-    const muscleMass = getElement("measurementMuscleMass")?.value;
-    const waist = getElement("measurementWaist")?.value;
-    const chest = getElement("measurementChest")?.value;
-    const arm = getElement("measurementArm")?.value;
-    const thigh = getElement("measurementThigh")?.value;
-    const notes = getElement("measurementNotes")?.value.trim();
-    
-    if (!date) {
-        showMessage("Data é obrigatória", "error");
-        return;
-    }
-    
-    try {
-        const method = id ? "PUT" : "POST";
-        const url = id ? `${API_BASE}/measurements/${id}` : `${API_BASE}/measurements`;
-        
-        const response = await fetch(url, {
-            method: method,
-            headers: {
-                "Content-Type": "application/json"
-            },
-            credentials: "include",
-            body: JSON.stringify({
-                date: date,
-                weight: weight ? parseFloat(weight) : null,
-                height: height ? parseFloat(height) : null,
-                body_fat: bodyFat ? parseFloat(bodyFat) : null,
-                muscle_mass: muscleMass ? parseFloat(muscleMass) : null,
-                waist: waist ? parseFloat(waist) : null,
-                chest: chest ? parseFloat(chest) : null,
-                arm: arm ? parseFloat(arm) : null,
-                thigh: thigh ? parseFloat(thigh) : null,
-                notes: notes
-            })
-        });
-        
-        if (response.ok) {
-            closeMeasurementModal();
-            loadMeasurements();
-            showMessage(id ? "Medidas atualizadas!" : "Medidas adicionadas!", "success");
-        } else {
-            const data = await response.json();
-            showMessage(data.error || "Erro ao salvar", "error");
-        }
-    } catch (error) {
-        console.error("Measurement submit error:", error);
-        showMessage("Erro de conexão", "error");
-    }
-}
 
 async function handleProfileSubmit(e) {
     e.preventDefault();
-    
+
     const age = getElement("profileAge")?.value;
     const gender = getElement("profileGender")?.value;
     const goal = getElement("profileGoal")?.value;
     const activity = getElement("profileActivity")?.value;
     const restrictions = getElement("profileRestrictions")?.value.trim();
-    
+    const weight = getElement("profileWeight")?.value;
+    const height = getElement("profileHeight")?.value;
+
     try {
         const response = await fetch(`${API_BASE}/profile`, {
             method: "POST",
@@ -937,20 +1548,22 @@ async function handleProfileSubmit(e) {
                 gender: gender,
                 goal: goal,
                 activity_level: activity,
-                dietary_restrictions: restrictions
+                dietary_restrictions: restrictions,
+                weight: weight ? parseFloat(weight) : null,
+                height: height ? parseFloat(height) : null
             })
         });
-        
+
         if (response.ok) {
             closeProfileModal();
-            showMessage("Perfil salvo com sucesso!", "success");
+            showToast("Perfil salvo com sucesso!", "success");
         } else {
             const data = await response.json();
-            showMessage(data.error || "Erro ao salvar perfil", "error");
+            showToast(data.error || "Erro ao salvar perfil", "error");
         }
     } catch (error) {
         console.error("Profile submit error:", error);
-        showMessage("Erro de conexão", "error");
+        showToast("Erro de conexão", "error");
     }
 }
 
@@ -965,28 +1578,30 @@ async function editDietEntry(id) {
     getElement("dietDescription").value = entry.description;
     getElement("dietNotes").value = entry.notes || "";
     
+    // Preenche os campos de macros se existirem
+    getElement("dietCalories").value = entry.calories || "";
+    getElement("dietProtein").value = entry.protein || "";
+    getElement("dietCarbs").value = entry.carbs || "";
+    getElement("dietFat").value = entry.fat || "";
+
     getElement("dietModalTitle").textContent = "Editar Registro de Dieta";
     getElement("dietModal").style.display = "block";
 }
 
 async function deleteDietEntry(id) {
-    if (!confirm("Tem certeza que deseja excluir este registro?")) return;
-    
+    if (!confirm("Tem certeza que deseja excluir esta refeição?")) return;
+    showToast("Excluindo...", "info");
     try {
-        const response = await fetch(`${API_BASE}/diet/${id}`, {
-            method: "DELETE",
-            credentials: "include"
-        });
-        
+        const response = await fetch(`/api/diet/${id}`, { method: "DELETE", credentials: 'include' });
         if (response.ok) {
+            showToast("Refeição excluída!", "success");
             loadDietEntries();
-            showMessage("Registro excluído!", "success");
         } else {
-            showMessage("Erro ao excluir", "error");
+            const errorData = await response.json();
+            showToast(errorData.error || "Erro ao excluir!", "error");
         }
-    } catch (error) {
-        console.error("Delete error:", error);
-        showMessage("Erro de conexão", "error");
+    } catch (e) {
+        showToast("Erro de conexão!", "error");
     }
 }
 
@@ -1012,22 +1627,18 @@ async function editMeasurement(id) {
 
 async function deleteMeasurement(id) {
     if (!confirm("Tem certeza que deseja excluir esta medição?")) return;
-    
+    showToast("Excluindo...", "info");
     try {
-        const response = await fetch(`${API_BASE}/measurements/${id}`, {
-            method: "DELETE",
-            credentials: "include"
-        });
-        
+        const response = await fetch(`/api/measurements/${id}`, { method: "DELETE", credentials: 'include' });
         if (response.ok) {
+            showToast("Medição excluída!", "success");
             loadMeasurements();
-            showMessage("Medição excluída!", "success");
         } else {
-            showMessage("Erro ao excluir", "error");
+            const errorData = await response.json();
+            showToast(errorData.error || "Erro ao excluir!", "error");
         }
-    } catch (error) {
-        console.error("Delete error:", error);
-        showMessage("Erro de conexão", "error");
+    } catch (e) {
+        showToast("Erro de conexão!", "error");
     }
 }
 
@@ -1041,7 +1652,6 @@ function clearDietFilters() {
     
     loadDietEntries();
 }
-
 function clearMeasurementFilters() {
     const startDate = getElement("measurementStartDate");
     const endDate = getElement("measurementEndDate");
@@ -1062,7 +1672,7 @@ function clearChat() {
                 <i class="fas fa-robot"></i>
             </div>
             <div class="message-content">
-                <p>Olá! 👋 Sou seu assistente fitness pessoal. Posso ajudar com dicas de nutrição, treino e uso do site. Como posso ajudá-lo hoje?</p>
+                <p>Olá! 👋 Sou seu assistente fitness pessoal. Como admin, posso gerar planos de dieta e treino. Como posso ajudá-lo hoje?</p>
             </div>
         </div>
     `;
@@ -1091,9 +1701,47 @@ async function checkUserProfile() {
     }
 }
 
-// Carrega vozes quando disponíveis
-if ('speechSynthesis' in window) {
-    speechSynthesis.onvoiceschanged = function() {
-        // Vozes disponíveis
-    };
+// --- SUGESTÕES PENDENTES (REMOVIDAS PARA ESTE ESCOPO) ---
+// As funções loadPendingDietSuggestions, loadPendingWorkoutSuggestions,
+async function loadPendingDietSuggestions() {
+    const container = getElement('pendingDietSuggestions');
+    if (!container) return;
+    // container.innerHTML = '<div class="pending-loading">Carregando sugestões...</div>';
+    // try {
+    //     const res = await fetch(`${API_BASE}/suggestions/diet`, { credentials: 'include' });
+    //     if (!res.ok) throw new Error('Erro ao buscar sugestões');
+    //     const suggestions = await res.json();
+    //     if (!Array.isArray(suggestions) || suggestions.length === 0) {
+    //         container.innerHTML = '<div class="pending-empty">Nenhuma sugestão pendente.</div>';
+    //         return;
+    //     }
+    //     container.innerHTML = suggestions.map(renderSuggestionCard('diet')).join('');
+    // } catch (e) {
+    //     container.innerHTML = '<div class="pending-error">Erro ao carregar sugestões.</div>';
+    // }
 }
+
+async function loadPendingWorkoutSuggestions() {
+    const container = getElement('pendingWorkoutSuggestions');
+    if (!container) return;
+    // container.innerHTML = '<div class="pending-loading">Carregando sugestões...</div>';
+    // try {
+    //     const res = await fetch(`${API_BASE}/suggestions/workout`, { credentials: 'include' });
+    //     if (!res.ok) throw new Error('Erro ao buscar sugestões');
+    //     const suggestions = await res.json();
+    //     if (!Array.isArray(suggestions) || suggestions.length === 0) {
+    //         container.innerHTML = '<div class="pending-empty">Nenhuma sugestão pendente.</div>';
+    //         return;
+    //     }
+    //     container.innerHTML = suggestions.map(renderSuggestionCard('workout')).join('');
+    // } catch (e) {
+    //     container.innerHTML = '<div class="pending-error">Erro ao carregar sugestões.</div>';
+    // }
+}
+// renderSuggestionCard, handleApproveSuggestion, handleEditSuggestion,
+// handleCancelSuggestion, removeSuggestionCard foram removidas pois
+// não há backend para elas neste escopo.
+
+// Chamar ao carregar as abas (ajustado para os novos planos)
+// Esta função showTab já foi definida acima, esta é apenas uma nota.
+// A lógica de carregamento de planos já está dentro da showTab.

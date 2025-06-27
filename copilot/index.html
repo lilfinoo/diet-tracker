@@ -6,20 +6,18 @@
     <title>Diet Tracker - Controle de Dieta e Evolução</title>
     <link rel="stylesheet" href="styles.css">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.css" />
 </head>
 <body>
-    <!-- Tela de Login -->
     <div id="loginScreen" class="screen">
         <div class="login-container">
             <div class="login-card">
                 <h1><i class="fas fa-chart-line"></i> Diet Tracker</h1>
                 <p>Controle sua dieta e evolução com IA</p>
-                
                 <div class="login-tabs">
                     <button class="tab-btn active" onclick="showLogin()">Entrar</button>
                     <button class="tab-btn" onclick="showRegister()">Criar Conta</button>
                 </div>
-                
                 <form id="loginForm" class="auth-form">
                     <div class="form-group">
                         <input type="text" id="loginUsername" placeholder="Nome de usuário" required>
@@ -31,7 +29,6 @@
                     </div>
                     <button type="submit" class="btn-primary">Entrar</button>
                 </form>
-                
                 <form id="registerForm" class="auth-form hidden">
                     <div class="form-group">
                         <input type="text" id="registerUsername" placeholder="Nome de usuário" required>
@@ -47,13 +44,11 @@
                     </div>
                     <button type="submit" class="btn-primary">Criar Conta</button>
                 </form>
-                
                 <div id="authMessage" class="message"></div>
             </div>
         </div>
     </div>
 
-    <!-- Modal de Perfil -->
     <div id="profileModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -99,6 +94,16 @@
                     <label>Restrições Alimentares (opcional)</label>
                     <textarea id="profileRestrictions" rows="3" placeholder="Ex: vegetariano, intolerância à lactose, alergia a nozes..."></textarea>
                 </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="profileWeight">Peso (kg)</label>
+                        <input type="number" id="profileWeight" step="0.1" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="profileHeight">Altura (cm)</label>
+                        <input type="number" id="profileHeight" step="0.1" min="0">
+                    </div>
+                </div>
                 <div class="modal-actions">
                     <button type="button" onclick="skipProfile()" class="btn-secondary">Pular por Agora</button>
                     <button type="submit" class="btn-primary">Salvar Perfil</button>
@@ -107,58 +112,91 @@
         </div>
     </div>
 
-    <!-- Tela Principal -->
     <div id="mainScreen" class="screen hidden">
-        <!-- Header -->
-        <header class="header">
+        <div id="workout_plansTab" class="tab-content hidden">
+            <div class="content-header">
+                <h2><i class="fas fa-dumbbell"></i> Meus Planos de Treino</h2>
+                <p>Aqui ficam os planos de treino gerados pela IA. Peça um novo no chat!</p>
+            </div>
+            <div class="table-container">
+                <table id="workoutPlansTable" class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Título</th><th>Descrição</th><th>Criado em</th><th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="workoutPlansTableBody"></tbody>
+                </table>
+            </div>
+        <div id="viewDietPlanModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="viewDietPlanTitle">Plano de Dieta</h3>
+                    <button onclick="closeViewDietPlanModal()" class="btn-close">&times;</button>
+                </div>
+                <div id="viewDietPlanDetails" class="plan-details-container"></div>
+                <div class="modal-actions">
+                    <button onclick="closeViewDietPlanModal()" class="btn-secondary">Fechar</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="viewWorkoutPlanModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="viewWorkoutPlanTitle">Plano de Treino</h3>
+                    <button onclick="closeViewWorkoutPlanModal()" class="btn-close">&times;</button>
+                </div>
+                <div id="viewWorkoutPlanDetails" class="plan-details-container"></div>
+                <div class="modal-actions">
+                    <button onclick="closeViewWorkoutPlanModal()" class="btn-secondary">Fechar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+<header class="header">
             <div class="header-content">
                 <h1><i class="fas fa-chart-line"></i> Diet Tracker</h1>
                 <div class="user-info">
                     <span id="welcomeUser">Bem-vindo!</span>
+                    <button id="editProfileBtn" class="btn-profile">
+                        <i class="fas fa-user-edit"></i> Editar Perfil
+                    </button>
                     <button onclick="logout()" class="btn-logout">
                         <i class="fas fa-sign-out-alt"></i> Sair
+                    </button>
+                    <button id="adminPanelBtn" class="btn-admin hidden" onclick="window.location.href='/admin'">
+                        <i class="fas fa-shield-alt"></i> Acessar Painel
                     </button>
                 </div>
             </div>
         </header>
 
-        <!-- Navigation -->
         <nav class="nav-tabs">
-            <button class="nav-btn active" onclick="showTab('diet')">
-                <i class="fas fa-utensils"></i> Dieta
-            </button>
-            <button class="nav-btn" onclick="showTab('measurements')">
-                <i class="fas fa-weight"></i> Medidas
-            </button>
-            <button class="nav-btn" onclick="showTab('stats')">
-                <i class="fas fa-chart-bar"></i> Estatísticas
-            </button>
-            <button class="nav-btn" onclick="showTab('chat')">
-                <i class="fas fa-robot"></i> Assistente IA
-            </button>
+            <button class="nav-btn active" onclick="showTab('diet')"><i class="fas fa-utensils"></i> Diário Alimentar</button>
+            <button class="nav-btn" onclick="showTab('diet_plans')"><i class="fas fa-calendar-alt"></i> Planos de Dieta</button>
+            <button class="nav-btn" onclick="showTab('workout_plans')"><i class="fas fa-dumbbell"></i> Planos de Treino</button>
+            <button class="nav-btn" onclick="showTab('measurements')"><i class="fas fa-weight"></i> Medidas</button>
+            <button class="nav-btn" onclick="showTab('stats')"><i class="fas fa-chart-bar"></i> Estatísticas</button>
+            <button class="nav-btn" onclick="showTab('chat')"><i class="fas fa-robot"></i> Assistente IA</button>
         </nav>
 
-        <!-- Chat Tab -->
         <div id="chatTab" class="tab-content hidden">
             <div class="content-header">
                 <h2><i class="fas fa-robot"></i> Assistente Fitness IA</h2>
-                <button onclick="clearChat()" class="btn-secondary">
-                    <i class="fas fa-trash"></i> Limpar Chat
-                </button>
+                <button onclick="clearChat()" class="btn-secondary"><i class="fas fa-trash"></i> Limpar Chat</button>
             </div>
-            
             <div class="chat-container">
                 <div id="chatMessages" class="chat-messages">
                     <div class="chat-message bot-message">
-                        <div class="message-avatar">
-                            <i class="fas fa-robot"></i>
-                        </div>
-                        <div class="message-content">
-                            <p>Olá! 👋 Sou seu assistente fitness pessoal. Posso ajudar com dicas de nutrição, treino e uso do site. Como posso ajudá-lo hoje?</p>
-                        </div>
+                        <div class="message-avatar"><i class="fas fa-robot"></i></div>
+                        <div class="message-content"><p>Olá! 👋 Sou seu assistente fitness pessoal. Como posso ajudá-lo hoje?</p></div>
                     </div>
                 </div>
-                
+                <div class="chat-quick-actions" style="display:flex; gap:1rem; justify-content:center; margin-bottom:1rem;">
+                    <button type="button" class="btn" id="quickDietBtn"><i class="fas fa-apple-alt"></i> Dieta Personalizada</button>
+                    <button type="button" class="btn" id="quickWorkoutBtn"><i class="fas fa-dumbbell"></i> Treino Personalizado</button>
+                </div>
                 <div class="chat-input-container">
                     <div class="audio-controls">
                         <button id="voiceButton" class="voice-btn" title="Falar com a IA">🎤</button>
@@ -170,85 +208,86 @@
             </div>
         </div>
 
-        <!-- Diet Tab -->
         <div id="dietTab" class="tab-content">
             <div class="content-header">
-                <h2><i class="fas fa-utensils"></i> Controle de Dieta</h2>
-                <button onclick="showAddDietModal()" class="btn-add">
-                    <i class="fas fa-plus"></i> Adicionar
-                </button>
+                <h2><i class="fas fa-utensils"></i> Diário Alimentar</h2>
+                <button onclick="showAddDietModal()" class="btn-add"><i class="fas fa-plus"></i> Adicionar Refeição</button>
             </div>
-            
             <div class="filters">
                 <input type="date" id="dietStartDate" onchange="loadDietEntries()">
                 <input type="date" id="dietEndDate" onchange="loadDietEntries()">
                 <button onclick="clearDietFilters()" class="btn-secondary">Limpar Filtros</button>
             </div>
-            
             <div class="table-container">
                 <table id="dietTable" class="data-table">
                     <thead>
                         <tr>
-                            <th>Data</th>
-                            <th>Refeição</th>
-                            <th>Descrição</th>
-                            <th>Calorias</th>
-                            <th>Proteínas</th>
-                            <th>Carboidratos</th>
-                            <th>Gorduras</th>
-                            <th>Ações</th>
+                            <th>Data</th><th>Refeição</th><th>Descrição</th><th>Calorias</th><th>Proteínas</th><th>Carboidratos</th><th>Gorduras</th><th>Ações</th>
                         </tr>
                     </thead>
-                    <tbody id="dietTableBody">
-                    </tbody>
+                    <tbody id="dietTableBody"></tbody>
                 </table>
             </div>
         </div>
 
-        <!-- Measurements Tab -->
+        <div id="diet_plansTab" class="tab-content hidden">
+            <div class="content-header">
+                <h2><i class="fas fa-calendar-alt"></i> Meus Planos de Dieta</h2>
+                <p>Aqui ficam os planos de dieta gerados pela IA. Peça um novo no chat!</p>
+            </div>
+            <div class="table-container">
+                <table id="dietPlansTable" class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Título</th><th>Descrição</th><th>Criado em</th><th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dietPlansTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="workout_plansTab" class="tab-content hidden">
+            <div class="content-header">
+                <h2><i class="fas fa-dumbbell"></i> Meus Planos de Treino</h2>
+                <p>Aqui ficam os planos de treino gerados pela IA. Peça um novo no chat!</p>
+            </div>
+            <div class="table-container">
+                <table id="workoutPlansTable" class="data-table">
+                    <thead>
+                        <tr>
+                           <th>Título</th><th>Descrição</th><th>Criado em</th><th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="workoutPlansTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+        
         <div id="measurementsTab" class="tab-content hidden">
             <div class="content-header">
                 <h2><i class="fas fa-weight"></i> Medidas Corporais</h2>
-                <button onclick="showAddMeasurementModal()" class="btn-add">
-                    <i class="fas fa-plus"></i> Adicionar
-                </button>
+                <button onclick="showAddMeasurementModal()" class="btn-add"><i class="fas fa-plus"></i> Adicionar</button>
             </div>
-            
             <div class="filters">
                 <input type="date" id="measurementStartDate" onchange="loadMeasurements()">
                 <input type="date" id="measurementEndDate" onchange="loadMeasurements()">
                 <button onclick="clearMeasurementFilters()" class="btn-secondary">Limpar Filtros</button>
             </div>
-            
             <div class="table-container">
                 <table id="measurementTable" class="data-table">
                     <thead>
                         <tr>
-                            <th>Data</th>
-                            <th>Peso (kg)</th>
-                            <th>Altura (cm)</th>
-                            <th>% Gordura</th>
-                            <th>Massa Muscular</th>
-                            <th>Cintura (cm)</th>
-                            <th>Peito (cm)</th>
-                            <th>Braço (cm)</th>
-                            <th>Coxa (cm)</th>
-                            <th>Observações</th>
-                            <th>Ações</th>
+                            <th>Data</th><th>Peso (kg)</th><th>Altura (cm)</th><th>% Gordura</th><th>Massa Muscular</th><th>Cintura (cm)</th><th>Peito (cm)</th><th>Braço (cm)</th><th>Coxa (cm)</th><th>Observações</th><th>Ações</th>
                         </tr>
                     </thead>
-                    <tbody id="measurementTableBody">
-                    </tbody>
+                    <tbody id="measurementTableBody"></tbody>
                 </table>
             </div>
         </div>
 
-        <!-- Stats Tab -->
         <div id="statsTab" class="tab-content hidden">
-            <div class="content-header">
-                <h2><i class="fas fa-chart-bar"></i> Estatísticas</h2>
-            </div>
-            
+            <div class="content-header"><h2><i class="fas fa-chart-bar"></i> Estatísticas</h2></div>
             <div class="stats-grid">
                 <div class="stat-card">
                     <h3>Última Medição</h3>
@@ -264,122 +303,111 @@
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Modal para Adicionar/Editar Dieta -->
-    <div id="dietModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 id="dietModalTitle">Adicionar Registro de Dieta</h3>
-                <button onclick="closeDietModal()" class="btn-close">
-                    <i class="fas fa-times"></i>
-                </button>
+        <div id="dietModal" class="modal">
+            <div class="modal-content">
+                <h2 id="dietModalTitle"><i class="fas fa-utensils"></i> Registro de Dieta</h2>
+                <form id="dietForm">
+                    <input type="hidden" id="dietId">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="dietDate"><i class="fas fa-calendar-alt"></i> Data:</label>
+                            <input type="date" id="dietDate" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="dietMealType"><i class="fas fa-clock"></i> Refeição:</label>
+                            <select id="dietMealType" required>
+                                <option value="café">Café da Manhã</option><option value="lanche_manha">Lanche da Manhã</option><option value="almoço">Almoço</option><option value="lanche_tarde">Lanche da Tarde</option><option value="jantar">Jantar</option><option value="ceia">Ceia</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="dietDescription"><i class="fas fa-pen"></i> Descrição dos alimentos:</label>
+                        <input id="dietDescription" class="awesomplete" autocomplete="off" required placeholder="Ex: 2 ovos, 1 fatia de pão integral, 1 xícara de café">
+                    </div>
+                    <div class="form-group" style="display: flex; gap: 10px; align-items: center;">
+                        <button type="button" id="generateMacrosBtn" class="btn" style="margin:0;"><span id="generateMacrosBtnText"><i class="fas fa-magic"></i> Gerar macros com IA</span><span id="generateMacrosLoading" class="hidden"><i class="fas fa-spinner fa-spin"></i></span></button>
+                        <span id="precisionBadge" class="precision-high" style="margin-left:10px;">Alta precisão</span>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label for="dietCalories"><i class="fas fa-fire"></i> Calorias (kcal):</label><input type="number" id="dietCalories" step="1" min="0"></div>
+                        <div class="form-group"><label for="dietProtein"><i class="fas fa-drumstick-bite"></i> Proteína (g):</label><input type="number" id="dietProtein" step="0.1" min="0"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label for="dietCarbs"><i class="fas fa-bread-slice"></i> Carboidratos (g):</label><input type="number" id="dietCarbs" step="0.1" min="0"></div>
+                        <div class="form-group"><label for="dietFat"><i class="fas fa-cheese"></i> Gorduras (g):</label><input type="number" id="dietFat" step="0.1" min="0"></div>
+                    </div>
+                    <div class="form-group"><label for="dietNotes"><i class="fas fa-sticky-note"></i> Observações:</label><textarea id="dietNotes" placeholder="Ex: sem açúcar, pão sem glúten..."></textarea></div>
+                    <div class="modal-actions">
+                        <button type="button" onclick="closeDietModal()" class="btn-secondary">Cancelar</button>
+                        <button id="dietSaveBtn" type="submit" class="btn"><span>Salvar</span><span id="dietSaveLoading" class="hidden"><i class="fas fa-spinner fa-spin"></i></span></button>
+                    </div>
+                </form>
             </div>
-            <form id="dietForm">
-                <input type="hidden" id="dietId">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Data</label>
-                        <input type="date" id="dietDate" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Refeição</label>
-                        <select id="dietMealType" required>
-                            <option value="">Selecione...</option>
-                            <option value="café">Café da Manhã</option>
-                            <option value="lanche_manha">Lanche da Manhã</option>
-                            <option value="almoço">Almoço</option>
-                            <option value="lanche_tarde">Lanche da Tarde</option>
-                            <option value="jantar">Jantar</option>
-                            <option value="ceia">Ceia</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Descreva o que você comeu</label>
-                    <textarea id="dietDescription" rows="3" placeholder="Ex: 2 ovos mexidos, 1 fatia de pão integral, 1 banana média, 1 copo de leite desnatado..." required></textarea>
-                    <small>A IA calculará automaticamente as calorias e nutrientes</small>
-                </div>
-                <div class="form-group">
-                    <label>Observações (opcional)</label>
-                    <textarea id="dietNotes" rows="2" placeholder="Como se sentiu, local da refeição, etc..."></textarea>
-                </div>
-                <div class="modal-actions">
-                    <button type="button" onclick="closeDietModal()" class="btn-secondary">Cancelar</button>
-                    <button type="submit" class="btn-primary">Salvar</button>
-                </div>
-            </form>
         </div>
-    </div>
 
-    <!-- Modal para Adicionar/Editar Medidas -->
-    <div id="measurementModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 id="measurementModalTitle">Adicionar Medidas</h3>
-                <button onclick="closeMeasurementModal()" class="btn-close">
-                    <i class="fas fa-times"></i>
-                </button>
+        <div id="measurementModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="measurementModalTitle">Adicionar Medidas</h3><button onclick="closeMeasurementModal()" class="btn-close"><i class="fas fa-times"></i></button>
+                </div>
+                <form id="measurementForm">
+                    <input type="hidden" id="measurementId">
+                    <div class="form-group"><label>Data</label><input type="date" id="measurementDate" required></div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Peso (kg)</label><input type="number" id="measurementWeight" step="0.1"></div>
+                        <div class="form-group"><label>Altura (cm)</label><input type="number" id="measurementHeight" step="0.1"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label>% Gordura Corporal</label><input type="number" id="measurementBodyFat" step="0.1"></div>
+                        <div class="form-group"><label>Massa Muscular (kg)</label><input type="number" id="measurementMuscleMass" step="0.1"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Cintura (cm)</label><input type="number" id="measurementWaist" step="0.1"></div>
+                        <div class="form-group"><label>Peito (cm)</label><input type="number" id="measurementChest" step="0.1"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Braço (cm)</label><input type="number" id="measurementArm" step="0.1"></div>
+                        <div class="form-group"><label>Coxa (cm)</label><input type="number" id="measurementThigh" step="0.1"></div>
+                    </div>
+                    <div class="form-group"><label>Observações</label><textarea id="measurementNotes" rows="3"></textarea></div>
+                    <div class="modal-actions">
+                        <button type="button" onclick="closeMeasurementModal()" class="btn-secondary">Cancelar</button>
+                        <button id="measurementSaveBtn" type="submit" class="btn"><span>Salvar</span><span id="measurementSaveLoading" class="hidden"><i class="fas fa-spinner fa-spin"></i></span></button>
+                    </div>
+                </form>
             </div>
-            <form id="measurementForm">
-                <input type="hidden" id="measurementId">
-                <div class="form-group">
-                    <label>Data</label>
-                    <input type="date" id="measurementDate" required>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Peso (kg)</label>
-                        <input type="number" id="measurementWeight" step="0.1">
-                    </div>
-                    <div class="form-group">
-                        <label>Altura (cm)</label>
-                        <input type="number" id="measurementHeight" step="0.1">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>% Gordura Corporal</label>
-                        <input type="number" id="measurementBodyFat" step="0.1">
-                    </div>
-                    <div class="form-group">
-                        <label>Massa Muscular (kg)</label>
-                        <input type="number" id="measurementMuscleMass" step="0.1">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Cintura (cm)</label>
-                        <input type="number" id="measurementWaist" step="0.1">
-                    </div>
-                    <div class="form-group">
-                        <label>Peito (cm)</label>
-                        <input type="number" id="measurementChest" step="0.1">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Braço (cm)</label>
-                        <input type="number" id="measurementArm" step="0.1">
-                    </div>
-                    <div class="form-group">
-                        <label>Coxa (cm)</label>
-                        <input type="number" id="measurementThigh" step="0.1">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Observações</label>
-                    <textarea id="measurementNotes" rows="3"></textarea>
-                </div>
-                <div class="modal-actions">
-                    <button type="button" onclick="closeMeasurementModal()" class="btn-secondary">Cancelar</button>
-                    <button type="submit" class="btn-primary">Salvar</button>
-                </div>
-            </form>
         </div>
+        
+        <div id="viewDietPlanModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="viewDietPlanTitle">Plano de Dieta</h3>
+                    <button onclick="closeViewDietPlanModal()" class="btn-close">&times;</button>
+                </div>
+                <div id="viewDietPlanDetails" class="plan-details-container"></div>
+                <div class="modal-actions">
+                    <button onclick="closeViewDietPlanModal()" class="btn-secondary">Fechar</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="viewWorkoutPlanModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="viewWorkoutPlanTitle">Plano de Treino</h3>
+                    <button onclick="closeViewWorkoutPlanModal()" class="btn-close">&times;</button>
+                </div>
+                <div id="viewWorkoutPlanDetails" class="plan-details-container"></div>
+                <div class="modal-actions">
+                    <button onclick="closeViewWorkoutPlanModal()" class="btn-secondary">Fechar</button>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <script src="script.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.js"></script>
 </body>
 </html>
-
