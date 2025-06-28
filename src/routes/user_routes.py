@@ -7,19 +7,29 @@ import os
 import json
 import re
 
-# Decorador para exigir que o usuário seja admin
-def admin_required(f):
+# Decorador para exigir que o usuário seja adm
+def adm_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         user_id = session.get("user_id")
         if not user_id:
             return abort(403) # Proibido se não logado
         user = User.query.get(user_id)
-        if not user or not user.is_admin:
-            return abort(403) # Proibido se não for admin
+        if not user or not user.is_adm:
+            return abort(403) # Proibido se não for adm
         return f(*args, **kwargs)
     return decorated_function
 
+def ai_access_required(f):
+    @wraps(f)
+    @login_required
+    def decorated_function(*args, **kwargs):
+        # Verifica se o usuário é premium OU se ele é um moderador
+        if not (g.user.is_premium or g.user.is_adm):
+            return jsonify({'error': 'Acesso negado: Requer status Premium'}), 403
+        return f(*args, **kwargs)
+    return decorated_function
+    
 user_bp = Blueprint("user", __name__)
 
 # Decorador para exigir login
@@ -144,7 +154,7 @@ def generate_ai_response(message, user, profile):
         else:
             return "Desculpe, estou com dificuldades técnicas. Tente reformular sua pergunta."
 
-# Função para gerar planos estruturados com a IA (usada apenas por admins no chat)
+# Função para gerar planos estruturados com a IA (usada apenas por adms no chat)
 def generate_structured_plan_with_ai(message, user, profile):
     context = f"Você é um assistente fitness especializado em nutrição e treino. "
     context += f"O usuário se chama {user.username}. "
@@ -534,10 +544,10 @@ def get_stats():
         "recent_diet_entries": recent_diet_entries
     }), 200
 
-# Rotas de Chat (AGORA APENAS PARA ADMINS)
+# Rotas de Chat (AGORA APENAS PARA admS)
 @user_bp.route("/chat", methods=["POST"])
 @login_required
-@admin_required # Apenas admins podem usar o chat
+@premium_required # Apenas adms podem usar o chat
 def chat():
     user_id = session["user_id"]
     user = User.query.get(user_id)
@@ -637,7 +647,7 @@ def chat():
 
 @user_bp.route("/chat/history", methods=["GET"])
 @login_required
-@admin_required # Apenas admins podem ver o histórico de chat
+@adm_required # Apenas adms podem ver o histórico de chat
 def chat_history():
     user_id = session["user_id"]
     messages = ChatMessage.query.filter_by(user_id=user_id).order_by(ChatMessage.created_at.asc()).all()
@@ -703,13 +713,13 @@ def delete_workout_plan(plan_id):
     db.session.commit()
     return jsonify({"message": "Plano de treino excluído com sucesso"}), 200
 
-# Rotas de Admin
-@user_bp.route("/admin_dashboard", methods=["GET"])
+# Rotas de adm
+@user_bp.route("/adm_dashboard", methods=["GET"])
 @login_required
-@admin_required
-def admin_dashboard():
+@adm_required
+def adm_dashboard():
     total_users = User.query.count()
-    total_admins = User.query.filter_by(is_admin=True).count()
+    total_adms = User.query.filter_by(is_adm=True).count()
     total_banned = User.query.filter_by(is_banned=True).count()
     total_diet_entries = DietEntry.query.count()
     total_measurements = Measurement.query.count()
@@ -717,57 +727,57 @@ def admin_dashboard():
 
     return jsonify({
         "total_users": total_users,
-        "total_admins": total_admins,
+        "total_adms": total_adms,
         "total_banned": total_banned,
         "total_diet_entries": total_diet_entries,
         "total_measurements": total_measurements,
         "total_chat_messages": total_chat_messages
     }), 200
 
-@user_bp.route("/admin/users", methods=["GET"])
+@user_bp.route("/adm/users", methods=["GET"])
 @login_required
-@admin_required
+@adm_required
 def list_users():
     users = User.query.all()
     return jsonify([user.to_dict() for user in users]), 200
 
-@user_bp.route("/admin/users/<int:user_id>/ban", methods=["POST"])
+@user_bp.route("/adm/users/<int:user_id>/ban", methods=["POST"])
 @login_required
-@admin_required
+@adm_required
 def ban_user(user_id):
     user = User.query.get_or_404(user_id)
-    if user.is_admin: # Não permite banir outros admins
-        return jsonify({"error": "Não é possível banir um administrador."}), 403
+    if user.is_adm: # Não permite banir outros adms
+        return jsonify({"error": "Não é possível banir um admistrador."}), 403
     user.ban_user()
     db.session.commit()
     return jsonify({"message": f"Usuário {user.username} banido com sucesso."}), 200
 
-@user_bp.route("/admin/users/<int:user_id>/unban", methods=["POST"])
+@user_bp.route("/adm/users/<int:user_id>/unban", methods=["POST"])
 @login_required
-@admin_required
+@adm_required
 def unban_user(user_id):
     user = User.query.get_or_404(user_id)
     user.unban_user()
     db.session.commit()
     return jsonify({"message": f"Usuário {user.username} desbanido com sucesso."}), 200
 
-@user_bp.route("/admin/users/<int:user_id>/toggle_admin", methods=["POST"])
+@user_bp.route("/adm/users/<int:user_id>/toggle_adm", methods=["POST"])
 @login_required
-@admin_required
-def toggle_admin_status(user_id):
+@adm_required
+def toggle_adm_status(user_id):
     user = User.query.get_or_404(user_id)
-    # Não permite que um admin remova seus próprios privilégios de admin
-    if user.id == session["user_id"] and user.is_admin:
-        return jsonify({"error": "Você não pode remover seus próprios privilégios de administrador."}), 403
+    # Não permite que um adm remova seus próprios privilégios de adm
+    if user.id == session["user_id"] and user.is_adm:
+        return jsonify({"error": "Você não pode remover seus próprios privilégios de admistrador."}), 403
     
-    user.is_admin = not user.is_admin
+    user.is_adm = not user.is_adm
     db.session.commit()
-    status = "promovido a" if user.is_admin else "rebaixado de"
-    return jsonify({"message": f"Usuário {user.username} {status} administrador."}), 200
+    status = "promovido a" if user.is_adm else "rebaixado de"
+    return jsonify({"message": f"Usuário {user.username} {status} admistrador."}), 200
 
-@user_bp.route("/admin/recent_activity", methods=["GET"])
+@user_bp.route("/adm/recent_activity", methods=["GET"])
 @login_required
-@admin_required
+@adm_required
 def get_recent_activity():
     # Busca as 20 atividades mais recentes de dietas, medidas e chats
     recent_diet = DietEntry.query.order_by(DietEntry.created_at.desc()).limit(10).all()
