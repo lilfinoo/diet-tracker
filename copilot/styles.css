@@ -45,6 +45,9 @@ body {
     display: flex;
     align-items: center;
     gap: 1rem;
+    /* Adição para mobile */
+    flex-wrap: wrap;
+    justify-content: center;
 }
 .btn-logout, .btn-admin, .btn-profile {
     background: #fff;
@@ -475,17 +478,18 @@ input[type="number"]::-webkit-outer-spin-button {
     margin-bottom: 1rem;
 }
 
-@media (max-width: 700px) {
-    .chat-container {
-        max-width: 98vw;
-        padding: 1rem 0.2rem 0.5rem 0.2rem;
-    }
-    .message-content {
-        max-width: 90vw;
-    }
-}
 @media (max-width: 900px) {
-    .header-content, .stats-grid {
+    .header-content {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1rem;
+        padding: 1.2rem 1rem;
+    }
+    .user-info {
+        width: 100%;
+        justify-content: space-between;
+    }
+    .stats-grid {
         flex-direction: column;
         align-items: flex-start;
         gap: 1rem;
@@ -494,8 +498,30 @@ input[type="number"]::-webkit-outer-spin-button {
         flex-direction: column;
         gap: 0.5rem;
     }
+    /* Adição para garantir que os grupos de formulário ocupem a largura total */
+    .form-row .form-group {
+        width: 100%;
+        min-width: unset;
+    }
     .table-container {
         padding: 0.5rem;
+    }
+}
+@media (max-width: 700px) {
+    .chat-container {
+        max-width: 98vw;
+        padding: 1rem; /* Uniform padding for better touch experience */
+        margin: 1rem auto;
+    }
+    .message-content {
+        max-width: calc(100% - 60px); /* Adjust max-width based on container size */
+        font-size: 1rem; /* Slightly smaller font for better readability on small screens */
+    }
+    .chat-messages {
+        padding-right: 0; /* Remove right padding */
+    }
+    .chat-message {
+        margin-bottom: 1rem; /* Reduced margin */
     }
 }
 @media (max-width: 600px) {
@@ -514,7 +540,19 @@ input[type="number"]::-webkit-outer-spin-button {
         padding: 0.4rem 0.7rem;
     }
 }
+@media (max-width: 500px) {
+    .modal-content {
+        padding: 1.5rem;
+    }
+    .modal-actions {
+        flex-direction: column;
+        gap: 0.8rem;
+    }
+    .btn-logout, .btn-admin, .btn-profile {
+        width: 100%;
+        text-align: center;
+    }
+}
 
 /* Outros */
 .hidden { display: none !important; }
-
