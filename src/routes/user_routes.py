@@ -20,7 +20,7 @@ def adm_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-def ai_access_required(f):
+def premium_required(f):
     @wraps(f)
     @login_required
     def decorated_function(*args, **kwargs):
