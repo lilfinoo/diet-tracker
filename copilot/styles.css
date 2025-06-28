@@ -526,7 +526,7 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 @media (max-width: 600px) {
     .modal-content {
-        padding: 1rem 0.5rem;
+        padding: 1rem 0.5rem; /* Ajuste o padding para telas menores */
     }
     .header h1 {
         font-size: 1.2rem;
@@ -542,7 +542,7 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 @media (max-width: 500px) {
     .modal-content {
-        padding: 1.5rem;
+        padding: 1rem; /* Padding uniforme e menor para telas muito pequenas */
     }
     .modal-actions {
         flex-direction: column;
