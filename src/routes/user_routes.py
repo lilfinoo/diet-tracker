@@ -25,7 +25,7 @@ def premium_required(f):
     @login_required
     def decorated_function(*args, **kwargs):
         # Verifica se o usuário é premium OU se ele é um moderador
-        if not (g.user.is_premium or g.user.is_adm):
+        if not (g.user.is_premium):
             return jsonify({'error': 'Acesso negado: Requer status Premium'}), 403
         return f(*args, **kwargs)
     return decorated_function
