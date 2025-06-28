@@ -14,8 +14,8 @@ class User(db.Model):
     is_banned = db.Column(db.Boolean, default=False, nullable=False)
     banned_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    is_admin = db.Column(db.Boolean, default=False, nullable=False)
+    is_premium = db.Column(db.Boolean, default=False, nullable=False)
+    is_adm = db.Column(db.Boolean, default=False, nullable=False)
 
     # Relacionamentos
     diet_entries = db.relationship("DietEntry", backref="user", lazy=True, cascade="all, delete-orphan")
