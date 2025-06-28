@@ -248,6 +248,9 @@ input[type="number"]::-webkit-outer-spin-button {
     box-shadow: 0 4px 24px rgba(0,0,0,0.08);
     position: relative;
     animation: modalFadeIn 0.3s;
+    max-height: 90vh; /* Limita a altura máxima do modal a 90% da altura da viewport */
+    overflow-y: auto; /* Adiciona uma barra de rolagem vertical se o conteúdo exceder a altura máxima */
+    -webkit-overflow-scrolling: touch;
 }
 .modal-header {
     display: flex;
