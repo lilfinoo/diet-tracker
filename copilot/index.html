@@ -33,23 +33,20 @@
                         </button>
                     </div>
                     
-                    <!-- FORMULÁRIO DE LOGIN CORRIGIDO -->
-                    <form id="loginForm" class="auth-form" method="POST" action="/api/login">
+                    <form id="loginForm" class="auth-form">
                         <div class="form-group">
                             <label for="loginUsername">
                                 <i class="fas fa-user"></i>
                                 Nome de usuário
                             </label>
-                            <!-- Adicionado o atributo name="username" -->
-                            <input type="text" id="loginUsername" name="username" placeholder="Digite seu nome de usuário" required>
+                            <input type="text" id="loginUsername" placeholder="Digite seu nome de usuário" required>
                         </div>
                         <div class="form-group">
                             <label for="loginPassword">
                                 <i class="fas fa-lock"></i>
                                 Senha
                             </label>
-                            <!-- Adicionado o atributo name="password" -->
-                            <input type="password" id="loginPassword" name="password" placeholder="Digite sua senha" required>
+                            <input type="password" id="loginPassword" placeholder="Digite sua senha" required>
                         </div>
                         <button type="submit" class="btn-primary">
                             <i class="fas fa-sign-in-alt"></i>
@@ -57,31 +54,27 @@
                         </button>
                     </form>
                     
-                    <!-- FORMULÁRIO DE CADASTRO CORRIGIDO -->
-                    <form id="registerForm" class="auth-form hidden" method="POST" action="/api/register">
+                    <form id="registerForm" class="auth-form hidden">
                         <div class="form-group">
                             <label for="registerUsername">
                                 <i class="fas fa-user"></i>
                                 Nome de usuário
                             </label>
-                            <!-- Adicionado o atributo name="username" -->
-                            <input type="text" id="registerUsername" name="username" placeholder="Escolha um nome de usuário" required>
+                            <input type="text" id="registerUsername" placeholder="Escolha um nome de usuário" required>
                         </div>
                         <div class="form-group">
                             <label for="registerPassword">
                                 <i class="fas fa-lock"></i>
                                 Senha
                             </label>
-                            <!-- Adicionado o atributo name="password" -->
-                            <input type="password" id="registerPassword" name="password" placeholder="Crie uma senha segura" required>
+                            <input type="password" id="registerPassword" placeholder="Crie uma senha segura" required>
                         </div>
                         <div class="form-group">
                             <label for="confirmPassword">
                                 <i class="fas fa-lock"></i>
                                 Confirmar senha
                             </label>
-                            <!-- Opcional: Adicionado name="confirm_password" se o backend validar -->
-                            <input type="password" id="confirmPassword" name="confirm_password" placeholder="Confirme sua senha" required>
+                            <input type="password" id="confirmPassword" placeholder="Confirme sua senha" required>
                         </div>
                         <button type="submit" class="btn-primary">
                             <i class="fas fa-user-plus"></i>
@@ -95,7 +88,6 @@
         </div>
     </div>
 
-    <!-- O restante do seu HTML permanece o mesmo -->
     <div id="profileModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -262,7 +254,7 @@
                 <table id="workoutPlansTable" class="data-table">
                     <thead>
                         <tr>
-                            <th>Título</th><th>Descrição</th><th>Criado em</th><th>Ações</th>
+                           <th>Título</th><th>Descrição</th><th>Criado em</th><th>Ações</th>
                         </tr>
                     </thead>
                     <tbody id="workoutPlansTableBody"></tbody>
@@ -355,6 +347,13 @@
                             <label for="dietFat">Gorduras (g)</label>
                             <input type="number" id="dietFat" step="0.1" min="0">
                         </div>
+                    </div>
+                    <div class="form-group">
+                        <button type="button" class="btn-secondary" id="generateMacrosBtn">
+                            <span id="generateMacrosBtnText"><i class="fas fa-robot"></i> Gerar Macros com IA</span>
+                            <span id="generateMacrosLoading" class="hidden"><i class="fas fa-spinner fa-spin"></i> Gerando...</span>
+                        </button>
+                        <span id="precisionBadge" class="precision-low"></span>
                     </div>
                     <div class="modal-actions">
                         <button type="button" onclick="closeDietModal()" class="btn-secondary">Cancelar</button>
@@ -457,3 +456,4 @@
     <script src="script.js"></script>
 </body>
 </html>
+
