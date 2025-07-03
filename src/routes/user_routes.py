@@ -22,10 +22,10 @@ def admin_required(f):
 
 def premium_required(f):
     @wraps(f)
-    @login_required
+    # Não precisa mais do @login_required aqui dentro
     def decorated_function(*args, **kwargs):
-        # Verifica se o usuário é premium OU se ele é um moderador
-        if not (g.user.is_premium):
+        # Agora g.user é garantido pelo @login_required na rota
+        if not g.user.is_premium:
             return jsonify({'error': 'Acesso negado: Requer status Premium'}), 403
         return f(*args, **kwargs)
     return decorated_function
@@ -36,8 +36,18 @@ user_bp = Blueprint("user", __name__)
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if "user_id" not in session:
+        user_id = session.get("user_id")
+        if user_id is None:
             return jsonify({"error": "Login necessário"}), 401
+        
+        # Carrega o usuário e anexa ao 'g'
+        g.user = User.query.get(user_id)
+
+        if g.user is None:
+            # Caso o user_id na sessão seja inválido
+            session.pop("user_id", None)
+            return jsonify({"error": "Usuário não encontrado"}), 401
+            
         return f(*args, **kwargs)
     return decorated_function
 
@@ -546,15 +556,18 @@ def get_stats():
 
 # Rotas de Chat (AGORA APENAS PARA adminS)
 @user_bp.route("/chat", methods=["POST"])
-@login_required
-@premium_required # Apenas admins podem usar o chat
+@login_required   # 2. Executa primeiro, carrega g.user
+@premium_required # 1. Executa depois, já pode usar g.user com segurança
 def chat():
-    user_id = session["user_id"]
-    user = User.query.get(user_id)
-    profile = UserProfile.query.filter_by(user_id=user_id).first()
+    # user_id = session["user_id"] # Não precisa mais
+    # user = User.query.get(user_id) # Não precisa mais, use g.user
+
+    # g.user já está disponível graças ao @login_required
+    user = g.user 
+    profile = UserProfile.query.filter_by(user_id=user.id).first()
     data = request.json
     message = data.get("message")
-    
+
     if not message:
         return jsonify({"error": "Mensagem vazia"}), 400
     
