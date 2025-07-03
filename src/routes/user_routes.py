@@ -652,7 +652,7 @@ def chat():
         response_text = generate_ai_response(message, user, profile)
     
     # Salva a mensagem e a resposta no histórico do chat
-    new_chat_message = ChatMessage(user_id=user_id, message=message, response=response_text)
+    new_chat_message = ChatMessage(user_id=user.id, message=message, response=response_text)
     db.session.add(new_chat_message)
     db.session.commit()
     
