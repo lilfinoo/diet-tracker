@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request, session, redirect, url_for, abort
+from flask import Blueprint, jsonify, request, session, redirect, url_for, abort, g
 from src.models.user import User, DietEntry, Measurement, UserProfile, ChatMessage, db, WorkoutPlan, WorkoutExercise, DietPlan, DietPlanMeal # Importa todos os modelos
 from datetime import datetime, date, timedelta
 from functools import wraps
