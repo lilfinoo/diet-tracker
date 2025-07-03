@@ -333,7 +333,7 @@ def update_profile():
 @user_bp.route("/diet", methods=["POST"])
 @login_required
 def add_diet_entry():
-    user_id = session["user_id"]
+    user = g.user
     data = request.json
     
     date_str = data.get("date")
@@ -354,7 +354,7 @@ def add_diet_entry():
         return jsonify({"error": "Formato de data inválido. Use YYYY-MM-DD"}), 400
     
     new_entry = DietEntry(
-        user_id=user_id,
+        user_id=user.id,
         date=entry_date,
         meal_type=meal_type,
         description=description,
