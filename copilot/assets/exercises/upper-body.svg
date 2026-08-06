@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" fill="none">
+  <defs><linearGradient id="bg" x1="21" y1="17" x2="294" y2="209" gradientUnits="userSpaceOnUse"><stop stop-color="#1A2945"/><stop offset="1" stop-color="#0B131F"/></linearGradient><linearGradient id="accent" x1="112" y1="58" x2="215" y2="166" gradientUnits="userSpaceOnUse"><stop stop-color="#B8C8FF"/><stop offset="1" stop-color="#6687E8"/></linearGradient></defs>
+  <rect width="320" height="220" rx="24" fill="url(#bg)"/><circle cx="269" cy="41" r="63" fill="#9BB9FF" fill-opacity=".1"/><circle cx="39" cy="196" r="69" fill="#5EE6A8" fill-opacity=".06"/>
+  <path d="M48 179H272" stroke="#B4C6EA" stroke-opacity=".22" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="156" cy="62" r="18" fill="#F2C5A0"/><path d="M141 82C151 73 169 73 179 84L189 130L126 130L141 82Z" fill="url(#accent)"/>
+  <path d="M142 89L104 111L74 104" stroke="#F2C5A0" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/><path d="M178 89L215 111L247 104" stroke="#F2C5A0" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M125 130L112 169" stroke="#B8C8FF" stroke-width="15" stroke-linecap="round"/><path d="M187 130L201 169" stroke="#B8C8FF" stroke-width="15" stroke-linecap="round"/>
+  <rect x="54" y="96" width="18" height="17" rx="4" fill="#92A8CC"/><rect x="248" y="96" width="18" height="17" rx="4" fill="#92A8CC"/><path d="M47 99H54M72 99H79M241 99H248M266 99H273" stroke="#D6E2FF" stroke-width="4" stroke-linecap="round"/>
+  <text x="26" y="37" fill="#D8E3FF" font-family="Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="2">UPPER BODY</text>
+</svg>

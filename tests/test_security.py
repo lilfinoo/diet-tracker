@@ -1,0 +1,73 @@
+import pytest
+
+from src.config import ProductionConfig
+
+
+def _register(client, username="alice", password="strong-password"):
+    return client.post("/api/register", json={"username": username, "password": password})
+
+
+def _login(client, username="alice", password="strong-password"):
+    return client.post("/api/login", json={"username": username, "password": password})
+
+
+def test_register_rejects_weak_password(client):
+    assert _register(client, password="short").status_code == 400
+    assert _register(client, password="").status_code == 400
+
+
+def test_register_rejects_oversized_password(client):
+    assert _register(client, password="x" * 129).status_code == 400
+
+
+def test_register_rejects_long_username(client):
+    assert _register(client, username="a" * 81).status_code == 400
+
+
+def test_admin_forbidden_returns_json(client):
+    assert _register(client, "regular").status_code == 201
+    response = client.get("/api/admin/dashboard")
+    assert response.status_code == 403
+    assert response.is_json
+    assert "error" in response.get_json()
+
+
+def test_rate_limit_exceeded_returns_429(client, app):
+    app.config["RATE_LIMITS"] = {"register": (3, 60), "login": (100, 60), "ai": (100, 60)}
+    responses = [_register(client, f"user{i}", "strong-password") for i in range(4)]
+    assert responses[-1].status_code == 429
+    assert responses[-1].is_json
+
+
+def test_diet_field_length_limits(client):
+    assert _register(client).status_code == 201
+    long_description = client.post("/api/diet", json={
+        "date": "2026-08-05", "meal_type": "Almoço", "description": "x" * 2001,
+    })
+    assert long_description.status_code == 400
+    long_meal_type = client.post("/api/diet", json={
+        "date": "2026-08-05", "meal_type": "m" * 51, "description": "Arroz",
+    })
+    assert long_meal_type.status_code == 400
+
+
+def test_profile_rejects_invalid_age(client):
+    assert _register(client).status_code == 201
+    assert client.post("/api/profile", json={"age": 999}).status_code == 400
+    assert client.post("/api/profile", json={"age": -1}).status_code == 400
+    assert client.post("/api/profile", json={"age": 30, "weight": 70}).status_code == 200
+
+
+def test_production_config_requires_gemini_key(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://example/db")
+    monkeypatch.setattr(ProductionConfig, "SECRET_KEY", "prod-secret")
+    monkeypatch.setattr(ProductionConfig, "GEMINI_API_KEY", None)
+    with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
+        ProductionConfig.validate()
+
+
+def test_production_config_accepts_complete_env(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://example/db")
+    monkeypatch.setattr(ProductionConfig, "SECRET_KEY", "prod-secret")
+    monkeypatch.setattr(ProductionConfig, "GEMINI_API_KEY", "fake-key")
+    ProductionConfig.validate()

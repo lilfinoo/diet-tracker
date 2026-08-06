@@ -1,0 +1,3342 @@
+[
+  {
+    "key": "agachamento_livre",
+    "name": "Agachamento livre",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 73.68,
+        "wger_id": 977,
+        "names": [
+          "box squat",
+          "sentadilla al cajon",
+          "squat box"
+        ],
+        "has_ai_image": true
+      },
+      {
+        "score": 60.87,
+        "wger_id": 1638,
+        "names": [
+          "barbell clean and press",
+          "cargada y press con barra",
+          "epaule developpe a la barre",
+          "umsetzen und drucken mit der langhantel"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 60.0,
+        "wger_id": 1963,
+        "names": [
+          "3 1 1 squat",
+          "langsame kniebeuge",
+          "sentadilla lenta",
+          "slow squat",
+          "squat lent",
+          "tempo squat"
+        ],
+        "has_ai_image": true
+      }
+    ]
+  },
+  {
+    "key": "agachamento_goblet",
+    "name": "Agachamento goblet",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 58.82,
+        "wger_id": 184,
+        "names": [
+          "deadlift",
+          "deadlifts",
+          "kreuzheben",
+          "levantamento terra",
+          "peso muerto convencional",
+          "souleves de terre",
+          "stacco"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 56.0,
+        "wger_id": 297,
+        "names": [
+          "barchetta",
+          "hollow hold"
+        ],
+        "has_ai_image": true
+      },
+      {
+        "score": 53.33,
+        "wger_id": 694,
+        "names": [
+          "aufrechtes rudern mit kurzhanteln",
+          "remo al menton con mancuernas",
+          "remo vertical",
+          "tirage menton avec halteres",
+          "upright row w dumbbells"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "agachamento_corporal",
+    "name": "Agachamento corporal",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 57.89,
+        "wger_id": 184,
+        "names": [
+          "deadlift",
+          "deadlifts",
+          "kreuzheben",
+          "levantamento terra",
+          "peso muerto convencional",
+          "souleves de terre",
+          "stacco"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 55.0,
+        "wger_id": 570,
+        "names": [
+          "encogimiento de hombros",
+          "encolher os ombros",
+          "haussement d epaules",
+          "mengangkat bahu",
+          "schouders ophalen",
+          "schulterzucken",
+          "scrollate di spalle",
+          "shoulder shrug"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 52.83,
+        "wger_id": 484,
+        "names": [
+          "levantamento terra em rack",
+          "peso muerto en rack",
+          "rack deadlift",
+          "rack kreuzheben",
+          "rack pull",
+          "souleve de terre au rack"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "leg_press_45",
+    "name": "Leg press 45°",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 96.97,
+        "wger_id": 371,
+        "names": [
+          "beinpresse",
+          "leg press",
+          "prensa de piernas",
+          "presse a cuisses"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 78.05,
+        "wger_id": 373,
+        "names": [
+          "beinpresse eng",
+          "leg presses narrow",
+          "prensa de piernas cerrada",
+          "presse a cuisses serree"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 69.77,
+        "wger_id": 538,
+        "names": [
+          "distensione panca inclinata bilanciere",
+          "incline bench press barbell",
+          "press de banca inclinado",
+          "schragbankdrucken lh"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 371
+  },
+  {
+    "key": "agachamento_bulgaro",
+    "name": "Agachamento búlgaro",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 63.41,
+        "wger_id": 988,
+        "names": [
+          "affondo bulgaro con manubri",
+          "bugarski podijeljeni cucanj lijevo",
+          "bulgaarse gespleten hurkzit links",
+          "bulgar tek bacakl comelmesi sol",
+          "bulgarian split squats esquerda",
+          "bulgarian split squats left",
+          "bulgarische geteilte kniebeugen links",
+          "bulharske drepy na leve noze"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 57.14,
+        "wger_id": 977,
+        "names": [
+          "box squat",
+          "sentadilla al cajon",
+          "squat box"
+        ],
+        "has_ai_image": true
+      },
+      {
+        "score": 57.14,
+        "wger_id": 1593,
+        "names": [
+          "sentadilla split en maquina smith",
+          "smith machine split squat",
+          "split kniebeuge an der smith maschine",
+          "split squat a la smith machine"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 988
+  },
+  {
+    "key": "levantamento_terra_convencional",
+    "name": "Levantamento terra",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 100.0,
+        "wger_id": 184,
+        "names": [
+          "deadlift",
+          "deadlifts",
+          "kreuzheben",
+          "levantamento terra",
+          "peso muerto convencional",
+          "souleves de terre",
+          "stacco"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 484,
+        "names": [
+          "levantamento terra em rack",
+          "peso muerto en rack",
+          "rack deadlift",
+          "rack kreuzheben",
+          "rack pull",
+          "souleve de terre au rack"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 630,
+        "names": [
+          "peso muerto sumo",
+          "souleve de terre sumo",
+          "sumo deadlift",
+          "sumo kreuzheben"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 184
+  },
+  {
+    "key": "levantamento_terra_romeno",
+    "name": "Levantamento terra romeno",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 184,
+        "names": [
+          "deadlift",
+          "deadlifts",
+          "kreuzheben",
+          "levantamento terra",
+          "peso muerto convencional",
+          "souleves de terre",
+          "stacco"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 78.43,
+        "wger_id": 484,
+        "names": [
+          "levantamento terra em rack",
+          "peso muerto en rack",
+          "rack deadlift",
+          "rack kreuzheben",
+          "rack pull",
+          "souleve de terre au rack"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 75.86,
+        "wger_id": 1003,
+        "names": [
+          "deadlift kettlebell",
+          "halteres de kettlebell",
+          "kettlebell deadliften",
+          "kettlebell deadlifts",
+          "kettlebell kreuzheben",
+          "levantamento terra com kettlebell",
+          "peso muerto con kettlebell"
+        ],
+        "has_ai_image": true
+      }
+    ]
+  },
+  {
+    "key": "stiff_com_halteres",
+    "name": "Stiff com halteres",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 81.08,
+        "wger_id": 75,
+        "names": [
+          "bankdrucken kh",
+          "benchpress dumbbells",
+          "developpe couche avec halteres",
+          "panca piana con manubri",
+          "press de banca con mancuernas",
+          "supino com halteres"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 73.08,
+        "wger_id": 694,
+        "names": [
+          "aufrechtes rudern mit kurzhanteln",
+          "remo al menton con mancuernas",
+          "remo vertical",
+          "tirage menton avec halteres",
+          "upright row w dumbbells"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 63.83,
+        "wger_id": 537,
+        "names": [
+          "developpe incline halteres",
+          "incline bench press dumbbell",
+          "incline dumbbell press",
+          "panca inclinata con manubri",
+          "press inclinado con mancuernas",
+          "schragbankdrucken kh",
+          "supino inclinado com halteres"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "elevacao_pelvica_barra",
+    "name": "Elevação pélvica com barra",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 1642,
+        "names": [
+          "dumbbell hip thrust",
+          "empuje de cadera con mancuerna",
+          "hip thrust avec haltere",
+          "hip thrust mit kurzhantel"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 70.37,
+        "wger_id": 51,
+        "names": [
+          "barbell wrist curl",
+          "curl de muneca con barra agarre supino",
+          "curl des poignets a la barre",
+          "flexao de punho com barra",
+          "forearm curls",
+          "handgelenkstreckung",
+          "kurzhantel unterarmcurl"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 68.85,
+        "wger_id": 978,
+        "names": [
+          "addominali alla sbarra",
+          "elevaciones de rodillas en barra",
+          "knee raises"
+        ],
+        "has_ai_image": true
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 1642
+  },
+  {
+    "key": "ponte_de_gluteos",
+    "name": "Ponte de glúteos",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 57.78,
+        "wger_id": 1131,
+        "names": [
+          "cable glute extension",
+          "extension de gluteos en polea",
+          "extension des fessiers a la poulie",
+          "gesa strecken am kabelzug"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 56.25,
+        "wger_id": 1112,
+        "names": [
+          "flexiones declinadas decline",
+          "liegestutze abfallend decline",
+          "pompes declinees",
+          "push ups decline"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 55.81,
+        "wger_id": 1735,
+        "names": [
+          "einbeinige seitliche gesa presse",
+          "gluteo en prensa de lado con una pierna",
+          "presse a fessiers laterale sur une jambe",
+          "single leg side glute press"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "supino_reto_barra",
+    "name": "Supino reto com barra",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 100.0,
+        "wger_id": 73,
+        "names": [
+          "bankdrucken lh",
+          "bench press",
+          "developpe couche",
+          "distensione panca piana con bilanciere",
+          "press de banca",
+          "wyciskanie lezac"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 76,
+        "names": [
+          "bankdrucken eng",
+          "bench press narrow grip",
+          "close grip bench press",
+          "developpe couche prise serree",
+          "panca piana con presa srtetta",
+          "press de banca con agarre cerrado"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 185,
+        "names": [
+          "decline bench press barbell",
+          "developpe couche decline a la barre",
+          "negativ bankdrucken",
+          "panca declinata con bilanciere",
+          "press de banca declinado con barra"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 73
+  },
+  {
+    "key": "supino_reto_halteres",
+    "name": "Supino reto com halteres",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 73,
+        "names": [
+          "bankdrucken lh",
+          "bench press",
+          "developpe couche",
+          "distensione panca piana con bilanciere",
+          "press de banca",
+          "wyciskanie lezac"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 88.37,
+        "wger_id": 75,
+        "names": [
+          "bankdrucken kh",
+          "benchpress dumbbells",
+          "developpe couche avec halteres",
+          "panca piana con manubri",
+          "press de banca con mancuernas",
+          "supino com halteres"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 84.21,
+        "wger_id": 1353,
+        "names": [
+          "developpe serre aux halteres hex press",
+          "dumbbell hex press",
+          "hex press mit kurzhanteln",
+          "press hex con mancuernas"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 75
+  },
+  {
+    "key": "flexao_de_bracos",
+    "name": "Flexão de braços",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 100.0,
+        "wger_id": 1551,
+        "names": [
+          "flexiones",
+          "lagartijas",
+          "liegestutz",
+          "pompe",
+          "push up"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 51,
+        "names": [
+          "barbell wrist curl",
+          "curl de muneca con barra agarre supino",
+          "curl des poignets a la barre",
+          "flexao de punho com barra",
+          "forearm curls",
+          "handgelenkstreckung",
+          "kurzhantel unterarmcurl"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 454,
+        "names": [
+          "flessioni del luccio",
+          "flexao pike",
+          "flexiones de pica",
+          "hecht liegestutze",
+          "kliky ve strese",
+          "pike push ups",
+          "pike s nav",
+          "pompes piquees"
+        ],
+        "has_ai_image": true
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 1551
+  },
+  {
+    "key": "supino_maquina",
+    "name": "Supino na máquina",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 100.0,
+        "wger_id": 129,
+        "names": [
+          "brustpresse",
+          "brustpresse an der maschine",
+          "chest press",
+          "exercice de developpe pectoral a la machine",
+          "machine chest press",
+          "press de pecho en maquina"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 1831,
+        "names": [
+          "developpe decline sur machine hammer strength",
+          "hammer strength bankdrucken negativ decline",
+          "hammerstrength decline chest press",
+          "hammerstrength decline press",
+          "press de pecho declinado en hammer strength"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 72.73,
+        "wger_id": 73,
+        "names": [
+          "bankdrucken lh",
+          "bench press",
+          "developpe couche",
+          "distensione panca piana con bilanciere",
+          "press de banca",
+          "wyciskanie lezac"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 129
+  },
+  {
+    "key": "flexao_inclinada",
+    "name": "Flexão inclinada",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 1551,
+        "names": [
+          "flexiones",
+          "lagartijas",
+          "liegestutz",
+          "pompe",
+          "push up"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 72.73,
+        "wger_id": 1112,
+        "names": [
+          "flexiones declinadas decline",
+          "liegestutze abfallend decline",
+          "pompes declinees",
+          "push ups decline"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 63.41,
+        "wger_id": 538,
+        "names": [
+          "distensione panca inclinata bilanciere",
+          "incline bench press barbell",
+          "press de banca inclinado",
+          "schragbankdrucken lh"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "desenvolvimento_militar_barra",
+    "name": "Desenvolvimento militar",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 566,
+        "names": [
+          "developpe epaules barre",
+          "military press lh",
+          "military press with barbell",
+          "ohp barbell",
+          "overhead press barbell",
+          "press de hombros con barra",
+          "schulterdrucken lh",
+          "shoulder press barbell"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 567,
+        "names": [
+          "developpe epaules halteres",
+          "military press kh",
+          "military press with dumbbells",
+          "ohp dumbbells",
+          "overhead press dumbbells",
+          "press militar mancuerna",
+          "schulterdrucken kh",
+          "shoulder press dumbbells"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 77.78,
+        "wger_id": 1893,
+        "names": [
+          "developpe militaire a la barre",
+          "langhantel uberkopfdrucken",
+          "military press",
+          "overhead barbell press",
+          "press de barra por encima de la cabeza",
+          "schulterdrucken"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 1893
+  },
+  {
+    "key": "desenvolvimento_halteres",
+    "name": "Desenvolvimento com halteres",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 79.17,
+        "wger_id": 570,
+        "names": [
+          "encogimiento de hombros",
+          "encolher os ombros",
+          "haussement d epaules",
+          "mengangkat bahu",
+          "schouders ophalen",
+          "schulterzucken",
+          "scrollate di spalle",
+          "shoulder shrug"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 75.56,
+        "wger_id": 566,
+        "names": [
+          "developpe epaules barre",
+          "military press lh",
+          "military press with barbell",
+          "ohp barbell",
+          "overhead press barbell",
+          "press de hombros con barra",
+          "schulterdrucken lh",
+          "shoulder press barbell"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 72.34,
+        "wger_id": 567,
+        "names": [
+          "developpe epaules halteres",
+          "military press kh",
+          "military press with dumbbells",
+          "ohp dumbbells",
+          "overhead press dumbbells",
+          "press militar mancuerna",
+          "schulterdrucken kh",
+          "shoulder press dumbbells"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 567
+  },
+  {
+    "key": "desenvolvimento_arnold",
+    "name": "Desenvolvimento Arnold",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 69.57,
+        "wger_id": 1901,
+        "names": [
+          "barbell clean and press",
+          "cargada y envion",
+          "cargada y press",
+          "clean and press",
+          "clean press",
+          "epaule developpe clean and press",
+          "olympic clean and press",
+          "umsetzen und sto en"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 66.67,
+        "wger_id": 371,
+        "names": [
+          "beinpresse",
+          "leg press",
+          "prensa de piernas",
+          "presse a cuisses"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 66.67,
+        "wger_id": 1194,
+        "names": [
+          "pallof press"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "desenvolvimento_maquina",
+    "name": "Desenvolvimento na máquina",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 80.85,
+        "wger_id": 543,
+        "names": [
+          "press de hombro con maquina",
+          "schultermaschine",
+          "shoulder press on machine"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 73.47,
+        "wger_id": 566,
+        "names": [
+          "developpe epaules barre",
+          "military press lh",
+          "military press with barbell",
+          "ohp barbell",
+          "overhead press barbell",
+          "press de hombros con barra",
+          "schulterdrucken lh",
+          "shoulder press barbell"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 69.57,
+        "wger_id": 567,
+        "names": [
+          "developpe epaules halteres",
+          "military press kh",
+          "military press with dumbbells",
+          "ohp dumbbells",
+          "overhead press dumbbells",
+          "press militar mancuerna",
+          "schulterdrucken kh",
+          "shoulder press dumbbells"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "flexao_pike",
+    "name": "Flexão pike",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 100.0,
+        "wger_id": 454,
+        "names": [
+          "flessioni del luccio",
+          "flexao pike",
+          "flexiones de pica",
+          "hecht liegestutze",
+          "kliky ve strese",
+          "pike push ups",
+          "pike s nav",
+          "pompes piquees"
+        ],
+        "has_ai_image": true
+      },
+      {
+        "score": 91.0,
+        "wger_id": 1551,
+        "names": [
+          "flexiones",
+          "lagartijas",
+          "liegestutz",
+          "pompe",
+          "push up"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 75.0,
+        "wger_id": 1554,
+        "names": [
+          "clap push up",
+          "flexion con palmada",
+          "liegestutz mit klatschen",
+          "pompe avec applaudissement"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 454
+  },
+  {
+    "key": "remada_curvada_barra",
+    "name": "Remada curvada com barra",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 83,
+        "names": [
+          "bent over rowing",
+          "remada curvada",
+          "rematore presa neutra con bilanciere",
+          "remo inclinado con barra agarre prono",
+          "rowing buste penche",
+          "rudern vorgebeugt lh"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 84,
+        "names": [
+          "bent over rowing reverse",
+          "remo inclinado con agarre invertido",
+          "rowing penche en supination",
+          "rudern vorgebeugt lh reverse"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 83.33,
+        "wger_id": 394,
+        "names": [
+          "long pulley",
+          "long pulley low row",
+          "pulley basso",
+          "remada baixa",
+          "remo con polea",
+          "tirage a la poulie basse rowing bas"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 83
+  },
+  {
+    "key": "remada_unilateral_halter",
+    "name": "Remada unilateral",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 68.29,
+        "wger_id": 1621,
+        "names": [
+          "einarmiges rudern am kabelzug",
+          "remo unilateral en polea",
+          "rowing unilateral a la poulie",
+          "single arm cable row",
+          "unilateral cable row"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 64.52,
+        "wger_id": 83,
+        "names": [
+          "bent over rowing",
+          "remada curvada",
+          "rematore presa neutra con bilanciere",
+          "remo inclinado con barra agarre prono",
+          "rowing buste penche",
+          "rudern vorgebeugt lh"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 62.07,
+        "wger_id": 394,
+        "names": [
+          "long pulley",
+          "long pulley low row",
+          "pulley basso",
+          "remada baixa",
+          "remo con polea",
+          "tirage a la poulie basse rowing bas"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 1621
+  },
+  {
+    "key": "remada_baixa_cabo",
+    "name": "Remada baixa no cabo",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 100.0,
+        "wger_id": 1117,
+        "names": [
+          "rematore seduto al cavo",
+          "remo gironda agarre cerrado",
+          "rowing assis a la poulie",
+          "seated cable row",
+          "sitzendes rudern am kabelzug"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 394,
+        "names": [
+          "long pulley",
+          "long pulley low row",
+          "pulley basso",
+          "remada baixa",
+          "remo con polea",
+          "tirage a la poulie basse rowing bas"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 72.22,
+        "wger_id": 1621,
+        "names": [
+          "einarmiges rudern am kabelzug",
+          "remo unilateral en polea",
+          "rowing unilateral a la poulie",
+          "single arm cable row",
+          "unilateral cable row"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 1117
+  },
+  {
+    "key": "remada_maquina",
+    "name": "Remada na máquina",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 77.42,
+        "wger_id": 83,
+        "names": [
+          "bent over rowing",
+          "remada curvada",
+          "rematore presa neutra con bilanciere",
+          "remo inclinado con barra agarre prono",
+          "rowing buste penche",
+          "rudern vorgebeugt lh"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 70.27,
+        "wger_id": 1725,
+        "names": [
+          "remo sentado maquina",
+          "rowing assis machine",
+          "rudern im sitzen maschine",
+          "seated row machine"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 68.97,
+        "wger_id": 394,
+        "names": [
+          "long pulley",
+          "long pulley low row",
+          "pulley basso",
+          "remada baixa",
+          "remo con polea",
+          "tirage a la poulie basse rowing bas"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 1725
+  },
+  {
+    "key": "remada_invertida",
+    "name": "Remada invertida",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 96.0,
+        "wger_id": 1198,
+        "names": [
+          "horizontal pull ups",
+          "inverted rows",
+          "inverted rows umgekehrtes rudern",
+          "remo invertido",
+          "rowing inverse",
+          "trazioni orizzontali"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 68.97,
+        "wger_id": 691,
+        "names": [
+          "remo al menton en multipower",
+          "remo vertical",
+          "rowing menton",
+          "rudern aufrecht mp",
+          "tirage menton a la smith machine",
+          "upright row on multi press"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 68.97,
+        "wger_id": 694,
+        "names": [
+          "aufrechtes rudern mit kurzhanteln",
+          "remo al menton con mancuernas",
+          "remo vertical",
+          "tirage menton avec halteres",
+          "upright row w dumbbells"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 1198
+  },
+  {
+    "key": "puxada_alta_frente",
+    "name": "Puxada alta pela frente",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 158,
+        "names": [
+          "close grip lat pull down",
+          "jalon al pecho con agarre cerrado",
+          "lat pulldown eng",
+          "lat ziehen eng",
+          "latzug eng",
+          "tirage vertical prise serree"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 1127,
+        "names": [
+          "close grip supinated lat pulldown",
+          "jalon cerrado supino",
+          "latzug mit engem untergriff",
+          "tirage vertical en prise serree et supination"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 71.43,
+        "wger_id": 1971,
+        "names": [
+          "jalon mentzer",
+          "mentzer latzug",
+          "mentzer pulldown",
+          "tirage mentzer"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 158
+  },
+  {
+    "key": "barra_fixa_pronada",
+    "name": "Barra fixa pronada",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 93.33,
+        "wger_id": 475,
+        "names": [
+          "dominadas",
+          "flexoes de braco",
+          "klimmzuge",
+          "optrekken",
+          "pull ups",
+          "shyby",
+          "tarik up",
+          "tractions"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 979,
+        "names": [
+          "addominali alla sbarra a gambe distese",
+          "elevaciones de piernas en barra",
+          "leg raises pull up bar"
+        ],
+        "has_ai_image": true
+      },
+      {
+        "score": 91.0,
+        "wger_id": 1198,
+        "names": [
+          "horizontal pull ups",
+          "inverted rows",
+          "inverted rows umgekehrtes rudern",
+          "remo invertido",
+          "rowing inverse",
+          "trazioni orizzontali"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 475
+  },
+  {
+    "key": "barra_fixa_supinada",
+    "name": "Barra fixa supinada",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 100.0,
+        "wger_id": 152,
+        "names": [
+          "chin up",
+          "chin ups",
+          "dominadas con agarre supino",
+          "traction en supination",
+          "trazioni alla sbarra"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 60.0,
+        "wger_id": 1080,
+        "names": [
+          "hindu liegestutze",
+          "hindu pushups",
+          "pompes hindoues"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 57.14,
+        "wger_id": 1551,
+        "names": [
+          "flexiones",
+          "lagartijas",
+          "liegestutz",
+          "pompe",
+          "push up"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 152
+  },
+  {
+    "key": "puxada_com_elastico",
+    "name": "Puxada com elástico",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 75.68,
+        "wger_id": 158,
+        "names": [
+          "close grip lat pull down",
+          "jalon al pecho con agarre cerrado",
+          "lat pulldown eng",
+          "lat ziehen eng",
+          "latzug eng",
+          "tirage vertical prise serree"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 55.56,
+        "wger_id": 984,
+        "names": [
+          "affondi",
+          "ausfallschritte",
+          "fentes",
+          "investidas",
+          "iskoraci",
+          "lunge hareketi",
+          "lunges",
+          "paru paru"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 55.56,
+        "wger_id": 1613,
+        "names": [
+          "glute kickback mit widerstandsband",
+          "kickback fessier a l elastique",
+          "patada de gluteo con banda elastica",
+          "rubber band glute kickback"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "barra_fixa_assistida",
+    "name": "Barra fixa assistida",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 64.0,
+        "wger_id": 475,
+        "names": [
+          "dominadas",
+          "flexoes de braco",
+          "klimmzuge",
+          "optrekken",
+          "pull ups",
+          "shyby",
+          "tarik up",
+          "tractions"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 62.07,
+        "wger_id": 394,
+        "names": [
+          "long pulley",
+          "long pulley low row",
+          "pulley basso",
+          "remada baixa",
+          "remo con polea",
+          "tirage a la poulie basse rowing bas"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 52.17,
+        "wger_id": 456,
+        "names": [
+          "drep na leve noze",
+          "einbeinige kniebeuge",
+          "pistol squat",
+          "pistol squat kiri",
+          "pistol squats",
+          "pistol squats esquerda",
+          "pistol squats gauches",
+          "pistoljski cucnjevi lijevo"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "mesa_flexora",
+    "name": "Mesa flexora",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 364,
+        "names": [
+          "beinbeuger",
+          "curl femoral",
+          "leg curl"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 70.59,
+        "wger_id": 367,
+        "names": [
+          "beinbeuger stehend",
+          "leg curls standing"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 66.67,
+        "wger_id": 366,
+        "names": [
+          "curl femoral sentado",
+          "leg curls sitting"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 365
+  },
+  {
+    "key": "cadeira_flexora",
+    "name": "Cadeira flexora",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 364,
+        "names": [
+          "beinbeuger",
+          "curl femoral",
+          "leg curl"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 76.47,
+        "wger_id": 367,
+        "names": [
+          "beinbeuger stehend",
+          "leg curls standing"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 68.57,
+        "wger_id": 366,
+        "names": [
+          "curl femoral sentado",
+          "leg curls sitting"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 366
+  },
+  {
+    "key": "flexao_joelhos_bola",
+    "name": "Flexão de joelhos na bola",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 364,
+        "names": [
+          "beinbeuger",
+          "curl femoral",
+          "leg curl"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 68.75,
+        "wger_id": 365,
+        "names": [
+          "beinbeuger liegend",
+          "curl de piernas tumbado",
+          "leg curl allonge",
+          "leg curls laying"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 64.0,
+        "wger_id": 51,
+        "names": [
+          "barbell wrist curl",
+          "curl de muneca con barra agarre supino",
+          "curl des poignets a la barre",
+          "flexao de punho com barra",
+          "forearm curls",
+          "handgelenkstreckung",
+          "kurzhantel unterarmcurl"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 364
+  },
+  {
+    "key": "flexao_joelhos_deslizante",
+    "name": "Flexão de joelhos deslizante",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 364,
+        "names": [
+          "beinbeuger",
+          "curl femoral",
+          "leg curl"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 68.57,
+        "wger_id": 365,
+        "names": [
+          "beinbeuger liegend",
+          "curl de piernas tumbado",
+          "leg curl allonge",
+          "leg curls laying"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 66.67,
+        "wger_id": 366,
+        "names": [
+          "curl femoral sentado",
+          "leg curls sitting"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "flexao_nordica",
+    "name": "Flexão nórdica",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 909,
+        "names": [
+          "curl nordico inverso",
+          "reverse nordic curl"
+        ],
+        "has_ai_image": true
+      },
+      {
+        "score": 64.52,
+        "wger_id": 454,
+        "names": [
+          "flessioni del luccio",
+          "flexao pike",
+          "flexiones de pica",
+          "hecht liegestutze",
+          "kliky ve strese",
+          "pike push ups",
+          "pike s nav",
+          "pompes piquees"
+        ],
+        "has_ai_image": true
+      },
+      {
+        "score": 58.33,
+        "wger_id": 51,
+        "names": [
+          "barbell wrist curl",
+          "curl de muneca con barra agarre supino",
+          "curl des poignets a la barre",
+          "flexao de punho com barra",
+          "forearm curls",
+          "handgelenkstreckung",
+          "kurzhantel unterarmcurl"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "cadeira_extensora",
+    "name": "Cadeira extensora",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 100.0,
+        "wger_id": 369,
+        "names": [
+          "beinstrecker leg extension",
+          "curl cuadriceps",
+          "extension des jambes leg extension",
+          "leg extension"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 76.47,
+        "wger_id": 1131,
+        "names": [
+          "cable glute extension",
+          "extension de gluteos en polea",
+          "extension des fessiers a la poulie",
+          "gesa strecken am kabelzug"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 74.07,
+        "wger_id": 1143,
+        "names": [
+          "back extension"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 369
+  },
+  {
+    "key": "extensao_joelho_elastico",
+    "name": "Extensão de joelho com elástico",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 369,
+        "names": [
+          "beinstrecker leg extension",
+          "curl cuadriceps",
+          "extension des jambes leg extension",
+          "leg extension"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 66.67,
+        "wger_id": 50,
+        "names": [
+          "barbell triceps extension",
+          "estensione dei tricipiti con bilanciere",
+          "extension de triceps",
+          "extension des triceps a la barre",
+          "trizepsdrucken kh uber kopf"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 64.86,
+        "wger_id": 301,
+        "names": [
+          "extension lombaire",
+          "extensions lombaires hyperextensions",
+          "hiperextensiones",
+          "hyperextensions",
+          "iperestensioni"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "extensao_terminal_joelho",
+    "name": "Extensão terminal de joelho",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 57.14,
+        "wger_id": 981,
+        "names": [
+          "ad m atma",
+          "chair steps",
+          "marches",
+          "opstappen",
+          "progressos",
+          "steigungen",
+          "step",
+          "step up"
+        ],
+        "has_ai_image": true
+      },
+      {
+        "score": 55.32,
+        "wger_id": 50,
+        "names": [
+          "barbell triceps extension",
+          "estensione dei tricipiti con bilanciere",
+          "extension de triceps",
+          "extension des triceps a la barre",
+          "trizepsdrucken kh uber kopf"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 54.55,
+        "wger_id": 622,
+        "names": [
+          "elevacion de talon de pie",
+          "extension des mollets debout",
+          "sollevamento dei polpacci in piedi",
+          "standing calf raises",
+          "wadenheben stehend"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "agachamento_sissy",
+    "name": "Agachamento sissy",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 69.57,
+        "wger_id": 456,
+        "names": [
+          "drep na leve noze",
+          "einbeinige kniebeuge",
+          "pistol squat",
+          "pistol squat kiri",
+          "pistol squats",
+          "pistol squats esquerda",
+          "pistol squats gauches",
+          "pistoljski cucnjevi lijevo"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 66.67,
+        "wger_id": 1963,
+        "names": [
+          "3 1 1 squat",
+          "langsame kniebeuge",
+          "sentadilla lenta",
+          "slow squat",
+          "squat lent",
+          "tempo squat"
+        ],
+        "has_ai_image": true
+      },
+      {
+        "score": 60.0,
+        "wger_id": 977,
+        "names": [
+          "box squat",
+          "sentadilla al cajon",
+          "squat box"
+        ],
+        "has_ai_image": true
+      }
+    ]
+  },
+  {
+    "key": "nordico_reverso",
+    "name": "Nórdico reverso",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 909,
+        "names": [
+          "curl nordico inverso",
+          "reverse nordic curl"
+        ],
+        "has_ai_image": true
+      },
+      {
+        "score": 64.29,
+        "wger_id": 999,
+        "names": [
+          "affondi inversi",
+          "arremetidas inversas",
+          "fentes arriere",
+          "iskoraci unatrag",
+          "lunge reverso",
+          "menekuk lutut terbalik",
+          "omgekeerde lunges",
+          "reverse lunges"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 59.09,
+        "wger_id": 50,
+        "names": [
+          "barbell triceps extension",
+          "estensione dei tricipiti con bilanciere",
+          "extension de triceps",
+          "extension des triceps a la barre",
+          "trizepsdrucken kh uber kopf"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 909
+  },
+  {
+    "key": "panturrilha_em_pe_maquina",
+    "name": "Panturrilha em pé na máquina",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 97.44,
+        "wger_id": 622,
+        "names": [
+          "elevacion de talon de pie",
+          "extension des mollets debout",
+          "sollevamento dei polpacci in piedi",
+          "standing calf raises",
+          "wadenheben stehend"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 80.0,
+        "wger_id": 1239,
+        "names": [
+          "estiramiento de gemelos de pie",
+          "etirement des mollets debout",
+          "standing calf stretch",
+          "stehende wadendehnung"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 66.67,
+        "wger_id": 135,
+        "names": [
+          "aperturas en maquina",
+          "butterfly"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "panturrilha_sentado",
+    "name": "Panturrilha sentado",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 79.07,
+        "wger_id": 1620,
+        "names": [
+          "elevacion de gemelos sentado con mancuerna",
+          "elevation des mollets halteres assis",
+          "seated dumbbell calf raise",
+          "sitzendes wadenheben mit kurzhantel"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 75.68,
+        "wger_id": 622,
+        "names": [
+          "elevacion de talon de pie",
+          "extension des mollets debout",
+          "sollevamento dei polpacci in piedi",
+          "standing calf raises",
+          "wadenheben stehend"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 73.68,
+        "wger_id": 1098,
+        "names": [
+          "seated rear delt rise"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 1620
+  },
+  {
+    "key": "panturrilha_unilateral",
+    "name": "Panturrilha unilateral",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 68.85,
+        "wger_id": 1654,
+        "names": [
+          "elevacao lateral na maquina",
+          "elevacion lateral en maquina",
+          "elevation laterale a la machine",
+          "machine lateral raise",
+          "seitheben an der maschine"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 67.74,
+        "wger_id": 1744,
+        "names": [
+          "elevacion lateral en maquina",
+          "elevations laterales a la machine",
+          "machine side lateral raises",
+          "seitheben an der maschine"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 66.67,
+        "wger_id": 348,
+        "names": [
+          "alzate laterali",
+          "elevacion lateral con mancuernas",
+          "elevations laterales",
+          "lateral raises",
+          "seitenheben",
+          "seitheben kh",
+          "shoulder fly",
+          "side raises"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 622
+  },
+  {
+    "key": "panturrilha_leg_press",
+    "name": "Panturrilha no leg press",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 146,
+        "names": [
+          "calf press using leg press machine",
+          "extension des mollets a la presse a cuisses",
+          "gemelos en prensa",
+          "pressa per polpacci alla leg press",
+          "wadendrucken an beinpresse"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 371,
+        "names": [
+          "beinpresse",
+          "leg press",
+          "prensa de piernas",
+          "presse a cuisses"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 81.82,
+        "wger_id": 1194,
+        "names": [
+          "pallof press"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 146
+  },
+  {
+    "key": "panturrilha_com_halteres",
+    "name": "Panturrilha com halteres",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 69.77,
+        "wger_id": 75,
+        "names": [
+          "bankdrucken kh",
+          "benchpress dumbbells",
+          "developpe couche avec halteres",
+          "panca piana con manubri",
+          "press de banca con mancuernas",
+          "supino com halteres"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 68.42,
+        "wger_id": 238,
+        "names": [
+          "aperturas con mancuernas",
+          "croci su panca inclinata",
+          "ecarte aux halteres",
+          "fliegende kh flachbank",
+          "fly with dumbbells"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 67.69,
+        "wger_id": 1338,
+        "names": [
+          "elevacion de hombros mancuerna",
+          "elevation des epaules haltere",
+          "schulterheben kurzhantel",
+          "shoulder raise dumbbell"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "rosca_direta_barra",
+    "name": "Rosca direta com barra",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 91,
+        "names": [
+          "biceps curls with barbell",
+          "bizeps lh curls",
+          "curl biceps a la barre",
+          "curl con barra",
+          "curl con bilanciere",
+          "rosca direta com barra reta"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 1290,
+        "names": [
+          "curl a la barre en prise inversee",
+          "curl de biceps con barra en agarre invertido",
+          "curl inverse a la barre",
+          "langhantel curls im obergriff",
+          "reverse grip barbell curls"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 80.0,
+        "wger_id": 51,
+        "names": [
+          "barbell wrist curl",
+          "curl de muneca con barra agarre supino",
+          "curl des poignets a la barre",
+          "flexao de punho com barra",
+          "forearm curls",
+          "handgelenkstreckung",
+          "kurzhantel unterarmcurl"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 91
+  },
+  {
+    "key": "rosca_alternada",
+    "name": "Rosca alternada",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 75.68,
+        "wger_id": 75,
+        "names": [
+          "bankdrucken kh",
+          "benchpress dumbbells",
+          "developpe couche avec halteres",
+          "panca piana con manubri",
+          "press de banca con mancuernas",
+          "supino com halteres"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 68.09,
+        "wger_id": 537,
+        "names": [
+          "developpe incline halteres",
+          "incline bench press dumbbell",
+          "incline dumbbell press",
+          "panca inclinata con manubri",
+          "press inclinado con mancuernas",
+          "schragbankdrucken kh",
+          "supino inclinado com halteres"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 66.67,
+        "wger_id": 1227,
+        "names": [
+          "dumbbell rear delt row",
+          "kurzhantel rudern fur die hintere schulter",
+          "remo para deltoides posterior con mancuernas",
+          "rowing pour deltoides posterieurs aux halteres"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "rosca_martelo",
+    "name": "Rosca martelo",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 95.65,
+        "wger_id": 272,
+        "names": [
+          "biceps martelo",
+          "curl martillo",
+          "curls marteau",
+          "hammer curls",
+          "hammercurls",
+          "hummer curl con manubri"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 1567,
+        "names": [
+          "alternating dumbbell hammer curl",
+          "curl alterno de martillo con mancuernas",
+          "curl marteau alterne avec halteres",
+          "hammercurl mit kurzhanteln abwechselnd"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 66.67,
+        "wger_id": 275,
+        "names": [
+          "biceps concentrado martillo con cable",
+          "curl marteau a la poulie",
+          "hammercurls am seil",
+          "hammercurls on cable"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 272
+  },
+  {
+    "key": "rosca_scott",
+    "name": "Rosca Scott",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 96.3,
+        "wger_id": 465,
+        "names": [
+          "curl en banco scott",
+          "curl predicador",
+          "curl su panca a 45",
+          "curls au pupitre",
+          "kh an scottmaschine",
+          "preacher curls",
+          "scott curls"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 69.23,
+        "wger_id": 51,
+        "names": [
+          "barbell wrist curl",
+          "curl de muneca con barra agarre supino",
+          "curl des poignets a la barre",
+          "flexao de punho com barra",
+          "forearm curls",
+          "handgelenkstreckung",
+          "kurzhantel unterarmcurl"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 64.0,
+        "wger_id": 272,
+        "names": [
+          "biceps martelo",
+          "curl martillo",
+          "curls marteau",
+          "hammer curls",
+          "hammercurls",
+          "hummer curl con manubri"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 465
+  },
+  {
+    "key": "rosca_no_cabo",
+    "name": "Rosca no cabo",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 912,
+        "names": [
+          "curl en polea con barra recta",
+          "straight bar cable curls"
+        ],
+        "has_ai_image": true
+      },
+      {
+        "score": 77.78,
+        "wger_id": 364,
+        "names": [
+          "beinbeuger",
+          "curl femoral",
+          "leg curl"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 64.29,
+        "wger_id": 394,
+        "names": [
+          "long pulley",
+          "long pulley low row",
+          "pulley basso",
+          "remada baixa",
+          "remo con polea",
+          "tirage a la poulie basse rowing bas"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 912
+  },
+  {
+    "key": "triceps_na_polia",
+    "name": "Tríceps na polia",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 805,
+        "names": [
+          "empuje de triceps en cable",
+          "extension triceps a la poulie",
+          "flessioni dei tricipiti al cavo",
+          "tricep pushdown on cable",
+          "trizepsdrucken am kabelzug"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 1185,
+        "names": [
+          "extension de triceps en polea con cuerda",
+          "triceps pushdown"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 1900,
+        "names": [
+          "extensiones de triceps con cuerda en polea",
+          "extensions triceps a la corde",
+          "tricep rope pushdowns",
+          "trizepsdrucken am seil"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 805
+  },
+  {
+    "key": "triceps_frances_halter",
+    "name": "Tríceps francês",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 75.0,
+        "wger_id": 659,
+        "names": [
+          "extension de triceps polea",
+          "extensions des triceps a la poulie",
+          "triceps extensions on cable",
+          "trizeps seildrucken"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 72.0,
+        "wger_id": 50,
+        "names": [
+          "barbell triceps extension",
+          "estensione dei tricipiti con bilanciere",
+          "extension de triceps",
+          "extension des triceps a la barre",
+          "trizepsdrucken kh uber kopf"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 69.44,
+        "wger_id": 1298,
+        "names": [
+          "extension de triceps cruzada en polea alta",
+          "extension des triceps croisee a la poulie haute nb",
+          "high cable cross tricep extention nb",
+          "trizepsstrecken uber kreuz am hohen kabelzug"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "triceps_testa",
+    "name": "Tríceps testa",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 75.0,
+        "wger_id": 246,
+        "names": [
+          "barre au front a la barre ez",
+          "french press sz bar",
+          "frenchpress sz stange",
+          "press frances con barra sz",
+          "skullcrusher sz bar"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 62.07,
+        "wger_id": 1185,
+        "names": [
+          "extension de triceps en polea con cuerda",
+          "triceps pushdown"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 60.61,
+        "wger_id": 1230,
+        "names": [
+          "estiramiento de triceps izquierdo",
+          "etirement des triceps a gauche",
+          "triceps stretch left",
+          "trizepsdehnung links"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 246
+  },
+  {
+    "key": "mergulho_no_banco",
+    "name": "Mergulho no banco",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 70.0,
+        "wger_id": 73,
+        "names": [
+          "bankdrucken lh",
+          "bench press",
+          "developpe couche",
+          "distensione panca piana con bilanciere",
+          "press de banca",
+          "wyciskanie lezac"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 66.67,
+        "wger_id": 1000,
+        "names": [
+          "bodensenken",
+          "cadimenti a terra",
+          "dips au sol",
+          "dipy na podlaze",
+          "floor dips",
+          "fondos",
+          "lantai dips",
+          "mergulho em solo"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 62.07,
+        "wger_id": 1185,
+        "names": [
+          "extension de triceps en polea con cuerda",
+          "triceps pushdown"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "flexao_diamante",
+    "name": "Flexão diamante",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 1551,
+        "names": [
+          "flexiones",
+          "lagartijas",
+          "liegestutz",
+          "pompe",
+          "push up"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 71.43,
+        "wger_id": 1080,
+        "names": [
+          "hindu liegestutze",
+          "hindu pushups",
+          "pompes hindoues"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 70.97,
+        "wger_id": 282,
+        "names": [
+          "flexiones en pino",
+          "handstand liegestutz",
+          "handstand pushup",
+          "pompe en equilibre sur les mains"
+        ],
+        "has_ai_image": true
+      }
+    ]
+  },
+  {
+    "key": "elevacao_lateral_halteres",
+    "name": "Elevação lateral com halteres",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 96.3,
+        "wger_id": 348,
+        "names": [
+          "alzate laterali",
+          "elevacion lateral con mancuernas",
+          "elevations laterales",
+          "lateral raises",
+          "seitenheben",
+          "seitheben kh",
+          "shoulder fly",
+          "side raises"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 1378,
+        "names": [
+          "cable lateral raises single arm",
+          "elevaciones laterales en polea a un brazo",
+          "elevations laterales a la poulie un bras",
+          "seitheben am kabelzug einarmig"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 1654,
+        "names": [
+          "elevacao lateral na maquina",
+          "elevacion lateral en maquina",
+          "elevation laterale a la machine",
+          "machine lateral raise",
+          "seitheben an der maschine"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 348
+  },
+  {
+    "key": "elevacao_lateral_cabo",
+    "name": "Elevação lateral no cabo",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 1378,
+        "names": [
+          "cable lateral raises single arm",
+          "elevaciones laterales en polea a un brazo",
+          "elevations laterales a la poulie un bras",
+          "seitheben am kabelzug einarmig"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 84.62,
+        "wger_id": 1654,
+        "names": [
+          "elevacao lateral na maquina",
+          "elevacion lateral en maquina",
+          "elevation laterale a la machine",
+          "machine lateral raise",
+          "seitheben an der maschine"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 78.79,
+        "wger_id": 348,
+        "names": [
+          "alzate laterali",
+          "elevacion lateral con mancuernas",
+          "elevations laterales",
+          "lateral raises",
+          "seitenheben",
+          "seitheben kh",
+          "shoulder fly",
+          "side raises"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 1378
+  },
+  {
+    "key": "elevacao_lateral_maquina",
+    "name": "Elevação lateral na máquina",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 100.0,
+        "wger_id": 1654,
+        "names": [
+          "elevacao lateral na maquina",
+          "elevacion lateral en maquina",
+          "elevation laterale a la machine",
+          "machine lateral raise",
+          "seitheben an der maschine"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 90.91,
+        "wger_id": 1744,
+        "names": [
+          "elevacion lateral en maquina",
+          "elevations laterales a la machine",
+          "machine side lateral raises",
+          "seitheben an der maschine"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 77.97,
+        "wger_id": 348,
+        "names": [
+          "alzate laterali",
+          "elevacion lateral con mancuernas",
+          "elevations laterales",
+          "lateral raises",
+          "seitenheben",
+          "seitheben kh",
+          "shoulder fly",
+          "side raises"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 1654
+  },
+  {
+    "key": "elevacao_lateral_elastico",
+    "name": "Elevação lateral com elástico",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 82.05,
+        "wger_id": 1654,
+        "names": [
+          "elevacao lateral na maquina",
+          "elevacion lateral en maquina",
+          "elevation laterale a la machine",
+          "machine lateral raise",
+          "seitheben an der maschine"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 81.25,
+        "wger_id": 348,
+        "names": [
+          "alzate laterali",
+          "elevacion lateral con mancuernas",
+          "elevations laterales",
+          "lateral raises",
+          "seitenheben",
+          "seitheben kh",
+          "shoulder fly",
+          "side raises"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 75.56,
+        "wger_id": 1744,
+        "names": [
+          "elevacion lateral en maquina",
+          "elevations laterales a la machine",
+          "machine side lateral raises",
+          "seitheben an der maschine"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "elevacao_lateral_inclinada",
+    "name": "Elevação lateral inclinada",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 80.95,
+        "wger_id": 1654,
+        "names": [
+          "elevacao lateral na maquina",
+          "elevacion lateral en maquina",
+          "elevation laterale a la machine",
+          "machine lateral raise",
+          "seitheben an der maschine"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 74.29,
+        "wger_id": 348,
+        "names": [
+          "alzate laterali",
+          "elevacion lateral con mancuernas",
+          "elevations laterales",
+          "lateral raises",
+          "seitenheben",
+          "seitheben kh",
+          "shoulder fly",
+          "side raises"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 74.07,
+        "wger_id": 1744,
+        "names": [
+          "elevacion lateral en maquina",
+          "elevations laterales a la machine",
+          "machine side lateral raises",
+          "seitheben an der maschine"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "abdominal_curto",
+    "name": "Abdominal curto",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 100.0,
+        "wger_id": 167,
+        "names": [
+          "abdominal",
+          "abdominales",
+          "abdominaux",
+          "addominali",
+          "crunch",
+          "crunches",
+          "trbusnjaci",
+          "yar m mekik"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 171,
+        "names": [
+          "abdominales en banco inclinado",
+          "addominali su panca inclinata",
+          "crunches an schragbank",
+          "crunchs sur banc incline",
+          "incline crunches"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 91.0,
+        "wger_id": 427,
+        "names": [
+          "crunches an negativbank",
+          "crunches negativos",
+          "crunchs negatifs",
+          "negative crunches"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 167
+  },
+  {
+    "key": "abdominal_reverso",
+    "name": "Abdominal reverso",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 167,
+        "names": [
+          "abdominal",
+          "abdominales",
+          "abdominaux",
+          "addominali",
+          "crunch",
+          "crunches",
+          "trbusnjaci",
+          "yar m mekik"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 75.0,
+        "wger_id": 1089,
+        "names": [
+          "abdominales rusas",
+          "abdominales sovieticas",
+          "medicine ball twist",
+          "medizinball drehung",
+          "rotation avec ballon medicinal",
+          "russian twist con palla medica"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 75.0,
+        "wger_id": 1193,
+        "names": [
+          "abdominales rusas",
+          "abdominales sovieticas",
+          "russian twist"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "abdominal_na_polia",
+    "name": "Abdominal na polia",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 167,
+        "names": [
+          "abdominal",
+          "abdominales",
+          "abdominaux",
+          "addominali",
+          "crunch",
+          "crunches",
+          "trbusnjaci",
+          "yar m mekik"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 71.43,
+        "wger_id": 171,
+        "names": [
+          "abdominales en banco inclinado",
+          "addominali su panca inclinata",
+          "crunches an schragbank",
+          "crunchs sur banc incline",
+          "incline crunches"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 69.57,
+        "wger_id": 576,
+        "names": [
+          "side crunch"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "abdominal_declinado",
+    "name": "Abdominal declinado",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 167,
+        "names": [
+          "abdominal",
+          "abdominales",
+          "abdominaux",
+          "addominali",
+          "crunch",
+          "crunches",
+          "trbusnjaci",
+          "yar m mekik"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 86.21,
+        "wger_id": 171,
+        "names": [
+          "abdominales en banco inclinado",
+          "addominali su panca inclinata",
+          "crunches an schragbank",
+          "crunchs sur banc incline",
+          "incline crunches"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 68.66,
+        "wger_id": 1889,
+        "names": [
+          "beinheben auf der schragbank",
+          "decline bench leg raise",
+          "elevacion de piernas en banco declinado",
+          "releve de jambes sur banc decline"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 427
+  },
+  {
+    "key": "abdominal_na_bola",
+    "name": "Abdominal na bola",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 167,
+        "names": [
+          "abdominal",
+          "abdominales",
+          "abdominaux",
+          "addominali",
+          "crunch",
+          "crunches",
+          "trbusnjaci",
+          "yar m mekik"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 66.67,
+        "wger_id": 978,
+        "names": [
+          "addominali alla sbarra",
+          "elevaciones de rodillas en barra",
+          "knee raises"
+        ],
+        "has_ai_image": true
+      },
+      {
+        "score": 64.71,
+        "wger_id": 1089,
+        "names": [
+          "abdominales rusas",
+          "abdominales sovieticas",
+          "medicine ball twist",
+          "medizinball drehung",
+          "rotation avec ballon medicinal",
+          "russian twist con palla medica"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "prancha_frontal",
+    "name": "Prancha frontal",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 100.0,
+        "wger_id": 458,
+        "names": [
+          "izdrzaj na podlakticama",
+          "on kol plank hareketi",
+          "onderarmplanken",
+          "papan lengan bawah",
+          "plancha de antebrazo",
+          "planche pour les avant bras",
+          "plank",
+          "prancha horizontal"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 61.54,
+        "wger_id": 167,
+        "names": [
+          "abdominal",
+          "abdominales",
+          "abdominaux",
+          "addominali",
+          "crunch",
+          "crunches",
+          "trbusnjaci",
+          "yar m mekik"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 60.61,
+        "wger_id": 257,
+        "names": [
+          "front kniebeuge",
+          "front squats",
+          "sentadilla frontal"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 458
+  },
+  {
+    "key": "prancha_lateral",
+    "name": "Prancha lateral",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 68.57,
+        "wger_id": 458,
+        "names": [
+          "izdrzaj na podlakticama",
+          "on kol plank hareketi",
+          "onderarmplanken",
+          "papan lengan bawah",
+          "plancha de antebrazo",
+          "planche pour les avant bras",
+          "plank",
+          "prancha horizontal"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 66.67,
+        "wger_id": 348,
+        "names": [
+          "alzate laterali",
+          "elevacion lateral con mancuernas",
+          "elevations laterales",
+          "lateral raises",
+          "seitenheben",
+          "seitheben kh",
+          "shoulder fly",
+          "side raises"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 66.67,
+        "wger_id": 1962,
+        "names": [
+          "low impact jumping jack",
+          "side step jack",
+          "step jack"
+        ],
+        "has_ai_image": true
+      }
+    ]
+  },
+  {
+    "key": "dead_bug",
+    "name": "Inseto morto",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 91.0,
+        "wger_id": 167,
+        "names": [
+          "abdominal",
+          "abdominales",
+          "abdominaux",
+          "addominali",
+          "crunch",
+          "crunches",
+          "trbusnjaci",
+          "yar m mekik"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 62.96,
+        "wger_id": 1479,
+        "names": [
+          "abdominal con golpe de codo",
+          "releve de buste avec poussee du coude",
+          "sit up elbow thrust",
+          "sit ups ellenbogen zum knie"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 57.63,
+        "wger_id": 1582,
+        "names": [
+          "innenrotation in seitenlage",
+          "rotacion interna tumbado de lado",
+          "rotation interne en decubitus lateral",
+          "side laying interior rotation"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "bird_dog",
+    "name": "Perdigueiro",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 100.0,
+        "wger_id": 1572,
+        "names": [
+          "bird dog",
+          "vierfu lerstand diagonal"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 51.95,
+        "wger_id": 1298,
+        "names": [
+          "extension de triceps cruzada en polea alta",
+          "extension des triceps croisee a la poulie haute nb",
+          "high cable cross tricep extention nb",
+          "trizepsstrecken uber kreuz am hohen kabelzug"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 50.91,
+        "wger_id": 50,
+        "names": [
+          "barbell triceps extension",
+          "estensione dei tricipiti con bilanciere",
+          "extension de triceps",
+          "extension des triceps a la barre",
+          "trizepsdrucken kh uber kopf"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 1572
+  },
+  {
+    "key": "press_pallof",
+    "name": "Press Pallof",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 100.0,
+        "wger_id": 1194,
+        "names": [
+          "pallof press"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 66.67,
+        "wger_id": 371,
+        "names": [
+          "beinpresse",
+          "leg press",
+          "prensa de piernas",
+          "presse a cuisses"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 63.64,
+        "wger_id": 478,
+        "names": [
+          "press de hombro con mancuernas",
+          "push press"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 1194
+  },
+  {
+    "key": "corrida_na_esteira",
+    "name": "Corrida na esteira",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 72.73,
+        "wger_id": 1615,
+        "names": [
+          "cardio en cinta",
+          "cardio sur tapis de course",
+          "laufband cardio",
+          "treadmill cardio"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 53.33,
+        "wger_id": 1007,
+        "names": [
+          "head turns",
+          "hoofd draaiingen",
+          "kopf drehen",
+          "la testa gira",
+          "putar kepala",
+          "rotacion de cabeza",
+          "tour de tete",
+          "virar a cabeca"
+        ],
+        "has_ai_image": true
+      },
+      {
+        "score": 52.94,
+        "wger_id": 983,
+        "names": [
+          "corsa sul posto con ginocchia alte",
+          "genoux hauts",
+          "high knees",
+          "joelhos para cima",
+          "knie hoch",
+          "lutut tinggi",
+          "rodillas elevadas",
+          "running in place"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 1615
+  },
+  {
+    "key": "bicicleta_ergometrica",
+    "name": "Bicicleta ergométrica",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 64.0,
+        "wger_id": 1618,
+        "names": [
+          "cardio auf dem heimtrainer",
+          "cardio en bicicleta estatica",
+          "cardio sur velo d appartement",
+          "stationary bike cardio"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 55.17,
+        "wger_id": 691,
+        "names": [
+          "remo al menton en multipower",
+          "remo vertical",
+          "rowing menton",
+          "rudern aufrecht mp",
+          "tirage menton a la smith machine",
+          "upright row on multi press"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 55.17,
+        "wger_id": 694,
+        "names": [
+          "aufrechtes rudern mit kurzhanteln",
+          "remo al menton con mancuernas",
+          "remo vertical",
+          "tirage menton avec halteres",
+          "upright row w dumbbells"
+        ],
+        "has_ai_image": false
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 1618
+  },
+  {
+    "key": "transport_eliptico",
+    "name": "Transport elíptico",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 53.33,
+        "wger_id": 691,
+        "names": [
+          "remo al menton en multipower",
+          "remo vertical",
+          "rowing menton",
+          "rudern aufrecht mp",
+          "tirage menton a la smith machine",
+          "upright row on multi press"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 53.33,
+        "wger_id": 694,
+        "names": [
+          "aufrechtes rudern mit kurzhanteln",
+          "remo al menton con mancuernas",
+          "remo vertical",
+          "tirage menton avec halteres",
+          "upright row w dumbbells"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 51.61,
+        "wger_id": 1198,
+        "names": [
+          "horizontal pull ups",
+          "inverted rows",
+          "inverted rows umgekehrtes rudern",
+          "remo invertido",
+          "rowing inverse",
+          "trazioni orizzontali"
+        ],
+        "has_ai_image": false
+      }
+    ]
+  },
+  {
+    "key": "pular_corda",
+    "name": "Pular corda",
+    "status": "unmatched",
+    "alternatives": [
+      {
+        "score": 62.07,
+        "wger_id": 285,
+        "names": [
+          "high knee jumps",
+          "hohe knie sprunge",
+          "saltos al pecho",
+          "sauts genoux hauts"
+        ],
+        "has_ai_image": true
+      },
+      {
+        "score": 58.33,
+        "wger_id": 1521,
+        "names": [
+          "pendular hack"
+        ],
+        "has_ai_image": false
+      },
+      {
+        "score": 58.06,
+        "wger_id": 990,
+        "names": [
+          "coice",
+          "contraccolpi in ginocchio",
+          "diz cokup geri tepme",
+          "extensions de la hanche",
+          "geknielde terugtrap",
+          "kickbacks berlutut",
+          "kickbacky v kleku",
+          "kneeling kickbacks"
+        ],
+        "has_ai_image": true
+      }
+    ]
+  },
+  {
+    "key": "polichinelo",
+    "name": "Polichinelo",
+    "status": "override",
+    "alternatives": [
+      {
+        "score": 100.0,
+        "wger_id": 320,
+        "names": [
+          "e",
+          "hampelmann",
+          "hampelmanner",
+          "hoppande jacks",
+          "jack z plama",
+          "jumping jack",
+          "jumping jacks",
+          "klapsprongen"
+        ],
+        "has_ai_image": true
+      },
+      {
+        "score": 91.0,
+        "wger_id": 1962,
+        "names": [
+          "low impact jumping jack",
+          "side step jack",
+          "step jack"
+        ],
+        "has_ai_image": true
+      },
+      {
+        "score": 66.67,
+        "wger_id": 285,
+        "names": [
+          "high knee jumps",
+          "hohe knie sprunge",
+          "saltos al pecho",
+          "sauts genoux hauts"
+        ],
+        "has_ai_image": true
+      }
+    ],
+    "score": 100.0,
+    "wger_id": 320
+  }
+]

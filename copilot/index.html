@@ -2,24 +2,29 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Diet Tracker - Controle de Dieta e Evolução</title>
-    <link rel="stylesheet" href="styles.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#07110d">
+    <title>Diet Tracker - Saúde e performance</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥗</text></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.css" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.css">
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+    <a class="skip-link" href="#appContent">Ir para o conteúdo</a>
     <div id="loginScreen" class="screen">
         <div class="login-background">
             <div class="login-container">
                 <div class="login-card">
                     <div class="login-header">
                         <div class="logo-container">
-                            <i class="fas fa-chart-line logo-icon"></i>
+                            <span class="brand-mark" aria-hidden="true"><i class="fas fa-leaf logo-icon"></i></span>
                             <h1 class="logo-text">Diet Tracker</h1>
                         </div>
-                        <p class="login-subtitle">Controle sua dieta e evolução com IA</p>
+                        <p class="login-subtitle">Sua saúde, seu ritmo, sua evolução.</p>
                     </div>
                     
                     <div class="login-tabs">
@@ -55,31 +60,34 @@
                     </form>
                     
                     <form id="registerForm" class="auth-form hidden">
-                        <div class="form-group">
-                            <label for="registerUsername">
-                                <i class="fas fa-user"></i>
-                                Nome de usuário
-                            </label>
-                            <input type="text" id="registerUsername" placeholder="Escolha um nome de usuário" required>
+                        <div class="field-group">
+                            <label class="field-label" for="registerUsername"><i class="fas fa-user"></i> Nome de usuário</label>
+                            <div class="field-input">
+                                <i class="fas fa-user field-input__icon" aria-hidden="true"></i>
+                                <input type="text" id="registerUsername" placeholder="Escolha um nome de usuário" autocomplete="username" required>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label for="registerPassword">
-                                <i class="fas fa-lock"></i>
-                                Senha
-                            </label>
-                            <input type="password" id="registerPassword" placeholder="Crie uma senha segura" required>
+                        <div class="field-group">
+                            <label class="field-label" for="registerPassword"><i class="fas fa-lock"></i> Senha</label>
+                            <div class="field-input">
+                                <i class="fas fa-lock field-input__icon" aria-hidden="true"></i>
+                                <input type="password" id="registerPassword" placeholder="Crie uma senha segura" autocomplete="new-password" required>
+                                <button type="button" class="field-reveal" data-reveal-target="registerPassword" aria-label="Mostrar senha"><i class="fas fa-eye"></i></button>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label for="confirmPassword">
-                                <i class="fas fa-lock"></i>
-                                Confirmar senha
-                            </label>
-                            <input type="password" id="confirmPassword" placeholder="Confirme sua senha" required>
+                        <div class="field-group">
+                            <label class="field-label" for="confirmPassword"><i class="fas fa-lock"></i> Confirmar senha</label>
+                            <div class="field-input">
+                                <i class="fas fa-lock field-input__icon" aria-hidden="true"></i>
+                                <input type="password" id="confirmPassword" placeholder="Confirme sua senha" autocomplete="new-password" required>
+                                <button type="button" class="field-reveal" data-reveal-target="confirmPassword" aria-label="Mostrar confirmação de senha"><i class="fas fa-eye"></i></button>
+                            </div>
                         </div>
-                        <button type="submit" class="btn-primary">
+                        <button type="submit" class="btn-primary btn-primary--block">
                             <i class="fas fa-user-plus"></i>
                             Criar Conta
                         </button>
+                        <p class="auth-helper">Crie sua conta para acompanhar refeições, medidas e planos.</p>
                     </form>
                     
                     <div id="authMessage" class="message"></div>
@@ -89,216 +97,290 @@
     </div>
 
     <div id="profileModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Complete seu Perfil</h3>
-                <p>Para personalizar suas dicas de nutrição e treino</p>
-            </div>
-            <form id="profileForm">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Idade</label>
-                        <input type="number" id="profileAge" min="10" max="100">
+            <div class="modal-content profile-sheet">
+                <div class="modal-header profile-sheet__header">
+                    <div>
+                        <span class="content-kicker">Personalização</span>
+                        <h3>Seu perfil</h3>
+                        <p>Conte-nos seus objetivos para personalizar dietas, treinos e recomendações.</p>
                     </div>
-                    <div class="form-group">
-                        <label>Gênero</label>
-                        <select id="profileGender">
-                            <option value="">Selecione...</option>
-                            <option value="masculino">Masculino</option>
-                            <option value="feminino">Feminino</option>
-                        </select>
-                    </div>
+                    <button type="button" class="btn-close" onclick="closeProfileModal()" aria-label="Fechar perfil">&times;</button>
                 </div>
-                <div class="form-group">
-                    <label>Objetivo Principal</label>
-                    <select id="profileGoal" required>
+                <form id="profileForm">
+                    <select id="profileGender" class="field-hidden" hidden>
+                        <option value="">Selecione...</option>
+                        <option value="masculino">Masculino</option>
+                        <option value="feminino">Feminino</option>
+                    </select>
+                    <select id="profileGoal" class="field-hidden" hidden required>
                         <option value="">Selecione...</option>
                         <option value="perder peso">Perder Peso</option>
                         <option value="ganhar massa muscular">Ganhar Massa Muscular</option>
                         <option value="manter peso">Manter Peso Atual</option>
                         <option value="melhorar saude">Melhorar Saúde Geral</option>
                     </select>
-                </div>
-                <div class="form-group">
-                    <label>Nível de Atividade</label>
-                    <select id="profileActivity">
+                    <select id="profileActivity" class="field-hidden" hidden>
                         <option value="">Selecione...</option>
-                        <option value="sedentario">Sedentário (pouco ou nenhum exercício)</option>
-                        <option value="leve">Leve (exercício 1-3 dias/semana)</option>
-                        <option value="moderado">Moderado (exercício 3-5 dias/semana)</option>
-                        <option value="intenso">Intenso (exercício 6-7 dias/semana)</option>
+                        <option value="sedentario">Sedentário</option>
+                        <option value="leve">Leve</option>
+                        <option value="moderado">Moderado</option>
+                        <option value="intenso">Intenso</option>
                     </select>
-                </div>
-                <div class="form-group">
-                    <label>Restrições Alimentares (opcional)</label>
-                    <textarea id="profileRestrictions" rows="3" placeholder="Ex: vegetariano, intolerância à lactose, alergia a nozes..."></textarea>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="profileWeight">Peso (kg)</label>
-                        <input type="number" id="profileWeight" step="0.1" min="0">
+
+                    <section class="profile-section">
+                        <div class="profile-section__head"><span class="profile-section__icon"><i class="fas fa-user"></i></span><div><strong>Gênero</strong><small>Como podemos te chamar</small></div></div>
+                        <div class="choice-grid choice-grid--2" id="genderCards" role="radiogroup" aria-label="Gênero">
+                            <button type="button" class="choice-card" data-value="masculino" role="radio"><span class="choice-card__icon"><i class="fas fa-mars"></i></span><span class="choice-card__label">Masculino</span></button>
+                            <button type="button" class="choice-card" data-value="feminino" role="radio"><span class="choice-card__icon"><i class="fas fa-venus"></i></span><span class="choice-card__label">Feminino</span></button>
+                        </div>
+                    </section>
+
+                    <section class="profile-section">
+                        <div class="profile-section__label"><span class="profile-section__icon"><i class="fas fa-bullseye"></i></span><div><strong>Objetivo principal</strong><small>O que você quer alcançar</small></div></div>
+                        <div class="choice-grid choice-grid--2" id="goalCards" role="radiogroup" aria-label="Objetivo principal">
+                            <button type="button" class="choice-card" data-value="perder peso" role="radio"><span class="choice-card__icon"><i class="fas fa-fire"></i></span><span class="choice-card__label">Perder peso</span></button>
+                            <button type="button" class="choice-card" data-value="ganhar massa muscular" role="radio"><span class="choice-card__icon"><i class="fas fa-dumbbell"></i></span><span class="choice-card__label">Ganhar massa</span></button>
+                            <button type="button" class="choice-card" data-value="manter peso" role="radio"><span class="choice-card__icon"><i class="fas fa-scale-balanced"></i></span><span class="choice-card__label">Manter peso</span></button>
+                            <button type="button" class="choice-card" data-value="melhorar saude" role="radio"><span class="choice-card__icon"><i class="fas fa-heart-pulse"></i></span><span class="choice-card__label">Melhorar saúde</span></button>
+                        </div>
+                    </section>
+
+                    <section class="profile-section">
+                        <div class="profile-section__label"><span class="profile-section__icon"><i class="fas fa-shoe-prints"></i></span><div><strong>Nível de atividade</strong><small>Seu ritmo semanal</small></div></div>
+                        <div class="choice-grid choice-grid--2" id="activityCards" role="radiogroup" aria-label="Nível de atividade">
+                            <button type="button" class="choice-card" data-value="sedentario" role="radio"><span class="choice-card__icon"><i class="fas fa-chair"></i></span><span class="choice-card__label">Sedentário</span></button>
+                            <button type="button" class="choice-card" data-value="leve" role="radio"><span class="choice-card__icon"><i class="fas fa-walking"></i></span><span class="choice-card__label">Leve</span></button>
+                            <button type="button" class="choice-card" data-value="moderado" role="radio"><span class="choice-card__icon"><i class="fas fa-person-running"></i></span><span class="choice-card__label">Moderado</span></button>
+                            <button type="button" class="choice-card" data-value="intenso" role="radio"><span class="choice-card__icon"><i class="fas fa-heartbeat"></i></span><span class="choice-card__label">Intenso</span></button>
+                        </div>
+                    </section>
+
+                    <section class="profile-section">
+                        <div class="profile-section__label"><span class="profile-section__icon"><i class="fas fa-birthday-cake"></i></span><div><strong>Idade</strong><small>Anos</small></div></div>
+                        <div class="stepper" data-step-field="profileAge">
+                            <button type="button" class="stepper__btn stepper__minus" aria-label="Diminuir idade"><i class="fas fa-minus"></i></button>
+                            <input type="number" id="profileAge" class="stepper__input" min="10" max="100" value="" placeholder="—" step="1">
+                            <button type="button" class="stepper__btn stepper__plus" aria-label="Aumentar idade"><i class="fas fa-plus"></i></button>
+                        </div>
+                    </section>
+
+                    <section class="profile-section profile-section--row">
+                        <div class="profile-section__col">
+                            <div class="profile-section__label"><span class="profile-section__icon"><i class="fas fa-weight-scale"></i></span><div><strong>Peso</strong><small>kg</small></div></div>
+                            <div class="stepper" data-field="profileWeight">
+                                <button type="button" class="stepper__btn stepper__minus" aria-label="Diminuir peso"><i class="fas fa-minus"></i></button>
+                                <input type="number" id="profileWeight" class="stepper__input" step="0.1" min="0" value="" placeholder="—">
+                                <button type="button" class="stepper__btn stepper__plus" aria-label="Aumentar peso"><i class="fas fa-plus"></i></button>
+                            </div>
+                        </div>
+                        <div class="profile-section__col">
+                            <div class="profile-section__label"><span class="profile-section__icon"><i class="fas fa-ruler-vertical"></i></span><div><strong>Altura</strong><small>cm</small></div></div>
+                            <div class="stepper" data-field="profileHeight">
+                                <button type="button" class="stepper__btn stepper__minus" aria-label="Diminuir altura"><i class="fas fa-minus"></i></button>
+                                <input type="number" id="profileHeight" class="stepper__input" step="1" min="0" value="" placeholder="—">
+                                <button type="button" class="stepper__btn stepper__plus" aria-label="Aumentar altura"><i class="fas fa-plus"></i></button>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="profile-section">
+                        <div class="profile-section__label"><span class="profile-section__icon"><i class="fas fa-seedling"></i></span><div><strong>Restrições alimentares</strong><small>Opcional — a IA considera para seus planos</small></div></div>
+                        <textarea id="profileRestrictions" rows="3" placeholder="Ex: vegetariano, intolerância à lactose, alergia a nozes..." class="field-textarea"></textarea>
+                    </section>
+
+                    <div class="sheet-actions">
+                        <button type="button" onclick="skipProfile()" class="btn-secondary">Pular por Agora</button>
+                        <button type="submit" class="btn-primary">Salvar Perfil</button>
                     </div>
-                    <div class="form-group">
-                        <label for="profileHeight">Altura (cm)</label>
-                        <input type="number" id="profileHeight" step="0.1" min="0">
-                    </div>
-                </div>
-                <div class="modal-actions">
-                    <button type="button" onclick="skipProfile()" class="btn-secondary">Pular por Agora</button>
-                    <button type="submit" class="btn-primary">Salvar Perfil</button>
-                </div>
-            </form>
+                </form>
+            </div>
         </div>
     </div>
 
     <div id="mainScreen" class="screen hidden">
-        <header class="header">
-            <div class="header-content">
-                <h1><i class="fas fa-chart-line"></i> Diet Tracker</h1>
-                <div class="user-info">
-                    <span id="welcomeUser">Bem-vindo!</span>
-                    <button id="editProfileBtn" class="btn-profile">
-                        <i class="fas fa-user-edit"></i> Editar Perfil
-                    </button>
-                    <button onclick="logout()" class="btn-logout">
-                        <i class="fas fa-sign-out-alt"></i> Sair
-                    </button>
-                    <button id="adminPanelBtn" class="btn-admin hidden" onclick="window.location.href='/admin'">
-                        <i class="fas fa-shield-alt"></i> Acessar Painel
+        <header class="app-header">
+            <div class="app-header__inner">
+                <a class="app-brand" href="#" onclick="showTab('diet'); return false" aria-label="Ir para o início">
+                    <span class="brand-mark" aria-hidden="true"><i class="fas fa-leaf"></i></span>
+                    <span><strong>Diet Tracker</strong><small>Saúde e performance</small></span>
+                </a>
+                <div class="app-header__actions">
+                    <button id="adminPanelBtn" class="header-icon-button hidden" onclick="window.location.href='/admin'" aria-label="Abrir painel administrativo"><i class="fas fa-shield-halved"></i></button>
+                    <button class="header-icon-button" onclick="showTab('stats')" aria-label="Abrir perfil">
+                        <span id="headerUserInitial" class="user-initial">U</span>
                     </button>
                 </div>
             </div>
         </header>
 
-        <nav class="nav-tabs">
-            <button class="nav-btn active" onclick="showTab('diet')"><i class="fas fa-utensils"></i> Diário Alimentar</button>
-            <button class="nav-btn" onclick="showTab('diet_plans')"><i class="fas fa-calendar-alt"></i> Planos de Dieta</button>
-            <button class="nav-btn" onclick="showTab('workout_plans')"><i class="fas fa-dumbbell"></i> Planos de Treino</button>
-            <button class="nav-btn" onclick="showTab('measurements')"><i class="fas fa-weight"></i> Medidas</button>
-            <button class="nav-btn" onclick="showTab('stats')"><i class="fas fa-chart-bar"></i> Estatísticas</button>
-            <button class="nav-btn" onclick="showTab('chat')"><i class="fas fa-robot"></i> Assistente IA</button>
-        </nav>
+        <div class="app-shell">
+            <nav class="nav-tabs" aria-label="Navegação principal">
+                <div class="nav-tabs-inner">
+                    <button class="nav-btn active" onclick="showTab('diet')"><i class="fas fa-house"></i><span>Início</span></button>
+                    <button class="nav-btn" onclick="showTab('diet_plans')"><i class="fas fa-bowl-food"></i><span>Dieta</span></button>
+                    <button class="nav-btn" onclick="showTab('workout_plans')"><i class="fas fa-dumbbell"></i><span>Treino</span></button>
+                    <button class="nav-btn" onclick="showTab('chat')"><i class="fas fa-wand-magic-sparkles"></i><span>IA</span><small class="premium-nav-dot" aria-label="Premium"></small></button>
+                    <button class="nav-btn" onclick="showTab('stats')"><i class="far fa-user"></i><span>Perfil</span></button>
+                </div>
+            </nav>
 
-        <div id="chatTab" class="tab-content hidden">
-            <div class="content-header">
-                <h2><i class="fas fa-robot"></i> Assistente Fitness IA</h2>
-                <button onclick="clearChat()" class="btn-secondary"><i class="fas fa-trash"></i> Limpar Chat</button>
-            </div>
-            <div class="chat-container">
-                <div id="chatMessages" class="chat-messages">
-                    <div class="chat-message bot-message">
-                        <div class="message-avatar"><i class="fas fa-robot"></i></div>
-                        <div class="message-content"><p>Olá! 👋 Sou seu assistente fitness pessoal. Como posso ajudá-lo hoje?</p></div>
+            <main id="appContent" class="app-content">
+                <div id="dietTab" class="tab-content">
+                    <section class="home-greeting">
+                        <div class="home-greeting__avatar"><span id="homeUserInitial">U</span><span class="online-dot"></span></div>
+                        <div>
+                            <span class="eyebrow">Visão de hoje</span>
+                            <h1 id="welcomeUser">Olá!</h1>
+                            <p id="homeDate">Continue construindo sua evolução.</p>
+                        </div>
+                        <button class="round-action" type="button" onclick="showTab('stats')" aria-label="Ver seu progresso"><i class="far fa-bell"></i></button>
+                    </section>
+
+                    <section class="daily-summary" aria-labelledby="dailySummaryTitle">
+                        <header class="section-heading section-heading--compact">
+                            <div><span class="eyebrow">Meta diária</span><h2 id="dailySummaryTitle">Resumo do dia</h2></div>
+                            <button type="button" class="text-button" onclick="showTab('stats')">Editar metas</button>
+                        </header>
+                        <div class="macro-grid">
+                            <article class="macro-card macro-card--calories"><span class="macro-card__icon"><i class="fas fa-fire"></i></span><strong id="todayCalories">0</strong><small>de 2.200 kcal</small><b>Calorias</b><span class="macro-progress"><i id="todayCaloriesProgress"></i></span></article>
+                            <article class="macro-card macro-card--protein"><span class="macro-card__icon"><i class="fas fa-drumstick-bite"></i></span><strong id="todayProtein">0 g</strong><small>de 160 g</small><b>Proteínas</b><span class="macro-progress"><i id="todayProteinProgress"></i></span></article>
+                            <article class="macro-card macro-card--carbs"><span class="macro-card__icon"><i class="fas fa-wheat-awn"></i></span><strong id="todayCarbs">0 g</strong><small>de 220 g</small><b>Carboidratos</b><span class="macro-progress"><i id="todayCarbsProgress"></i></span></article>
+                            <article class="macro-card macro-card--fat"><span class="macro-card__icon"><i class="fas fa-droplet"></i></span><strong id="todayFat">0 g</strong><small>de 70 g</small><b>Gorduras</b><span class="macro-progress"><i id="todayFatProgress"></i></span></article>
+                        </div>
+                    </section>
+
+                    <section class="today-cardapio" id="todayCardapioSection" aria-labelledby="todayCardapioTitle">
+                        <header class="section-heading section-heading--compact">
+                            <div><span class="eyebrow">Cardápio de hoje</span><h2 id="todayCardapioTitle">Plano do dia</h2></div>
+                            <div class="today-cardapio__rotate" id="todayDayChips" aria-label="Dia da rotação"></div>
+                        </header>
+                        <div id="todayCardapioBody" class="today-cardapio__body" aria-live="polite"></div>
+                    </section>
+
+                    <section class="diary-panel" aria-labelledby="todayMealsTitle">
+                        <header class="section-heading">
+                            <div><span class="eyebrow">Diário alimentar</span><h2 id="todayMealsTitle">Refeições registradas</h2></div>
+                            <button onclick="showAddDietModal()" class="icon-add-button" aria-label="Adicionar refeição"><i class="fas fa-plus"></i></button>
+                        </header>
+                        <div class="filters compact-filters">
+                            <label><span>De</span><input type="date" id="dietStartDate" onchange="loadDietEntries()"></label>
+                            <label><span>Até</span><input type="date" id="dietEndDate" onchange="loadDietEntries()"></label>
+                            <button onclick="clearDietFilters()" class="filter-reset" aria-label="Limpar período"><i class="fas fa-rotate-left"></i></button>
+                        </div>
+                        <div id="dietTableBody" class="meal-entry-list" aria-live="polite"></div>
+                        <button onclick="showAddDietModal()" class="btn-add dashboard-add"><i class="fas fa-plus"></i> Adicionar refeição</button>
+                    </section>
+
+                    <section class="quick-grid" aria-label="Atalhos">
+                        <button type="button" onclick="showTab('measurements')"><span><i class="fas fa-ruler-combined"></i></span><div><strong>Registrar medidas</strong><small>Acompanhe sua evolução corporal</small></div><i class="fas fa-chevron-right"></i></button>
+                        <button type="button" onclick="showTab('workout_plans')"><span><i class="fas fa-dumbbell"></i></span><div><strong>Treino de hoje</strong><small>Abra seu plano e inicie a sessão</small></div><i class="fas fa-chevron-right"></i></button>
+                    </section>
+                </div>
+
+                <div id="diet_plansTab" class="tab-content hidden">
+                    <div class="content-header">
+                        <div class="content-heading">
+                            <span class="content-kicker">Planejamento alimentar</span>
+                            <h2>Planos de dieta</h2>
+                            <p>Cardápios personalizados para sua meta, rotina e preferências.</p>
+                        </div>
+                        <button type="button" class="btn-primary plan-wizard-cta" data-plan-wizard="diet"><i class="fas fa-wand-magic-sparkles"></i> Criar plano guiado</button>
+                    </div>
+                    <div id="dietPlansTable" class="plans-grid" aria-live="polite"><div id="dietPlansTableBody"></div></div>
+                </div>
+
+                <div id="workout_plansTab" class="tab-content hidden">
+                    <div class="content-header">
+                        <div class="content-heading">
+                            <span class="content-kicker content-kicker--blue">Rotina de movimento</span>
+                            <h2>Planos de treino</h2>
+                            <p>Escolha uma divisão e acompanhe cada sessão com clareza.</p>
+                        </div>
+                        <button type="button" class="btn-primary btn-primary--blue plan-wizard-cta" data-plan-wizard="workout"><i class="fas fa-plus"></i> Criar plano guiado</button>
+                    </div>
+                    <div class="plan-filter-bar" aria-label="Filtros de treino">
+                        <label><span class="sr-only">Objetivo</span><select id="workoutGoalFilter"><option value="">Todos os objetivos</option><option value="hypertrophy">Hipertrofia</option><option value="strength">Força</option><option value="conditioning">Condicionamento</option><option value="fat_loss">Perda de gordura</option><option value="mobility">Mobilidade</option></select></label>
+                        <label><span class="sr-only">Experiência</span><select id="workoutExperienceFilter"><option value="">Toda experiência</option><option value="beginner">Iniciante</option><option value="intermediate">Intermediário</option><option value="advanced">Avançado</option></select></label>
+                        <label><span class="sr-only">Dias</span><select id="workoutDaysFilter"><option value="">Todos os dias</option><option value="2">2 dias</option><option value="3">3 dias</option><option value="4">4 dias</option><option value="5">5 dias</option><option value="6">6 dias</option></select></label>
+                    </div>
+                    <div id="workoutPlansTable" class="plans-grid plans-grid--workout" aria-live="polite"><div id="workoutPlansTableBody"></div></div>
+                </div>
+
+                <div id="chatTab" class="tab-content hidden">
+                    <div class="content-header">
+                        <div class="content-heading"><span class="content-kicker">Assistente premium</span><h2>Converse com sua IA</h2><p>Tire dúvidas e inicie planos personalizados.</p></div>
+                        <button onclick="clearChat()" class="btn-secondary"><i class="fas fa-trash"></i> Limpar</button>
+                    </div>
+                    <div class="chat-container">
+                        <div id="chatMessages" class="chat-messages">
+                            <div class="chat-message bot-message"><div class="message-avatar"><i class="fas fa-wand-magic-sparkles"></i></div><div class="message-content"><p>Olá! Sou seu assistente fitness. Posso ajudar com alimentação, treino e planejamento.</p></div></div>
+                        </div>
+                        <div class="chat-quick-actions">
+                            <button type="button" class="btn" id="quickDietBtn"><i class="fas fa-bowl-food"></i> Criar dieta</button>
+                            <button type="button" class="btn" id="quickWorkoutBtn"><i class="fas fa-dumbbell"></i> Criar treino</button>
+                        </div>
+                        <div class="chat-input-container">
+                            <div class="audio-controls"><button id="voiceButton" class="voice-btn" title="Falar com a IA"><i class="fas fa-microphone"></i></button><button id="speakButton" class="speak-btn" title="Ouvir última resposta"><i class="fas fa-volume-high"></i></button></div>
+                            <input type="text" id="chatInput" placeholder="Pergunte sobre sua rotina...">
+                            <button onclick="sendChatMessage()" class="send-btn" aria-label="Enviar mensagem"><i class="fas fa-arrow-up"></i></button>
+                        </div>
                     </div>
                 </div>
-                <div class="chat-quick-actions" style="display:flex; gap:1rem; justify-content:center; margin-bottom:1rem;">
-                    <button type="button" class="btn" id="quickDietBtn"><i class="fas fa-apple-alt"></i> Dieta Personalizada</button>
-                    <button type="button" class="btn" id="quickWorkoutBtn"><i class="fas fa-dumbbell"></i> Treino Personalizado</button>
-                </div>
-                <div class="chat-input-container">
-                    <div class="audio-controls">
-                        <button id="voiceButton" class="voice-btn" title="Falar com a IA">🎤</button>
-                        <button id="speakButton" class="speak-btn" title="Ouvir última resposta">🔊</button>
+
+                <div id="measurementsTab" class="tab-content hidden">
+                    <div class="content-header">
+                        <div class="content-heading"><button class="back-button" type="button" onclick="showTab('stats')" aria-label="Voltar ao perfil"><i class="fas fa-arrow-left"></i></button><span class="content-kicker">Evolução corporal</span><h2>Suas medidas</h2><p>Registre dados comparáveis e acompanhe as mudanças ao longo do tempo.</p></div>
+                        <button onclick="showAddMeasurementModal()" class="btn-add"><i class="fas fa-plus"></i> Nova medição</button>
                     </div>
-                    <input type="text" id="chatInput" placeholder="Digite sua mensagem ou use o microfone..." />
-                    <button onclick="sendChatMessage()" class="send-btn">Enviar</button>
+                    <div class="filters compact-filters">
+                        <label><span>De</span><input type="date" id="measurementStartDate" onchange="loadMeasurements()"></label>
+                        <label><span>Até</span><input type="date" id="measurementEndDate" onchange="loadMeasurements()"></label>
+                        <button onclick="clearMeasurementFilters()" class="filter-reset" aria-label="Limpar período"><i class="fas fa-rotate-left"></i></button>
+                    </div>
+                    <div id="measurementTableBody" class="measurement-list" aria-live="polite"></div>
                 </div>
-            </div>
+
+                <div id="statsTab" class="tab-content hidden">
+                    <section class="profile-hero">
+                        <div class="profile-avatar"><span id="profileUserInitial">U</span></div>
+                        <div><span class="content-kicker">Seu espaço</span><h2 id="profileUserName">Perfil</h2><p id="profileMembership">Plano gratuito</p></div>
+                        <button id="editProfileBtn" type="button" class="btn-secondary" onclick="openProfileEditor()"><i class="fas fa-pen"></i> Editar</button>
+                    </section>
+                    <div class="stats-grid">
+                        <article class="stat-card stat-card--large"><span class="stat-card__icon"><i class="fas fa-weight-scale"></i></span><div><small>Última medição</small><div id="latestMeasurement">Carregando...</div></div></article>
+                        <article class="stat-card"><span class="stat-card__icon"><i class="fas fa-bowl-food"></i></span><div><small>Registros totais</small><strong id="totalDietEntries">0</strong></div></article>
+                        <article class="stat-card"><span class="stat-card__icon stat-card__icon--blue"><i class="fas fa-chart-line"></i></span><div><small>Últimos 7 dias</small><strong id="recentDietEntries">0</strong></div></article>
+                    </div>
+                    <section class="profile-menu" aria-label="Opções do perfil">
+                        <button type="button" onclick="showTab('measurements')"><span><i class="fas fa-ruler-combined"></i></span><div><strong>Medidas corporais</strong><small>Histórico de peso e composição</small></div><i class="fas fa-chevron-right"></i></button>
+                        <button type="button" onclick="openProfileEditor()"><span><i class="far fa-id-card"></i></span><div><strong>Dados e objetivos</strong><small>Preferências usadas pela IA</small></div><i class="fas fa-chevron-right"></i></button>
+                        <button type="button" onclick="openExerciseCredits()"><span><i class="fas fa-image"></i></span><div><strong>Créditos das imagens</strong><small>Autores, fontes e licenças dos exercícios</small></div><i class="fas fa-chevron-right"></i></button>
+                        <button type="button" id="profileAdminLink" class="hidden" onclick="window.location.href='/admin'"><span><i class="fas fa-shield-halved"></i></span><div><strong>Painel administrativo</strong><small>Gestão da plataforma</small></div><i class="fas fa-chevron-right"></i></button>
+                        <button type="button" class="profile-menu__danger" onclick="logout()"><span><i class="fas fa-arrow-right-from-bracket"></i></span><div><strong>Sair da conta</strong><small>Encerrar esta sessão</small></div><i class="fas fa-chevron-right"></i></button>
+                    </section>
+                </div>
+            </main>
         </div>
 
-        <div id="dietTab" class="tab-content">
-            <div class="content-header">
-                <h2><i class="fas fa-utensils"></i> Diário Alimentar</h2>
-                <button onclick="showAddDietModal()" class="btn-add"><i class="fas fa-plus"></i> Adicionar Refeição</button>
-            </div>
-            <div class="filters">
-                <input type="date" id="dietStartDate" onchange="loadDietEntries()">
-                <input type="date" id="dietEndDate" onchange="loadDietEntries()">
-                <button onclick="clearDietFilters()" class="btn-secondary">Limpar Filtros</button>
-            </div>
-            <div class="table-container">
-                <table id="dietTable" class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Data</th><th>Refeição</th><th>Descrição</th><th>Calorias</th><th>Proteínas</th><th>Carboidratos</th><th>Gorduras</th><th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody id="dietTableBody"></tbody>
-                </table>
-            </div>
-        </div>
+        <button id="activeWorkoutDock" type="button" class="active-workout-dock hidden" aria-label="Abrir treino em andamento">
+            <span class="active-workout-dock__pulse" aria-hidden="true"><i class="fas fa-dumbbell"></i></span>
+            <span class="active-workout-dock__copy"><small>Treino em andamento</small><strong id="activeWorkoutDockTitle">Treino atual</strong></span>
+            <time id="activeWorkoutDockTimer" data-workout-elapsed>00:00:00</time>
+            <i class="fas fa-chevron-right" aria-hidden="true"></i>
+        </button>
 
-        <div id="diet_plansTab" class="tab-content hidden">
-            <div class="content-header">
-                <h2><i class="fas fa-calendar-alt"></i> Meus Planos de Dieta</h2>
-                <p>Aqui ficam os planos de dieta gerados pela IA. Peça um novo no chat!</p>
-            </div>
-            <div class="table-container">
-                <table id="dietPlansTable" class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Título</th><th>Descrição</th><th>Criado em</th><th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody id="dietPlansTableBody"></tbody>
-                </table>
-            </div>
-        </div>
-
-        <div id="workout_plansTab" class="tab-content hidden">
-            <div class="content-header">
-                <h2><i class="fas fa-dumbbell"></i> Meus Planos de Treino</h2>
-                <p>Aqui ficam os planos de treino gerados pela IA. Peça um novo no chat!</p>
-            </div>
-            <div class="table-container">
-                <table id="workoutPlansTable" class="data-table">
-                    <thead>
-                        <tr>
-                           <th>Título</th><th>Descrição</th><th>Criado em</th><th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody id="workoutPlansTableBody"></tbody>
-                </table>
-            </div>
-        </div>
-        
-        <div id="measurementsTab" class="tab-content hidden">
-            <div class="content-header">
-                <h2><i class="fas fa-weight"></i> Medidas Corporais</h2>
-                <button onclick="showAddMeasurementModal()" class="btn-add"><i class="fas fa-plus"></i> Adicionar</button>
-            </div>
-            <div class="filters">
-                <input type="date" id="measurementStartDate" onchange="loadMeasurements()">
-                <input type="date" id="measurementEndDate" onchange="loadMeasurements()">
-                <button onclick="clearMeasurementFilters()" class="btn-secondary">Limpar Filtros</button>
-            </div>
-            <div class="table-container">
-                <table id="measurementTable" class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Data</th><th>Peso (kg)</th><th>Altura (cm)</th><th>% Gordura</th><th>Massa Muscular</th><th>Cintura (cm)</th><th>Peito (cm)</th><th>Braço (cm)</th><th>Coxa (cm)</th><th>Observações</th><th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody id="measurementTableBody"></tbody>
-                </table>
-            </div>
-        </div>
-
-        <div id="statsTab" class="tab-content hidden">
-            <div class="content-header"><h2><i class="fas fa-chart-bar"></i> Estatísticas</h2></div>
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <h3>Última Medição</h3>
-                    <div id="latestMeasurement">Carregando...</div>
+        <div id="exerciseCreditsModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="exerciseCreditsTitle">
+            <div class="modal-content exercise-credits-sheet">
+                <div class="modal-header">
+                    <div>
+                        <span class="content-kicker">Mídia de exercícios</span>
+                        <h3 id="exerciseCreditsTitle">Créditos das imagens</h3>
+                        <p>Imagens importadas do wger e armazenadas localmente para uso offline.</p>
+                    </div>
+                    <button type="button" class="btn-close" onclick="closeExerciseCredits()" aria-label="Fechar créditos">&times;</button>
                 </div>
-                <div class="stat-card">
-                    <h3>Total de Registros de Dieta</h3>
-                    <div id="totalDietEntries">Carregando...</div>
-                </div>
-                <div class="stat-card">
-                    <h3>Registros dos Últimos 7 Dias</h3>
-                    <div id="recentDietEntries">Carregando...</div>
-                </div>
+                <div class="exercise-credits-notice"><i class="fas fa-scale-balanced"></i><p>Cada imagem mantém a licença e atribuição informadas pelo autor no wger. Exercícios sem mídia confiável usam ilustrações locais.</p></div>
+                <div id="exerciseCreditsList" class="exercise-credits-list"></div>
             </div>
         </div>
 
@@ -306,58 +388,104 @@
             <div class="modal-content">
                 <h2 id="dietModalTitle"><i class="fas fa-utensils"></i> Adicionar Refeição</h2>
                 <form id="dietForm">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="dietDate">Data</label>
-                            <input type="date" id="dietDate" required>
+                    <input type="hidden" id="dietId">
+                    <select id="dietMeal" class="field-hidden" hidden required>
+                        <option value="">Selecione...</option>
+                        <option value="Café da manhã">Café da manhã</option>
+                        <option value="Lanche da manhã">Lanche da manhã</option>
+                        <option value="Almoço">Almoço</option>
+                        <option value="Lanche da tarde">Lanche da tarde</option>
+                        <option value="Jantar">Jantar</option>
+                        <option value="Ceia">Ceia</option>
+                    </select>
+
+                    <section class="profile-section">
+                        <div class="profile-section__label"><span class="profile-section__icon"><i class="fas fa-clock"></i></span><div><strong>Quando?</strong><small>Refeição do dia</small></div></div>
+                        <div class="quick-chips" id="dietDateChips" aria-label="Data da refeição">
+                            <button type="button" class="chip-btn" data-day-offset="0"><i class="fas fa-sun"></i> Hoje</button>
+                            <button type="button" class="chip-btn" data-day-offset="-1"><i class="fas fa-arrow-rotate-left"></i> Ontem</button>
                         </div>
                         <div class="form-group">
-                            <label for="dietMeal">Refeição</label>
-                            <select id="dietMeal" required>
-                                <option value="">Selecione...</option>
-                                <option value="Café da manhã">Café da manhã</option>
-                                <option value="Lanche da manhã">Lanche da manhã</option>
-                                <option value="Almoço">Almoço</option>
-                                <option value="Lanche da tarde">Lanche da tarde</option>
-                                <option value="Jantar">Jantar</option>
-                                <option value="Ceia">Ceia</option>
-                            </select>
+                            <label for="dietDate" class="field-label">Data específica</label>
+                            <input type="date" id="dietDate" class="field-input" required>
                         </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="dietDescription">Descrição</label>
-                        <input type="text" id="dietDescription" placeholder="Ex: 2 fatias de pão integral com queijo" required>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="dietCalories">Calorias</label>
-                            <input type="number" id="dietCalories" step="0.1" min="0">
+                    </section>
+
+                    <section class="profile-section">
+                        <div class="profile-section__label"><span class="profile-section__icon"><i class="fas fa-bowl-food"></i></span><div><strong>Tipo de refeição</strong><small>Escolha uma opção</small></div></div>
+                        <div class="choice-grid choice-grid--2" id="mealTypeCards" role="radiogroup" aria-label="Tipo de refeição">
+                            <button type="button" class="choice-card" data-value="Café da manhã" role="radio"><span class="choice-card__icon"><i class="fas fa-mug-hot"></i></span><span class="choice-card__label">Café da manhã</span></button>
+                            <button type="button" class="choice-card" data-value="Lanche da manhã" role="radio"><span class="choice-card__icon"><i class="fas fa-apple-whole"></i></span><span class="choice-card__label">Lanche da manhã</span></button>
+                            <button type="button" class="choice-card" data-value="Almoço" role="radio"><span class="choice-card__icon"><i class="fas fa-sun"></i></span><span class="choice-card__label">Almoço</span></button>
+                            <button type="button" class="choice-card" data-value="Lanche da tarde" role="radio"><span class="choice-card__icon"><i class="fas fa-mug-saucer"></i></span><span class="choice-card__label">Lanche da tarde</span></button>
+                            <button type="button" class="choice-card" data-value="Jantar" role="radio"><span class="choice-card__icon"><i class="fas fa-moon"></i></span><span class="choice-card__label">Jantar</span></button>
+                            <button type="button" class="choice-card" data-value="Ceia" role="radio"><span class="choice-card__icon"><i class="fas fa-moon"></i></span><span class="choice-card__label">Ceia</span></button>
                         </div>
-                        <div class="form-group">
-                            <label for="dietProtein">Proteínas (g)</label>
-                            <input type="number" id="dietProtein" step="0.1" min="0">
+                    </section>
+
+                    <section class="profile-section">
+                        <div class="profile-section__label"><span class="profile-section__icon"><i class="fas fa-utensils"></i></span><div><strong>O que você comeu?</strong><small>Descreva os alimentos</small></div></div>
+                        <div class="field-input">
+                            <i class="fas fa-utensils field-input__icon" aria-hidden="true"></i>
+                            <input type="text" id="dietDescription" class="field-input__core" placeholder="Ex: 2 fatias de pão integral com queijo" required>
                         </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="dietCarbs">Carboidratos (g)</label>
-                            <input type="number" id="dietCarbs" step="0.1" min="0">
-                        </div>
-                        <div class="form-group">
-                            <label for="dietFat">Gorduras (g)</label>
-                            <input type="number" id="dietFat" step="0.1" min="0">
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <button type="button" class="btn-secondary" id="generateMacrosBtn">
+                    </section>
+
+                    <section class="profile-section">
+                        <div class="profile-section__label"><span class="profile-section__icon"><i class="fas fa-wand-magic-sparkles"></i></span><div><strong>Macros estimados</strong><small>Ajuste ou gere com IA</small></div></div>
+                        <button type="button" class="btn-secondary macros-ai" id="generateMacrosBtn">
                             <span id="generateMacrosBtnText"><i class="fas fa-robot"></i> Gerar Macros com IA</span>
                             <span id="generateMacrosLoading" class="hidden"><i class="fas fa-spinner fa-spin"></i> Gerando...</span>
                         </button>
                         <span id="precisionBadge" class="precision-low"></span>
-                    </div>
-                    <div class="modal-actions">
+                        <div class="macro-grid">
+                            <div class="macro-stepper">
+                                <span class="macro-stepper__icon"><i class="fas fa-fire"></i></span>
+                                <label for="dietCalories">Calorias</label>
+                                <div class="stepper" data-field="dietCalories" data-step="10">
+                                    <button type="button" class="stepper__btn stepper__minus" aria-label="Diminuir calorias"><i class="fas fa-minus"></i></button>
+                                    <input type="number" id="dietCalories" class="stepper__input" step="10" min="0" value="" placeholder="0">
+                                    <button type="button" class="stepper__btn stepper__plus" aria-label="Aumentar calorias"><i class="fas fa-plus"></i></button>
+                                </div>
+                            </div>
+                            <div class="macro-stepper">
+                                <span class="macro-stepper__icon"><i class="fas fa-drumstick-bite"></i></span>
+                                <label for="dietProtein">Proteínas (g)</label>
+                                <div class="stepper" data-field="dietProtein" data-step="1">
+                                    <button type="button" class="stepper__btn stepper__minus" aria-label="Diminuir proteínas"><i class="fas fa-minus"></i></button>
+                                    <input type="number" id="dietProtein" class="stepper__input" step="1" min="0" value="" placeholder="0">
+                                    <button type="button" class="stepper__btn stepper__plus" aria-label="Aumentar proteínas"><i class="fas fa-plus"></i></button>
+                                </div>
+                            </div>
+                            <div class="macro-stepper">
+                                <span class="macro-stepper__icon"><i class="fas fa-wheat-awn"></i></span>
+                                <label for="dietCarbs">Carboidratos (g)</label>
+                                <div class="stepper" data-field="dietCarbs" data-step="1">
+                                    <button type="button" class="stepper__btn stepper__minus" aria-label="Diminuir carboidratos"><i class="fas fa-minus"></i></button>
+                                    <input type="number" id="dietCarbs" class="stepper__input" step="1" min="0" value="" placeholder="0">
+                                    <button type="button" class="stepper__btn stepper__plus" aria-label="Aumentar carboidratos"><i class="fas fa-plus"></i></button>
+                                </div>
+                            </div>
+                            <div class="macro-stepper">
+                                <span class="macro-stepper__icon"><i class="fas fa-droplet"></i></span>
+                                <label for="dietFat">Gorduras (g)</label>
+                                <div class="stepper" data-field="dietFat" data-step="1">
+                                    <button type="button" class="stepper__btn stepper__minus" aria-label="Diminuir gorduras"><i class="fas fa-minus"></i></button>
+                                    <input type="number" id="dietFat" class="stepper__input" step="1" min="0" value="" placeholder="0">
+                                    <button type="button" class="stepper__btn stepper__plus" aria-label="Aumentar gorduras"><i class="fas fa-plus"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <details class="collapse">
+                        <summary><i class="fas fa-note-sticky"></i> Observações (opcional)</summary>
+                        <textarea id="dietNotes" rows="2" class="field-textarea" placeholder="Observações opcionais..."></textarea>
+                    </details>
+
+                    <div class="sheet-actions">
                         <button type="button" onclick="closeDietModal()" class="btn-secondary">Cancelar</button>
-                        <button type="submit" class="btn-primary">Salvar</button>
+                        <button type="submit" id="dietSaveBtn" class="btn-primary"><span>Salvar refeição</span><span id="dietSaveLoading" class="hidden"><i class="fas fa-spinner fa-spin"></i></span></button>
                     </div>
                 </form>
                 <div id="dietMessage" class="modal-message"></div>
@@ -368,6 +496,7 @@
             <div class="modal-content">
                 <h2 id="measurementModalTitle"><i class="fas fa-weight"></i> Adicionar Medida</h2>
                 <form id="measurementForm">
+                    <input type="hidden" id="measurementId">
                     <div class="form-group">
                         <label for="measurementDate">Data</label>
                         <input type="date" id="measurementDate" required>
@@ -418,18 +547,52 @@
                     </div>
                     <div class="modal-actions">
                         <button type="button" onclick="closeMeasurementModal()" class="btn-secondary">Cancelar</button>
-                        <button type="submit" class="btn-primary">Salvar</button>
+                        <button type="submit" id="measurementSaveBtn" class="btn-primary"><span>Salvar</span><span id="measurementSaveLoading" class="hidden"><i class="fas fa-spinner fa-spin"></i></span></button>
                     </div>
                 </form>
                 <div id="measurementMessage" class="modal-message"></div>
             </div>
         </div>
 
-        <div id="viewDietPlanModal" class="modal">
+        <div id="guidedPlanModal" class="modal plan-wizard-modal" role="dialog" aria-modal="true" aria-labelledby="planWizardTitle" aria-describedby="planWizardDescription" aria-hidden="true">
+            <div class="modal-content plan-wizard">
+                <form id="guidedPlanForm" novalidate>
+                    <header class="plan-wizard__header">
+                        <div class="plan-wizard__heading">
+                            <span id="planWizardIcon" class="plan-wizard__icon" aria-hidden="true"><i class="fas fa-apple-alt"></i></span>
+                            <div>
+                                <span id="planWizardKicker" class="content-kicker">Plano guiado</span>
+                                <h3 id="planWizardTitle">Criar plano</h3>
+                                <p id="planWizardDescription">Responda algumas perguntas para personalizar seu plano.</p>
+                            </div>
+                        </div>
+                        <button type="button" id="planWizardClose" class="btn-close" data-wizard-action="close" aria-label="Fechar questionário">&times;</button>
+                    </header>
+
+                    <div class="plan-wizard__progress" aria-label="Progresso do questionário">
+                        <ol id="planWizardSteps" class="plan-wizard__steps"></ol>
+                        <div class="plan-wizard__track" aria-hidden="true"><span id="planWizardProgressBar"></span></div>
+                    </div>
+
+                    <div id="planWizardStep" class="plan-wizard__body" aria-live="polite"></div>
+                    <div id="planWizardError" class="plan-wizard__error hidden" role="alert" tabindex="-1"></div>
+
+                    <footer class="plan-wizard__actions">
+                        <button type="button" class="btn-secondary" data-wizard-action="close">Cancelar</button>
+                        <div class="plan-wizard__navigation">
+                            <button type="button" id="planWizardBack" class="btn-secondary" data-wizard-action="back"><i class="fas fa-arrow-left"></i> Voltar</button>
+                            <button type="submit" id="planWizardNext" class="btn-primary"><span id="planWizardNextLabel">Continuar</span><i id="planWizardNextIcon" class="fas fa-arrow-right"></i></button>
+                        </div>
+                    </footer>
+                </form>
+            </div>
+        </div>
+
+        <div id="viewDietPlanModal" class="modal plan-modal" role="dialog" aria-modal="true" aria-labelledby="viewDietPlanTitle">
             <div class="modal-content">
                 <div class="modal-header">
+                    <button onclick="closeViewDietPlanModal()" class="btn-close" aria-label="Voltar"><i class="fas fa-arrow-left"></i></button>
                     <h3 id="viewDietPlanTitle">Plano de Dieta</h3>
-                    <button onclick="closeViewDietPlanModal()" class="btn-close">&times;</button>
                 </div>
                 <div id="viewDietPlanDetails" class="plan-details-container"></div>
                 <div class="modal-actions">
@@ -438,11 +601,55 @@
             </div>
         </div>
 
-        <div id="viewWorkoutPlanModal" class="modal">
+        <div id="editPlanMealModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="editPlanMealTitle">
             <div class="modal-content">
                 <div class="modal-header">
+                    <button onclick="closeEditPlanMealModal()" class="btn-close" aria-label="Fechar edição">&times;</button>
+                    <h3 id="editPlanMealTitle">Editar refeição do plano</h3>
+                </div>
+                <form id="editPlanMealForm">
+                    <input type="hidden" id="editPlanMealId">
+                    <div class="form-group">
+                        <label for="editPlanMealDescription">Descrição / Ingredientes</label>
+                        <textarea id="editPlanMealDescription" rows="3" placeholder="Ex: 2 ovos, 1 fatia de pão integral" required></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="editPlanMealNotes">Observações</label>
+                        <textarea id="editPlanMealNotes" rows="2" placeholder="Observações opcionais..."></textarea>
+                    </div>
+                    <div class="modal-actions">
+                        <button type="button" onclick="closeEditPlanMealModal()" class="btn-secondary">Cancelar</button>
+                        <button type="submit" class="btn-primary">Salvar alteração</button>
+                    </div>
+                </form>
+                <div id="editPlanMealMessage" class="modal-message"></div>
+            </div>
+        </div>
+
+        <div id="suggestDietModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="suggestDietTitle">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button onclick="closeSuggestDietModal()" class="btn-close" aria-label="Fechar sugestão">&times;</button>
+                    <h3 id="suggestDietTitle">Sugerir mudanças no cardápio</h3>
+                </div>
+                <p class="modal-hint">Descreva o que deseja ajustar nesse dia e a IA reescreve apenas o cardápio de hoje.</p>
+                <textarea id="suggestDietFeedback" rows="3" placeholder="Ex: Trocar o lanche da manhã por algo mais leve..." class="form-textarea"></textarea>
+                <div id="suggestDietLoading" class="modal-message hidden"></div>
+                <div id="suggestDietPreview" class="suggest-preview hidden"></div>
+                <div class="modal-actions">
+                    <button type="button" onclick="closeSuggestDietModal()" class="btn-secondary">Cancelar</button>
+                    <button type="button" id="suggestDietGenerateBtn" class="btn-primary" onclick="generateDietDaySuggestion()"><i class="fas fa-wand-magic-sparkles"></i> Gerar sugestão</button>
+                    <button type="button" id="suggestDietApplyBtn" class="btn-primary hidden" onclick="applyDietDaySuggestion()"><i class="fas fa-check"></i> Aplicar ao plano</button>
+                </div>
+                <div id="suggestDietMessage" class="modal-message"></div>
+            </div>
+        </div>
+
+        <div id="viewWorkoutPlanModal" class="modal plan-modal" role="dialog" aria-modal="true" aria-labelledby="viewWorkoutPlanTitle">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button onclick="closeViewWorkoutPlanModal()" class="btn-close" aria-label="Voltar"><i class="fas fa-arrow-left"></i></button>
                     <h3 id="viewWorkoutPlanTitle">Plano de Treino</h3>
-                    <button onclick="closeViewWorkoutPlanModal()" class="btn-close">&times;</button>
                 </div>
                 <div id="viewWorkoutPlanDetails" class="plan-details-container"></div>
                 <div class="modal-actions">
@@ -453,7 +660,9 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.js"></script>
+    <script src="js/exercise-media.js"></script>
+    <script src="js/utils.js"></script>
     <script src="script.js"></script>
+    <script src="js/plans.js"></script>
 </body>
 </html>
-

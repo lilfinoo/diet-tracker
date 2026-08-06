@@ -498,15 +498,14 @@
                             <tr>
                                 <th>ID</th>
                                 <th>Nome</th>
-                                <th>Email</th>
                                 <th>Status</th>
-                                <th>Último Acesso</th>
+                                <th>Criado em</th>
                                 <th>Ações</th>
                             </tr>
                         </thead>
                         <tbody id="usersTableBody">
                             <tr>
-                                <td colspan="6" class="loading">
+                                <td colspan="5" class="loading">
                                     <i class="fas fa-spinner"></i>
                                     Carregando usuários...
                                 </td>
@@ -674,7 +673,7 @@
         async function loadDashboardData() {
             // Estatísticas
             try {
-                const res = await fetch('/api/admin_dashboard');
+                const res = await fetch('/api/admin/dashboard', { credentials: 'include' });
                 const data = await res.json();
                 const statsDiv = document.getElementById('dashboardStats');
                 if (statsDiv) {
@@ -717,7 +716,7 @@
 
             // Atividades Recentes
             try {
-                const res = await fetch('/api/admin/recent_activity');
+                const res = await fetch('/api/admin/recent_activity', { credentials: 'include' });
                 const activities = await res.json();
                 const activityDiv = document.getElementById('recentActivity');
                 if (activityDiv) {
@@ -731,16 +730,16 @@
                         let desc = '';
                         if (act.type === 'user') {
                             icon = 'fa-user-plus'; color = '#667eea';
-                            desc = `Novo usuário: <strong>${act.username}</strong>`;
+                            desc = `Novo usuário: <strong>${escapeHtml(act.username)}</strong>`;
                         } else if (act.type === 'diet') {
                             icon = 'fa-utensils'; color = '#27ae60';
-                            desc = `Nova dieta de <strong>${act.username}</strong>: ${act.description}`;
+                            desc = `Nova dieta de <strong>${escapeHtml(act.username)}</strong>: ${escapeHtml(act.description)}`;
                         } else if (act.type === 'measurement') {
                             icon = 'fa-ruler'; color = '#f39c12';
-                            desc = `Nova medição de <strong>${act.username}</strong>`;
+                            desc = `Nova medição de <strong>${escapeHtml(act.username)}</strong>`;
                         } else if (act.type === 'chat') {
                             icon = 'fa-comments'; color = '#16a085';
-                            desc = `Nova mensagem no chat de <strong>${act.username}</strong>`;
+                            desc = `Nova mensagem no chat de <strong>${escapeHtml(act.username)}</strong>`;
                         }
                         const date = new Date(act.created_at).toLocaleString('pt-BR');
                         return `
@@ -762,35 +761,40 @@
         // Usuários
         async function loadUsersData() {
             try {
-                const res = await fetch('/api/users');
+                const res = await fetch('/api/admin/users', { credentials: 'include' });
                 const users = await res.json();
                 const tbody = document.getElementById('usersTableBody');
                 if (tbody) {
                     if (!users.length) {
-                        tbody.innerHTML = `<tr><td colspan="6" class="loading">Nenhum usuário encontrado.</td></tr>`;
+                        tbody.innerHTML = `<tr><td colspan="5" class="loading">Nenhum usuário encontrado.</td></tr>`;
                         return;
                     }
                     tbody.innerHTML = users.map(user => `
                         <tr>
-                            <td>${user.id}</td>
-                            <td>${user.username}</td>
-                            <td>${user.email || '-'}</td>
+                            <td>${escapeHtml(user.id)}</td>
+                            <td>${escapeHtml(user.username)}</td>
                             <td>
                                 <span class="status-badge ${user.is_banned ? 'status-inactive' : 'status-active'}">
                                     ${user.is_banned ? 'Banido' : 'Ativo'}
                                 </span>
                                 ${user.is_admin ? '<span class="status-badge status-pending" style="margin-left:5px;">Admin</span>' : ''}
+                                <span class="status-badge ${user.is_premium ? 'status-active' : 'status-inactive'}" style="margin-left:5px;">
+                                    ${user.is_premium ? 'Premium' : 'Grátis'}
+                                </span>
                             </td>
-                            <td>${user.last_login ? new Date(user.last_login).toLocaleString('pt-BR') : '-'}</td>
+                            <td>${user.created_at ? new Date(user.created_at).toLocaleString('pt-BR') : '-'}</td>
                             <td>
-                                <button class="btn btn-secondary" onclick="editUser(${user.id})"><i class="fas fa-edit"></i></button>
-                                <button class="btn btn-danger" onclick="banUser(${user.id})"><i class="fas fa-user-slash"></i></button>
+                                <button class="btn" onclick='setPremium(${JSON.stringify(String(user.id))}, ${user.is_premium})'>
+                                    <i class="fas ${user.is_premium ? 'fa-star-half-alt' : 'fa-star'}"></i>
+                                    ${user.is_premium ? 'Revogar Premium' : 'Conceder Premium'}
+                                </button>
+                                <button class="btn btn-danger" onclick='banUser(${JSON.stringify(String(user.id))}, ${user.is_banned})'><i class="fas fa-user-slash"></i></button>
                             </td>
                         </tr>
                     `).join('');
                 }
             } catch (error) {
-                document.getElementById('usersTableBody').innerHTML = `<tr><td colspan="6" class="loading">Erro ao carregar usuários.</td></tr>`;
+                document.getElementById('usersTableBody').innerHTML = `<tr><td colspan="5" class="loading">Erro ao carregar usuários.</td></tr>`;
             }
         }
 
@@ -844,6 +848,43 @@
         async function loadSettingsData() {
             // Implemente conforme seu backend
             // Exemplo: buscar e preencher configurações do sistema
+        }
+
+        function escapeHtml(value) {
+            const element = document.createElement('span');
+            element.textContent = value ?? '';
+            return element.innerHTML;
+        }
+
+        async function banUser(userId, isBanned) {
+            const action = isBanned ? 'unban' : 'ban';
+            const response = await fetch(`/api/admin/users/${userId}/${action}`, {
+                method: 'POST', credentials: 'include'
+            });
+            if (!response.ok) {
+                alert((await response.json()).error || 'Não foi possível atualizar o usuário.');
+                return;
+            }
+            loadUsersData();
+        }
+
+        async function setPremium(userId, isPremium) {
+            const grantPremium = !isPremium;
+            const action = grantPremium ? 'conceder' : 'revogar';
+            if (!confirm(`Deseja ${action} o acesso Premium deste usuário?`)) return;
+
+            const response = await fetch(`/api/admin/users/${userId}/premium`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ is_premium: grantPremium })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                alert(data.error || 'Não foi possível atualizar o acesso Premium.');
+                return;
+            }
+            loadUsersData();
         }
 
         // Initialize dashboard on page load

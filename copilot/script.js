@@ -5,8 +5,6 @@ let currentUser = null;
 let currentTab = 'diet';
 let dietEntries = [];
 let measurements = [];
-let dietPlans = []; // NOVO: Para armazenar planos de dieta
-let workoutPlans = []; // NOVO: Para armazenar planos de treino
 
 // API Base URL
 const API_BASE = '/api';
@@ -19,6 +17,7 @@ function getElement(id) {
     }    
     return element;
 }
+
 // Adiciona um event listener apenas se o elemento existir
 function addEventListenerSafe(id, event, handler) {
     const el = getElement(id);
@@ -87,11 +86,128 @@ function hideGlobalLoading() {
     if (loading) loading.remove();
 }
 
+// --- CONTROLES VISUAIS (cards de escolha, steppers, chips de data, revelar senha) ---
+function bindChoiceCardGrid(gridId, targetId) {
+    const grid = getElement(gridId);
+    const target = getElement(targetId);
+    if (!grid || !target) return;
+    grid.querySelectorAll(".choice-card").forEach(card => {
+        card.addEventListener("click", function() {
+            const value = card.dataset.value;
+            if (!value) return;
+            target.value = value;
+            grid.querySelectorAll(".choice-card").forEach(c => c.classList.toggle("is-active", c === card));
+            card.setAttribute("aria-checked", "true");
+            grid.querySelectorAll(".choice-card").forEach(c => {
+                if (c !== card) c.setAttribute("aria-checked", "false");
+            });
+            target.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+    });
+}
+
+function syncChoiceCardGrid(gridId, targetId) {
+    const grid = getElement(gridId);
+    const target = getElement(targetId);
+    if (!grid || !target) return;
+    const value = target.value || "";
+    grid.querySelectorAll(".choice-card").forEach(card => {
+        const active = card.dataset.value === value;
+        card.classList.toggle("is-active", active);
+        card.setAttribute("aria-checked", active ? "true" : "false");
+    });
+}
+
+function bindStepper(stepperEl) {
+    const input = stepperEl.querySelector("input");
+    if (!input) return;
+    const minus = stepperEl.querySelector(".stepper__minus");
+    const plus = stepperEl.querySelector(".stepper__plus");
+    const stepAttr = stepperEl.dataset.step;
+    const step = stepAttr != null ? parseFloat(stepAttr) : (input.step ? parseFloat(input.step) : 1) || 1;
+    const min = input.min != null && input.min !== "" ? parseFloat(input.min) : -Infinity;
+    const max = input.max != null && input.max !== "" ? parseFloat(input.max) : Infinity;
+
+    function adjust(delta) {
+        let current = parseFloat(input.value);
+        if (Number.isNaN(current)) current = 0;
+        let next = current + delta * step;
+        if (step < 1) next = Math.round(next * 10) / 10;
+        if (next < min) next = min;
+        if (next > max) next = max;
+        input.value = next;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    if (minus) minus.addEventListener("click", () => adjust(-1));
+    if (plus) plus.addEventListener("click", () => adjust(1));
+}
+
+function syncDietDateChips() {
+    const chips = getElement("dietDateChips");
+    const dateInput = getElement("dietDate");
+    if (!chips || !dateInput) return;
+    const current = dateInput.value || "";
+    chips.querySelectorAll(".chip-btn").forEach(btn => {
+        const offset = parseInt(btn.dataset.dayOffset || "0", 10);
+        const targetDate = localDateInputValue(new Date(Date.now() + offset * 24 * 60 * 60 * 1000));
+        btn.classList.toggle("is-active", current === targetDate);
+    });
+}
+
+function bindDietDateChips() {
+    const chips = getElement("dietDateChips");
+    const dateInput = getElement("dietDate");
+    if (!chips || !dateInput) return;
+    chips.querySelectorAll(".chip-btn").forEach(btn => {
+        btn.addEventListener("click", function() {
+            const offset = parseInt(btn.dataset.dayOffset || "0", 10);
+            const targetDate = new Date(Date.now() + offset * 24 * 60 * 60 * 1000);
+            dateInput.value = localDateInputValue(targetDate);
+            chips.querySelectorAll(".chip-btn").forEach(c => c.classList.toggle("is-active", c === btn));
+            dateInput.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+    });
+    dateInput.addEventListener("change", syncDietDateChips);
+}
+
+function bindFieldReveal() {
+    document.querySelectorAll(".field-reveal").forEach(button => {
+        button.addEventListener("click", function() {
+            const target = getElement(button.dataset.revealTarget);
+            if (!target) return;
+            const show = target.type === "password";
+            target.type = show ? "text" : "password";
+            button.setAttribute("aria-label", show ? "Ocultar senha" : "Mostrar senha");
+            button.innerHTML = show ? '<i class="fas fa-eye-slash"></i>' : '<i class="fas fa-eye"></i>';
+        });
+    });
+}
+
+function setupAppStyleControls() {
+    bindChoiceCardGrid("genderCards", "profileGender");
+    bindChoiceCardGrid("goalCards", "profileGoal");
+    bindChoiceCardGrid("activityCards", "profileActivity");
+    bindChoiceCardGrid("mealTypeCards", "dietMeal");
+    document.querySelectorAll(".stepper").forEach(bindStepper);
+    bindDietDateChips();
+    bindFieldReveal();
+}
+
+function syncChoiceCards() {
+    syncChoiceCardGrid("genderCards", "profileGender");
+    syncChoiceCardGrid("goalCards", "profileGoal");
+    syncChoiceCardGrid("activityCards", "profileActivity");
+    syncChoiceCardGrid("mealTypeCards", "dietMeal");
+}
+
 // Adiciona listeners ao carregar a página
 document.addEventListener('DOMContentLoaded', function() {
     setDefaultDates();
     initializeAudioFeatures();
     checkAuthStatus();
+    setupAppStyleControls();
+    syncChoiceCards();
 
     // Autocomplete local para descrição dos alimentos
     const dietDescription = getElement("dietDescription");
@@ -107,15 +223,16 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .catch(error => console.error("Erro ao carregar alimentos.json:", error));
 
-        const awesomplete = new Awesomplete(dietDescription, {
+        const awesomplete = window.Awesomplete ? new Awesomplete(dietDescription, {
             minChars: 2,
             maxItems: 10,
             autoFirst: true
-        });
+        }) : null;
 
         dietDescription.addEventListener("input", function() {
             const query = dietDescription.value.trim().toLowerCase();
             if (query.length < 2) return;
+            if (!awesomplete) return;
             awesomplete.list = alimentosList.filter(desc =>
                 desc.toLowerCase().includes(query)
             );
@@ -153,6 +270,15 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // Formulário de edição de refeição do plano
+    const editPlanMealForm = document.getElementById("editPlanMealForm");
+    if (editPlanMealForm) {
+        editPlanMealForm.addEventListener("submit", async function(e) {
+            e.preventDefault();
+            await handleEditPlanMealSubmit(e);
+        });
+    }
+
     // Auth forms
     addEventListenerSafe("loginForm", "submit", handleLogin);
     addEventListenerSafe("registerForm", "submit", handleRegister);
@@ -174,12 +300,12 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Botões rápidos do chat (NOVO)
+    // Os atalhos abrem o questionário guiado sem disparar uma geração pelo chat.
     addEventListenerSafe("quickDietBtn", "click", function() {
-        sendChatMessageWithProfile("Gere um plano de dieta personalizado para mim, considerando meu perfil.");
+        if (window.openPlanWizard) window.openPlanWizard("diet");
     });
     addEventListenerSafe("quickWorkoutBtn", "click", function() {
-        sendChatMessageWithProfile("Gere um plano de treino personalizado para mim, considerando meu perfil.");
+        if (window.openPlanWizard) window.openPlanWizard("workout");
     });
 
     // Modal close events
@@ -258,7 +384,7 @@ async function handleDietFormSubmit() {
     const payload = {
         id: dietIdRaw,
         date: document.getElementById("dietDate").value,
-        meal_type: document.getElementById("dietMealType").value,
+        meal_type: document.getElementById("dietMeal").value,
         description: document.getElementById("dietDescription").value,
         calories: parseNumber(document.getElementById("dietCalories").value),
         protein: parseNumber(document.getElementById("dietProtein").value),
@@ -274,6 +400,7 @@ async function handleDietFormSubmit() {
         const response = await fetch(url, {
             method,
             headers: { "Content-Type": "application/json" },
+            credentials: "include",
             body: JSON.stringify(payload)
         });
 
@@ -281,6 +408,7 @@ async function handleDietFormSubmit() {
             showToast("Dieta salva com sucesso!", "success");
             closeDietModal();
             loadDietEntries();
+            loadTodayCardapio();
         } else {
             const errorData = await response.json();
             showToast(errorData.error || "Erro ao salvar dieta!", "error");
@@ -328,6 +456,7 @@ async function handleMeasurementFormSubmit() {
         const response = await fetch(url, {
             method,
             headers: { "Content-Type": "application/json" },
+            credentials: "include",
             body: JSON.stringify(payload)
         });
 
@@ -335,16 +464,17 @@ async function handleMeasurementFormSubmit() {
             closeMeasurementModal();
             loadMeasurements();
             showToast(isEdit ? "Medidas atualizadas!" : "Medidas adicionadas!", "success");
-            // Atualiza o peso e altura do perfil com os últimos valores registrados
-            await fetch(`${API_BASE}/profile`, {
-                method: "POST", // Ou PUT, dependendo da sua API
-                headers: { "Content-Type": "application/json" },
-                credentials: "include",
-                body: JSON.stringify({ 
-                    weight: payload.weight,
-                    height: payload.height
-                })
-            });
+            const profileUpdate = {};
+            if (payload.weight != null) profileUpdate.weight = payload.weight;
+            if (payload.height != null) profileUpdate.height = payload.height;
+            if (Object.keys(profileUpdate).length) {
+                await fetch(`${API_BASE}/profile`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "include",
+                    body: JSON.stringify(profileUpdate)
+                });
+            }
         } else {
             const data = await response.json();
             showToast(data.error || "Erro ao salvar", "error");
@@ -366,7 +496,8 @@ function setupModalEvents() {
     const modals = [
         { id: "dietModal", closeFunc: closeDietModal },
         { id: "measurementModal", closeFunc: closeMeasurementModal },
-        { id: "profileModal", closeFunc: closeProfileModal }
+        { id: "profileModal", closeFunc: closeProfileModal },
+        { id: "exerciseCreditsModal", closeFunc: closeExerciseCredits }
     ];
 
     modals.forEach(modal => {
@@ -404,11 +535,11 @@ function setupPlanViewModals() {
 
 // Set default dates
 function setDefaultDates() {
-    const today = new Date().toISOString().split('T')[0];
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const today = localDateInputValue();
+    const weekAgo = localDateInputValue(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
     
     const dateFields = [
-        { id: 'dietStartDate', value: weekAgo },
+        { id: 'dietStartDate', value: today },
         { id: 'dietEndDate', value: today },
         { id: 'measurementStartDate', value: weekAgo },
         { id: 'measurementEndDate', value: today },
@@ -455,6 +586,7 @@ function showLoginScreen() {
     
     if (loginScreen) loginScreen.classList.remove('hidden');
     if (mainScreen) mainScreen.classList.add('hidden');
+    if (window.clearActiveWorkoutDock) window.clearActiveWorkoutDock();
     
     clearForms();
 }
@@ -467,33 +599,43 @@ function showMainScreen() {
     if (mainScreen) mainScreen.classList.remove('hidden');
     
     if (currentUser) {
+        const username = currentUser.username || 'Usuário';
+        const initial = username.trim().charAt(0).toUpperCase() || 'U';
         const welcomeUser = getElement('welcomeUser');
-        if (welcomeUser) {
-            welcomeUser.textContent = `Bem-vindo, ${currentUser.username}!`;
+        if (welcomeUser) welcomeUser.textContent = `Olá, ${username}`;
+        ['headerUserInitial', 'homeUserInitial', 'profileUserInitial'].forEach(id => {
+            const element = getElement(id);
+            if (element) element.textContent = initial;
+        });
+        const profileUserName = getElement('profileUserName');
+        if (profileUserName) profileUserName.textContent = username;
+        const profileMembership = getElement('profileMembership');
+        if (profileMembership) profileMembership.textContent = currentUser.is_premium ? 'Membro Premium' : 'Plano gratuito';
+        const homeDate = getElement('homeDate');
+        if (homeDate) {
+            const formatted = new Intl.DateTimeFormat('pt-BR', {
+                weekday: 'long',
+                day: '2-digit',
+                month: 'long'
+            }).format(new Date());
+            homeDate.textContent = formatted.charAt(0).toUpperCase() + formatted.slice(1);
         }
-        // Mostra o botão admin se for admin
-        const adminBtn = getElement('adminPanelBtn');
-        if (adminBtn) {
-            if (currentUser && currentUser.is_admin) {
-                adminBtn.classList.remove('hidden');
-            } else {
-                adminBtn.classList.add('hidden');
-            }
-        }
+
+        const isAdmin = Boolean(currentUser.is_admin);
+        getElement('adminPanelBtn')?.classList.toggle('hidden', !isAdmin);
+        getElement('profileAdminLink')?.classList.toggle('hidden', !isAdmin);
     }
-    
-    // NOVO: Define a visibilidade inicial da aba de chat
+
     const chatNavBtn = document.querySelector(`[onclick="showTab('chat')"]`);
     if (chatNavBtn) {
-        if (currentUser && currentUser.is_admin) {
-            chatNavBtn.style.display = ''; // Mostra
-        } else {
-            chatNavBtn.style.display = 'none'; // Oculta
-        }
+        chatNavBtn.style.display = '';
+        chatNavBtn.classList.toggle('is-locked', !currentUser?.is_premium);
+        chatNavBtn.setAttribute('aria-label', currentUser?.is_premium ? 'Assistente IA' : 'Assistente IA, recurso Premium');
     }
 
     showTab('diet'); // Sempre começa na aba de dieta
     checkUserProfile();
+    if (window.loadActiveWorkoutDock) window.loadActiveWorkoutDock();
 }
 
 /**
@@ -539,13 +681,7 @@ async function sendChatMessage() {
             hideTypingIndicator();
             lastAIResponse = data.response; // Salva para reprodução de áudio
             addMessageToChat(data.response, "bot");
-            // NOVO: Se a resposta da IA indica que um plano foi salvo, recarregue as listas
-            if (data.response.includes("plano de dieta") && data.response.includes("salvo")) {
-                loadDietPlans();
-            }
-            if (data.response.includes("plano de treino") && data.response.includes("salvo")) {
-                loadWorkoutPlans();
-            }
+            if (window.handlePlanChatAction) window.handlePlanChatAction(data.action);
         } else {
             hideTypingIndicator();
             const errorData = await response.json();
@@ -561,7 +697,7 @@ async function sendChatMessage() {
 /**
  * Envia mensagem para a IA com o perfil do usuário (usado pelos botões rápidos)
  */
-async function sendChatMessageWithProfile(message) {
+async function sendChatMessageWithProfile(message, intent) {
     const chatMessages = getElement("chatMessages");
     if (!chatMessages) return;
     addMessageToChat(message, "user");
@@ -572,25 +708,17 @@ async function sendChatMessageWithProfile(message) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             credentials: "include",
-            body: JSON.stringify({ message })
+            body: JSON.stringify({ message, intent })
         });
         const data = await response.json();
         hideTypingIndicator();
         if (response.ok && data.response) {
             addMessageToChat(data.response, "bot");
             lastAIResponse = data.response;
-            // NOVO: Se a resposta da IA indica que um plano foi salvo, recarregue as listas
-            if (data.response.includes("plano de dieta") && data.response.includes("salvo")) {
-                loadDietPlans();
-            }
-            if (data.response.includes("plano de treino") && data.response.includes("salvo")) {
-                loadWorkoutPlans();
-            }
-        } else {
-            const errorData = await response.json();
-            addMessageToChat(errorData.error || "Erro ao obter resposta da IA.", "bot");
+            if (window.handlePlanChatAction) window.handlePlanChatAction(data.action);
         }
-    } catch (e) {
+    } catch (error) {
+        console.error("Chat error:", error);
         hideTypingIndicator();
         addMessageToChat("Erro de conexão com a IA.", "bot");
     }
@@ -606,7 +734,7 @@ function addMessageToChat(message, sender) {
         <div class="message-avatar">
             <i class="fas ${sender === "bot" ? "fa-robot" : "fa-user"}"></i>
         </div>
-        <div class="message-content">${message}</div>
+        <div class="message-content">${escapeHtml(message)}</div>
     `;
     chatMessages.appendChild(messageDiv);
     chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -891,6 +1019,11 @@ async function logout() {
 // Interface functions
 // Interface functions
 function showTab(tabName) {
+    if (tabName === 'chat' && !currentUser?.is_premium) {
+        showToast('O Assistente IA está disponível no plano Premium.', 'info');
+        return;
+    }
+
     // Remove active class from all nav buttons
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.classList.remove('active');
@@ -901,18 +1034,10 @@ function showTab(tabName) {
         tab.classList.add('hidden');
     });
     
-    // Lógica para controlar a visibilidade da aba de chat
     const chatNavBtn = document.querySelector(`[onclick="showTab('chat')"]`);
     if (chatNavBtn) {
-        if (currentUser && currentUser.is_admin) {
-            chatNavBtn.style.display = ''; // Mostra o botão da aba
-        } else {
-            chatNavBtn.style.display = 'none'; // Oculta o botão da aba
-            if (tabName === 'chat') {
-                showTab('diet'); // Redireciona para aba padrão se não for admin
-                return;
-            }
-        }
+        chatNavBtn.style.display = '';
+        chatNavBtn.classList.toggle('is-locked', !currentUser?.is_premium);
     }
 
     // Show selected tab
@@ -922,16 +1047,20 @@ function showTab(tabName) {
     }
     
     // Add active class to clicked button
-    const activeBtn = document.querySelector(`[onclick="showTab('${tabName}')"]`);
+    const navTabName = tabName === 'measurements' ? 'stats' : tabName;
+    const activeBtn = document.querySelector(`[onclick="showTab('${navTabName}')"]`);
     if (activeBtn) {
         activeBtn.classList.add('active');
     }
     
     currentTab = tabName;
+    document.body.dataset.activeTab = tabName;
+    window.scrollTo({ top: 0, behavior: 'instant' });
     
     // Carrega os dados corretos para cada aba
     if (tabName === 'diet') {
         loadDietEntries();
+        loadTodayCardapio();
     } else if (tabName === 'measurements') {
         loadMeasurements();
     } else if (tabName === 'stats') {
@@ -977,25 +1106,55 @@ function clearForms() {
 }
 
 // Modal functions
+let activeModal = null;
+let modalTrigger = null;
+
+function openAppModal(modal) {
+    if (!modal) return;
+    modalTrigger = document.activeElement;
+    activeModal = modal;
+    modal.classList.add("show");
+    document.body.classList.add("modal-open");
+    const focusTarget = modal.querySelector(".btn-close, input:not([type='hidden']), select, textarea, button");
+    if (focusTarget) requestAnimationFrame(() => focusTarget.focus());
+}
+
+function closeAppModal(modal) {
+    if (!modal) return;
+    modal.classList.remove("show");
+    if (activeModal === modal) {
+        activeModal = null;
+        document.body.classList.remove("modal-open");
+        if (modalTrigger instanceof HTMLElement) modalTrigger.focus();
+        modalTrigger = null;
+    }
+}
+
+document.addEventListener("keydown", function(event) {
+    if (event.key === "Escape" && activeModal && activeModal.dataset.modalLocked !== "true") closeAppModal(activeModal);
+});
+
 function showAddDietModal() {
     const modal = getElement("dietModal");
     const title = getElement("dietModalTitle");
     const form = getElement("dietForm");
     
-    if (modal) modal.style.display = "block";
     if (title) title.textContent = "Adicionar Registro de Dieta";
     if (form) form.reset();
     
     // Set today's date
     const dietDate = getElement("dietDate");
     if (dietDate) {
-        dietDate.value = new Date().toISOString().split('T')[0];
+        dietDate.value = localDateInputValue();
     }
+    syncDietDateChips();
+    syncChoiceCards();
+    openAppModal(modal);
 }
 
 function closeDietModal() {
     const modal = getElement("dietModal");
-    if (modal) modal.style.display = "none";
+    closeAppModal(modal);
     clearForms();
 }
 
@@ -1004,41 +1163,117 @@ function showAddMeasurementModal() {
     const title = getElement("measurementModalTitle");
     const form = getElement("measurementForm");
     
-    if (modal) modal.style.display = "block";
     if (title) title.textContent = "Adicionar Medidas";
     if (form) form.reset();
     
     // Set today's date
     const measurementDate = getElement("measurementDate");
     if (measurementDate) {
-        measurementDate.value = new Date().toISOString().split('T')[0];
+        measurementDate.value = localDateInputValue();
     }
+    openAppModal(modal);
 }
 
 function closeMeasurementModal() {
     const modal = getElement("measurementModal");
-    if (modal) modal.style.display = "none";
+    closeAppModal(modal);
     clearForms();
 }
 
 function closeProfileModal() {
     const modal = getElement("profileModal");
-    if (modal) modal.style.display = "none";
+    closeAppModal(modal);
 }
 
 function skipProfile() {
     closeProfileModal();
 }
 
+function fillProfileForm(profile) {
+    const values = {
+        profileAge: profile?.age,
+        profileGender: profile?.gender,
+        profileGoal: profile?.goal,
+        profileActivity: profile?.activity_level,
+        profileRestrictions: profile?.dietary_restrictions,
+        profileWeight: profile?.weight,
+        profileHeight: profile?.height
+    };
+    Object.entries(values).forEach(([id, value]) => {
+        const field = getElement(id);
+        if (field) field.value = value ?? '';
+    });
+    syncChoiceCards();
+}
+
+async function openProfileEditor() {
+    try {
+        const response = await fetch(`${API_BASE}/profile`, { credentials: 'include' });
+        if (!response.ok) throw new Error('Não foi possível carregar o perfil.');
+        const data = await response.json();
+        fillProfileForm(data.profile);
+        openAppModal(getElement('profileModal'));
+    } catch (error) {
+        showToast(error.message || 'Erro ao carregar perfil.', 'error');
+    }
+}
+
+function safeExternalUrl(value) {
+    try {
+        const url = new URL(String(value || ""));
+        return ["http:", "https:"].includes(url.protocol) ? url.href : "#";
+    } catch (error) {
+        return "#";
+    }
+}
+
+function openExerciseCredits() {
+    const container = getElement('exerciseCreditsList');
+    const entries = Object.values(window.EXERCISE_MEDIA || {});
+    if (!container) return;
+
+    const grouped = new Map();
+    entries.forEach(entry => {
+        const group = grouped.get(entry.image) || { ...entry, names: [] };
+        group.names.push(entry.name);
+        grouped.set(entry.image, group);
+    });
+    const credits = Array.from(grouped.values()).sort((left, right) => left.names[0].localeCompare(right.names[0], 'pt-BR'));
+    container.innerHTML = credits.length ? credits.map(entry => {
+        const authorUrl = safeExternalUrl(entry.author_url);
+        const sourceUrl = safeExternalUrl(entry.object_url || entry.derivative_source_url || entry.source_url);
+        const author = escapeHtml(entry.author || 'wger community');
+        return `
+            <article class="exercise-credit-card">
+                <img src="${escapeHtml(entry.image)}" alt="" loading="lazy">
+                <div class="exercise-credit-card__body">
+                    <h4>${entry.names.map(escapeHtml).join(', ')}</h4>
+                    <p>Imagem por ${authorUrl === '#' ? `<strong>${author}</strong>` : `<a href="${escapeHtml(authorUrl)}" target="_blank" rel="noopener noreferrer">${author}</a>`}${entry.license_title ? ` · ${escapeHtml(entry.license_title)}` : ''}</p>
+                    <div class="exercise-credit-card__links">
+                        <a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Fonte da imagem <i class="fas fa-arrow-up-right-from-square"></i></a>
+                        <a href="${escapeHtml(safeExternalUrl(entry.license_url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(entry.license || 'Creative Commons')}</a>
+                        ${entry.is_ai_generated ? '<span><i class="fas fa-wand-magic-sparkles"></i> Gerada por IA</span>' : ''}
+                    </div>
+                </div>
+            </article>`;
+    }).join('') : '<div class="empty-state"><strong>Nenhuma mídia externa importada.</strong></div>';
+    openAppModal(getElement('exerciseCreditsModal'));
+}
+
+function closeExerciseCredits() {
+    closeAppModal(getElement('exerciseCreditsModal'));
+}
+
 // NOVO: Funções para modais de visualização de planos
 function closeViewDietPlanModal() {
     const modal = getElement("viewDietPlanModal");
-    if (modal) modal.style.display = "none";
+    closeAppModal(modal);
 }
 
 function closeViewWorkoutPlanModal() {
     const modal = getElement("viewWorkoutPlanModal");
-    if (modal) modal.style.display = "none";
+    if (window.invalidateWorkoutView) window.invalidateWorkoutView();
+    closeAppModal(modal);
 }
 
 // Data functions
@@ -1117,9 +1352,8 @@ async function loadStats() {
                 if (stats.latest_measurement) {
                     const m = stats.latest_measurement;
                     latestMeasurement.innerHTML = `
-                        <strong>Data:</strong> ${formatDate(m.date)}<br>
-                        <strong>Peso:</strong> ${m.weight || 'N/A'} kg<br>
-                        <strong>% Gordura:</strong> ${m.body_fat || 'N/A'}%
+                        <strong>${m.weight != null ? `${escapeHtml(m.weight)} kg` : 'Sem peso'}</strong>
+                        <span>${m.body_fat != null ? `${escapeHtml(m.body_fat)}% de gordura` : 'Composição não informada'} · ${formatDate(m.date)}</span>
                     `;
                 } else {
                     latestMeasurement.textContent = "Nenhuma medição registrada";
@@ -1136,190 +1370,6 @@ async function loadStats() {
         }
     } catch (error) {
         console.error('Error loading stats:', error);
-    }
-}
-
-async function loadDashboard() {
-    try {
-        const res = await fetch('/api/admin_dashboard');
-        if (!res.ok) throw new Error('Erro ao buscar dashboard');
-        const data = await res.json();
-
-        const dashboardStats = getElement('dashboardStats');
-        if (dashboardStats) {
-            dashboardStats.innerHTML = `
-                <div class="dashboard-grid">
-                    <div class="dashboard-card"><h2>${data.total_users}</h2><p>Usuários</p></div>
-                    <div class="dashboard-card"><h2>${data.total_admins}</h2><p>Admins</p></div>
-                    <div class="dashboard-card"><h2>${data.total_banned}</h2><p>Banidos</p></div>
-                    <div class="dashboard-card"><h2>${data.total_diet_entries}</h2><p>Dietas</p></div>
-                    <div class="dashboard-card"><h2>${data.total_measurements}</h2><p>Medidas</p></div>
-                    <div class="dashboard-card"><h2>${data.total_chat_messages}</h2><p>Mensagens Chat</p></div>
-                </div>
-            `;
-        }
-    } catch (error) {
-        console.error('Erro ao carregar dashboard:', error);
-        const dashboardStats = getElement('dashboardStats');
-        if (dashboardStats) {
-            dashboardStats.innerHTML = '<p class="text-danger">Erro ao carregar estatísticas do dashboard</p>';
-        }
-    }
-}
-
-async function loadRecentActivity() {
-    try {
-        const res = await fetch('/api/admin/recent_activity');
-        if (!res.ok) throw new Error('Erro ao buscar atividades');
-        const activities = await res.json();
-
-        const activityDiv = getElement('recentActivity');
-        if (!activityDiv) return;
-
-        if (activities.length === 0) {
-            activityDiv.innerHTML = '<p>Nenhuma atividade recente.</p>';
-            return;
-        }
-
-        activityDiv.innerHTML = activities.map(act => {
-            let icon = '';
-            let desc = '';
-            if (act.type === 'user') {
-                icon = '<i class="fas fa-user-plus"></i>';
-                desc = `Novo usuário: <strong>${act.username}</strong>`;
-            } else if (act.type === 'diet') {
-                icon = '<i class="fas fa-utensils"></i>';
-                desc = `Nova dieta de <strong>${act.username}</strong>: ${act.description}`;
-            } else if (act.type === 'measurement') {
-                icon = '<i class="fas fa-ruler"></i>';
-                desc = `Nova medição de <strong>${act.username}</strong>`;
-            } else if (act.type === 'chat') {
-                icon = '<i class="fas fa-comments"></i>';
-                desc = `Nova mensagem no chat de <strong>${act.username}</strong>`;
-            }
-            const date = new Date(act.created_at).toLocaleString('pt-BR');
-            return `
-                <div style="display: flex; align-items: center; gap: 1rem; padding: 0.5rem 0;">
-                    <span style="font-size: 1.5rem;">${icon}</span>
-                    <span>${desc}</span>
-                    <span style="margin-left:auto; color:#64748b; font-size:0.9rem;">${date}</span>
-                </div>
-            `;
-        }).join('');
-    } catch (error) {
-        console.error('Erro ao carregar atividades:', error);
-        const activityDiv = document.getElementById('recentActivity');
-        if (activityDiv) activityDiv.innerHTML = '<p class="text-danger">Erro ao carregar atividades recentes</p>';
-    }
-}
-
-// NOVO: Funções para carregar e renderizar Planos de Dieta
-async function loadDietPlans() {
-    showGlobalLoading("Carregando planos de dieta...");
-    try {
-        const response = await fetch(`${API_BASE}/diet_plans`, {
-            credentials: 'include'
-        });
-        if (response.ok) {
-            dietPlans = await response.json();
-            renderDietPlansTable();
-        } else {
-            console.error('Failed to load diet plans');
-            showToast("Erro ao carregar planos de dieta.", "error");
-        }
-    } catch (error) {
-        console.error('Error loading diet plans:', error);
-        showToast("Erro de conexão ao carregar planos de dieta.", "error");
-    } finally {
-        hideGlobalLoading();
-    }
-}
-
-function renderDietPlansTable() {
-    const tbody = getElement("dietPlansTableBody");
-    if (!tbody) return;
-    tbody.innerHTML = "";
-
-    if (dietPlans.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4">Nenhum plano de dieta encontrado. Peça um para a IA!</td></tr>';
-        return;
-    }
-
-    dietPlans.forEach(plan => {
-        const row = document.createElement("tr");
-        row.innerHTML = `
-            <td>${plan.title}</td>
-            <td>${plan.description || '-'}
-            <td>${formatDateTime(plan.created_at)}</td>
-            <td>
-                <button onclick="viewDietPlan(${plan.id})" class="btn-edit">
-                    <i class="fas fa-eye"></i> Ver
-                </button>
-                <button onclick="deleteDietPlan(${plan.id})" class="btn-delete">
-                    <i class="fas fa-trash"></i>
-                </button>
-            </td>
-        `;
-        tbody.appendChild(row);
-    });
-}
-
-async function viewDietPlan(id) {
-    showGlobalLoading("Carregando detalhes do plano de dieta...");
-    try {
-        const response = await fetch(`${API_BASE}/diet_plans/${id}`, {
-            credentials: 'include'
-        });
-        if (response.ok) {
-            const plan = await response.json();
-            const modal = getElement("viewDietPlanModal");
-            const title = getElement("viewDietPlanTitle");
-            const detailsDiv = getElement("viewDietPlanDetails");
-
-            if (modal && title && detailsDiv) {
-                title.textContent = plan.title;
-                let htmlContent = `
-                    <p><strong>Descrição:</strong> ${plan.description || 'N/A'}</p>
-                    <p><strong>Criado em:</strong> ${formatDateTime(plan.created_at)}</p>
-                `;
-
-                if (plan.meals && plan.meals.length > 0) {
-                    const mealsByDay = plan.meals.reduce((acc, meal) => {
-                        const day = meal.day_of_week || 'Geral';
-                        if (!acc[day]) acc[day] = [];
-                        acc[day].push(meal);
-                        return acc;
-                    }, {});
-
-                    for (const day in mealsByDay) {
-                        htmlContent += `<div class="plan-details-section"><h4>${day}</h4><ul>`;
-                        mealsByDay[day].sort((a, b) => (a.order || 0) - (b.order || 0)).forEach(meal => {
-                            htmlContent += `
-                                <li>
-                                    <strong>${meal.meal_type}:</strong> ${meal.description}
-                                    <br>
-                                    (Cal: ${meal.calories || 0} | Prot: ${meal.protein || 0}g | Carb: ${meal.carbs || 0}g | Gord: ${meal.fat || 0}g)
-                                    ${meal.notes ? `<br><em>Obs: ${meal.notes}</em>` : ''}
-                                </li>
-                            `;
-                        });
-                        htmlContent += `</ul></div>`;
-                    }
-                } else {
-                    htmlContent += '<p>Nenhuma refeição detalhada para este plano.</p>';
-                }
-                detailsDiv.innerHTML = htmlContent;
-                modal.style.display = "flex"; // Usa flex para centralizar
-            }
-        } else {
-            console.error('Failed to load diet plan details');
-            showToast("Erro ao carregar detalhes do plano de dieta.", "error");
-        }
-    } catch (error) {
-        console.error('Error viewing diet plan:', error);
-        showToast("Erro de conexão ao ver plano de dieta.", "error");
-    } finally {
-        hideGlobalLoading();
     }
 }
 
@@ -1340,105 +1390,29 @@ async function deleteDietPlan(id) {
     }
 }
 
-// NOVO: Funções para carregar e renderizar Planos de Treino
-async function loadWorkoutPlans() {
-    showGlobalLoading("Carregando planos de treino...");
-    try {
-        const response = await fetch(`${API_BASE}/workout_plans`, {
-            credentials: 'include'
-        });
-        if (response.ok) {
-            workoutPlans = await response.json();
-            renderWorkoutPlansTable();
-        } else {
-            console.error('Failed to load workout plans');
-            showToast("Erro ao carregar planos de treino.", "error");
-        }
-    } catch (error) {
-        console.error('Error loading workout plans:', error);
-        showToast("Erro de conexão ao carregar planos de treino.", "error");
-    } finally {
-        hideGlobalLoading();
-    }
+function exerciseImagePath(_exerciseName, catalogKey) {
+    const importedImage = window.EXERCISE_MEDIA?.[String(catalogKey || "")]?.image;
+    return importedImage || "";
 }
 
-function renderWorkoutPlansTable() {
-    const tbody = getElement("workoutPlansTableBody");
-    if (!tbody) return;
-    tbody.innerHTML = "";
-
-    if (workoutPlans.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4">Nenhum plano de treino encontrado. Peça um para a IA!</td></tr>';
-        return;
+function exerciseImageMarkup(exercise, escapedName) {
+    const imagePath = exerciseImagePath(exercise.name, exercise.catalog_key);
+    if (imagePath) {
+        return `<img class="exercise-demonstration-image" src="${escapeHtml(imagePath)}" alt="Demonstração de ${escapedName}" loading="lazy">`;
     }
-
-    workoutPlans.forEach(plan => {
-        const row = document.createElement("tr");
-        row.innerHTML = `
-            <td>${plan.title}</td>
-            <td>${plan.description || '-'}
-            <td>${formatDateTime(plan.created_at)}</td>
-            <td>
-                <button onclick="viewWorkoutPlan(${plan.id})" class="btn-edit">
-                    <i class="fas fa-eye"></i> Ver
-                </button>
-                <button onclick="deleteWorkoutPlan(${plan.id})" class="btn-delete">
-                    <i class="fas fa-trash"></i>
-                </button>
-            </td>
-        `;
-        tbody.appendChild(row);
-    });
+    return '<span class="exercise-image-placeholder" role="img" aria-label="Imagem não disponível"><i class="fas fa-dumbbell" aria-hidden="true"></i></span>';
 }
 
-async function viewWorkoutPlan(id) {
-    showGlobalLoading("Carregando detalhes do plano de treino...");
-    try {
-        const response = await fetch(`${API_BASE}/workout_plans/${id}`, {
-            credentials: 'include'
-        });
-        if (response.ok) {
-            const plan = await response.json();
-            const modal = getElement("viewWorkoutPlanModal");
-            const title = getElement("viewWorkoutPlanTitle");
-            const detailsDiv = getElement("viewWorkoutPlanDetails");
-
-            if (modal && title && detailsDiv) {
-                title.textContent = plan.title;
-                let htmlContent = `
-                    <p><strong>Descrição:</strong> ${plan.description || 'N/A'}</p>
-                    <p><strong>Criado em:</strong> ${formatDateTime(plan.created_at)}</p>
-                `;
-
-                if (plan.exercises && plan.exercises.length > 0) {
-                    htmlContent += `<div class="plan-details-section"><h4>Exercícios</h4><ul>`;
-                    plan.exercises.sort((a, b) => (a.order || 0) - (b.order || 0)).forEach(exercise => {
-                        htmlContent += `
-                            <li>
-                                <strong>${exercise.name}:</strong> ${exercise.sets || 'N/A'} séries de ${exercise.reps || 'N/A'} repetições
-                                ${exercise.weight ? ` (${exercise.weight})` : ''}
-                                ${exercise.notes ? `<br><em>Obs: ${exercise.notes}</em>` : ''}
-                            </li>
-                        `;
-                    });
-                    htmlContent += `</ul></div>`;
-                } else {
-                    htmlContent += '<p>Nenhum exercício detalhado para este plano.</p>';
-                }
-                detailsDiv.innerHTML = htmlContent;
-                modal.style.display = "flex"; // Usa flex para centralizar
-            }
-        } else {
-            console.error('Failed to load workout plan details');
-            showToast("Erro ao carregar detalhes do plano de treino.", "error");
-        }
-    } catch (error) {
-        console.error('Error viewing workout plan:', error);
-        showToast("Erro de conexão ao ver plano de treino.", "error");
-    } finally {
-        hideGlobalLoading();
-    }
-}
+document.addEventListener('error', event => {
+    const image = event.target;
+    if (!(image instanceof HTMLImageElement) || !image.classList.contains('exercise-demonstration-image')) return;
+    const placeholder = document.createElement('span');
+    placeholder.className = 'exercise-image-placeholder';
+    placeholder.setAttribute('role', 'img');
+    placeholder.setAttribute('aria-label', 'Imagem não disponível');
+    placeholder.innerHTML = '<i class="fas fa-dumbbell" aria-hidden="true"></i>';
+    image.replaceWith(placeholder);
+}, true);
 
 async function deleteWorkoutPlan(id) {
     if (!confirm("Tem certeza que deseja excluir este plano de treino?")) return;
@@ -1459,69 +1433,423 @@ async function deleteWorkoutPlan(id) {
 
 
 // Rendering and Form functions
-function renderDietTable() {
-    const tbody = getElement("dietTableBody");
-    if (!tbody) return;
-    
-    tbody.innerHTML = "";
-    
-    dietEntries.forEach(entry => {
-        const row = document.createElement("tr");
-        row.innerHTML = `
-            <td>${formatDate(entry.date)}</td>
-            <td>${getMealTypeLabel(entry.meal_type)}</td>
-            <td>${entry.description}</td>
-            <td>
-              <span class="${entry.precision === 'alta' ? 'precision-high' : entry.precision === 'manual' ? 'precision-high' : entry.precision === 'moderada' ? 'precision-moderate' : 'precision-low'}">
-                ${entry.calories || 0}
-              </span>
-            </td>
-            <td>${entry.protein || 0}g</td>
-            <td>${entry.carbs || 0}g</td>
-            <td>${entry.fat || 0}g</td>
-            <td>
-                <button onclick="editDietEntry(${entry.id})" class="btn-edit">
-                    <i class="fas fa-edit"></i>
-                </button>
-                <button onclick="deleteDietEntry(${entry.id})" class="btn-delete">
-                    <i class="fas fa-trash"></i>
-                </button>
-            </td>
-        `;
-        tbody.appendChild(row);
+function mealIconClass(mealType) {
+    const normalized = String(mealType || '').toLowerCase();
+    if (normalized.includes('café') || normalized.includes('manha')) return 'fa-mug-hot';
+    if (normalized.includes('almoço')) return 'fa-sun';
+    if (normalized.includes('jantar') || normalized.includes('ceia')) return 'fa-moon';
+    if (normalized.includes('lanche')) return 'fa-apple-whole';
+    return 'fa-bowl-food';
+}
+
+function updateDailySummary() {
+    const totals = dietEntries.reduce((sum, entry) => ({
+        calories: sum.calories + (Number(entry.calories) || 0),
+        protein: sum.protein + (Number(entry.protein) || 0),
+        carbs: sum.carbs + (Number(entry.carbs) || 0),
+        fat: sum.fat + (Number(entry.fat) || 0)
+    }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+    const targets = { calories: 2200, protein: 160, carbs: 220, fat: 70 };
+
+    Object.entries(totals).forEach(([key, value]) => {
+        const rounded = Math.round(value);
+        const valueElement = getElement(`today${key.charAt(0).toUpperCase()}${key.slice(1)}`);
+        const progressElement = getElement(`today${key.charAt(0).toUpperCase()}${key.slice(1)}Progress`);
+        if (valueElement) valueElement.textContent = key === 'calories' ? rounded.toLocaleString('pt-BR') : `${rounded} g`;
+        if (progressElement) progressElement.style.width = `${Math.min((value / targets[key]) * 100, 100)}%`;
     });
 }
 
-function renderMeasurementTable() {
-    const tbody = getElement("measurementTableBody");
-    if (!tbody) return;
-    
-    tbody.innerHTML = "";
-    
-    measurements.forEach(measurement => {
-        const row = document.createElement("tr");
-        row.innerHTML = `
-            <td>${formatDate(measurement.date)}</td>
-            <td>${measurement.weight || '-'}
-            <td>${measurement.height || '-'}
-            <td>${measurement.body_fat || '-'}
-            <td>${measurement.muscle_mass || '-'}
-            <td>${measurement.waist || '-'}
-            <td>${measurement.chest || '-'}
-            <td>${measurement.arm || '-'}
-            <td>${measurement.thigh || '-'}
-            <td>${measurement.notes || '-'}
-            <td>
-                <button onclick="editMeasurement(${measurement.id})" class="btn-edit">
-                    <i class="fas fa-edit"></i>
-                </button>
-                <button onclick="deleteMeasurement(${measurement.id})" class="btn-delete">
-                    <i class="fas fa-trash"></i>
-                </button>
-            </td>
-        `;
-        tbody.appendChild(row);
+function renderDietTable() {
+    const container = getElement("dietTableBody");
+    if (!container) return;
+
+    updateDailySummary();
+    if (!dietEntries.length) {
+        container.innerHTML = `
+            <div class="empty-state empty-state--compact">
+                <span><i class="fas fa-bowl-food"></i></span>
+                <div><strong>Nenhuma refeição neste período</strong><p>Registre sua primeira refeição para acompanhar os macros.</p></div>
+            </div>`;
+        return;
+    }
+
+    container.innerHTML = dietEntries.map(entry => `
+        <article class="diary-meal-card">
+            <span class="diary-meal-card__icon"><i class="fas ${mealIconClass(entry.meal_type)}"></i></span>
+            <div class="diary-meal-card__content">
+                <div><strong>${escapeHtml(getMealTypeLabel(entry.meal_type))}</strong><time datetime="${escapeHtml(entry.date)}">${formatDate(entry.date)}</time></div>
+                <p>${escapeHtml(entry.description)}</p>
+                <div class="diary-meal-card__macros"><span>${Math.round(Number(entry.protein) || 0)}g prot.</span><span>${Math.round(Number(entry.carbs) || 0)}g carb.</span><span>${Math.round(Number(entry.fat) || 0)}g gord.</span></div>
+            </div>
+            <div class="diary-meal-card__energy"><strong>${Math.round(Number(entry.calories) || 0)}</strong><small>kcal</small></div>
+            <div class="entry-actions">
+                <button type="button" onclick="editDietEntry(${Number(entry.id)})" class="entry-action" aria-label="Editar ${escapeHtml(getMealTypeLabel(entry.meal_type))}"><i class="fas fa-pen"></i></button>
+                <button type="button" onclick="deleteDietEntry(${Number(entry.id)})" class="entry-action entry-action--danger" aria-label="Excluir ${escapeHtml(getMealTypeLabel(entry.meal_type))}"><i class="fas fa-trash"></i></button>
+            </div>
+        </article>`).join('');
+}
+
+function measurementMetric(label, value, unit = '') {
+    if (value == null || value === '') return '';
+    return `<div><small>${label}</small><strong>${escapeHtml(value)}${unit}</strong></div>`;
+}
+
+// --- CARDÁPIO DE HOJE (sincronizado com o plano de dieta) ---
+let cardapioActivePlan = null;
+let cardapioDay = 1;
+let cardapioTodayEntries = [];
+
+function getStoredCardapioDay() {
+    const stored = parseInt(localStorage.getItem("dietCardapioDay") || "1", 10);
+    return [1, 2, 3].includes(stored) ? stored : 1;
+}
+
+function setStoredCardapioDay(day) {
+    localStorage.setItem("dietCardapioDay", String(day));
+}
+
+function normalizeMealType(value) {
+    const normalized = String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    return normalized.replace(/\s+/g, " ").trim();
+}
+
+function cardapioMealTypeToEntry(mealType) {
+    const norm = normalizeMealType(mealType);
+    if (norm.includes("cafe") || norm.includes("manha")) return "Café da manhã";
+    if (norm.includes("almoco")) return "Almoço";
+    if (norm.includes("jantar")) return "Jantar";
+    if (norm.includes("lanche") && norm.includes("tarde")) return "Lanche da tarde";
+    if (norm.includes("lanche")) return "Lanche da manhã";
+    if (norm.includes("ceia")) return "Ceia";
+    return mealType || "Café da manhã";
+}
+
+function cardapioTodayEntryKeys() {
+    const keys = new Set();
+    cardapioTodayEntries.forEach(entry => {
+        keys.add(`${entry.date}|${normalizeMealType(entry.meal_type)}`);
     });
+    return keys;
+}
+
+async function loadTodayCardapio() {
+    const section = getElement("todayCardapioSection");
+    if (!section) return;
+    const today = localDateInputValue();
+    cardapioDay = getStoredCardapioDay();
+
+    const [plansRes, entriesRes] = await Promise.all([
+        fetch(`${API_BASE}/diet_plans`, { credentials: 'include' }),
+        fetch(`${API_BASE}/diet?start_date=${today}&end_date=${today}`, { credentials: 'include' })
+    ]);
+
+    cardapioTodayEntries = entriesRes.ok ? await entriesRes.json() : [];
+
+    if (!plansRes.ok) {
+        renderTodayCardapio(null, 'Não foi possível carregar seu plano de dieta.');
+        return;
+    }
+    const plans = await plansRes.json();
+    if (!plans.length) {
+        renderTodayCardapio(null, null);
+        return;
+    }
+    const latestPlanId = plans[0].id;
+    const planRes = await fetch(`${API_BASE}/diet_plans/${latestPlanId}`, { credentials: 'include' });
+    if (!planRes.ok) {
+        renderTodayCardapio(null, 'Não foi possível carregar o cardápio do plano.');
+        return;
+    }
+    cardapioActivePlan = await planRes.json();
+    renderTodayCardapio(cardapioActivePlan, null);
+}
+
+function renderTodayCardapio(plan, errorMessage) {
+    const chipsEl = getElement("todayDayChips");
+    const bodyEl = getElement("todayCardapioBody");
+    if (!chipsEl || !bodyEl) return;
+
+    const chips = [1, 2, 3].map(day => `
+        <button type="button" class="day-chip${day === cardapioDay ? ' is-active' : ''}" onclick="setCardapioDay(${day})" aria-pressed="${day === cardapioDay}">Dia ${day}</button>
+    `).join('');
+    chipsEl.innerHTML = chips;
+
+    if (errorMessage) {
+        bodyEl.innerHTML = `<div class="empty-state empty-state--compact"><span><i class="fas fa-triangle-exclamation"></i></span><div><strong>Cardápio indisponível</strong><p>${escapeHtml(errorMessage)}</p></div></div>`;
+        return;
+    }
+    if (!plan || !plan.meals || !plan.meals.length) {
+        bodyEl.innerHTML = `<div class="empty-state empty-state--compact"><span><i class="fas fa-seedling"></i></span><div><strong>Sem plano de dieta</strong><p>Crie um plano guiado e acompanhe suas refeições do dia.</p></div><button type="button" class="btn-primary" data-plan-wizard="diet"><i class="fas fa-wand-magic-sparkles"></i> Criar plano</button></div>`;
+        return;
+    }
+
+    const dayMeals = plan.meals
+        .filter(meal => normalizeMealType(meal.day_of_week) === `dia ${cardapioDay}`)
+        .sort((a, b) => (a.order || 0) - (b.order || 0));
+
+const doneKeys = cardapioTodayEntryKeys();
+
+    const pendingMeals = [];
+    const doneMeals = [];
+    dayMeals.forEach(meal => {
+        const entryType = cardapioMealTypeToEntry(meal.meal_type);
+        const isDone = doneKeys.has(`${localDateInputValue()}|${normalizeMealType(entryType)}`);
+        (isDone ? doneMeals : pendingMeals).push({ meal, entryType });
+    });
+
+    const itemMarkup = ({ meal }) => {
+        const items = Array.isArray(meal.items) ? meal.items.join(', ') : (meal.description || '');
+        return `
+            <article class="cardapio-item">
+                <div class="cardapio-item__head">
+                    <span class="cardapio-item__icon"><i class="fas ${mealIconClass(meal.meal_type)}"></i></span>
+                    <div class="cardapio-item__copy">
+                        <strong>${escapeHtml(meal.meal_type)}</strong>
+                        <p>${escapeHtml(items)}</p>
+                        <div class="cardapio-item__macros"><span>${Math.round(Number(meal.calories) || 0)} kcal</span><span>${Math.round(Number(meal.protein) || 0)}g prot.</span><span>${Math.round(Number(meal.carbs) || 0)}g carb.</span><span>${Math.round(Number(meal.fat) || 0)}g gord.</span></div>
+                    </div>
+                    <span class="cardapio-item__status" aria-hidden="true"><i class="far fa-circle"></i></span>
+                </div>
+                <div class="cardapio-item__actions">
+                    <button type="button" class="btn-quick" onclick="quickLogPlanMeal(${meal.id}, 'exact')"><i class="fas fa-check"></i> Comi exatamente</button>
+                    <button type="button" class="btn-quick btn-quick--soft" onclick="quickLogPlanMeal(${meal.id}, 'describe')"><i class="fas fa-pen"></i> Descrevi diferente</button>
+                    <button type="button" class="entry-action" onclick="openEditPlanMealModal(${meal.id})" aria-label="Editar refeição do plano"><i class="fas fa-pen-to-square"></i></button>
+                </div>
+            </article>`;
+    };
+
+    const pendingMarkup = pendingMeals.map(itemMarkup).join('');
+    const bodyInner = doneMeals.length
+        ? `<div class="cardapio-progress"><i class="fas fa-check-circle"></i> ${doneMeals.length} de ${dayMeals.length} refeições de hoje registradas</div>`
+        : '';
+
+    bodyEl.innerHTML = `
+        ${bodyInner}\n
+        ${pendingMeals.length
+            ? `<div class="cardapio-list">${pendingMarkup}</div>`
+            : dayMeals.length
+                ? `<div class="empty-state empty-state--compact empty-state--all-done"><span><i class="fas fa-circle-check"></i></span><div><strong>Cardápio de hoje concluído</strong><p>Todas as refeições foram registradas.</p></div></div>`
+                : `<div class="empty-state empty-state--compact"><span><i class="fas fa-utensils"></i></span><div><strong>Este dia está vazio</strong><p>Escolha outro dia da rotação.</p></div></div>`}
+        <div class="cardapio-footer">
+            <button type="button" class="btn-secondary" onclick="openSuggestDietModal()"><i class="fas fa-wand-magic-sparkles"></i> Sugerir mudanças</button>
+            <button type="button" class="btn-add" onclick="showAddDietModal()"><i class="fas fa-plus"></i> Adicionar refeição</button>
+        </div>`;
+}
+
+function setCardapioDay(day) {
+    if (![1, 2, 3].includes(Number(day))) return;
+    setStoredCardapioDay(Number(day));
+    cardapioDay = Number(day);
+    renderTodayCardapio(cardapioActivePlan, null);
+}
+
+function findPlanMeal(mealId) {
+    if (!cardapioActivePlan) return null;
+    return (cardapioActivePlan.meals || []).find(meal => Number(meal.id) === Number(mealId)) || null;
+}
+
+async function quickLogPlanMeal(mealId, mode) {
+    const meal = findPlanMeal(mealId);
+    if (!meal) {
+        showToast("Refeição não encontrada.", "error");
+        return;
+    }
+    const entryType = cardapioMealTypeToEntry(meal.meal_type);
+    if (mode === "describe") {
+        showAddDietModal();
+        getElement("dietMeal").value = entryType;
+        const items = Array.isArray(meal.items) ? meal.items.join(', ') : meal.description;
+        getElement("dietDescription").value = items;
+        syncChoiceCards();
+        return;
+    }
+    try {
+        const response = await fetch(`${API_BASE}/diet`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({
+                date: localDateInputValue(),
+                meal_type: entryType,
+                description: Array.isArray(meal.items) ? meal.items.join(', ') : meal.description,
+                calories: meal.calories,
+                protein: meal.protein,
+                carbs: meal.carbs,
+                fat: meal.fat,
+                notes: meal.notes
+            })
+        });
+        if (response.ok) {
+            showToast("Refeição registrada!", "success");
+            loadDietEntries();
+            loadTodayCardapio();
+        } else {
+            const errorData = await response.json();
+            showToast(errorData.error || "Erro ao registrar!", "error");
+        }
+    } catch (error) {
+        showToast("Erro de conexão!", "error");
+    }
+}
+
+async function openEditPlanMealModal(mealId) {
+    const meal = findPlanMeal(mealId);
+    if (!meal) return;
+    getElement("editPlanMealId").value = meal.id;
+    getElement("editPlanMealDescription").value = Array.isArray(meal.items) ? meal.items.join(', ') : (meal.description || "");
+    getElement("editPlanMealNotes").value = meal.notes || "";
+    getElement("editPlanMealTitle").textContent = `Editar ${meal.meal_type}`;
+    openAppModal(getElement("editPlanMealModal"));
+}
+
+function closeEditPlanMealModal() {
+    closeAppModal(getElement("editPlanMealModal"));
+}
+
+async function handleEditPlanMealSubmit(e) {
+    e.preventDefault();
+    const mealId = getElement("editPlanMealId").value;
+    const description = getElement("editPlanMealDescription").value.trim();
+    const notes = getElement("editPlanMealNotes").value.trim();
+    if (!description) {
+        showToast("A descrição da refeição é obrigatória.", "error");
+        return;
+    }
+    try {
+        const response = await fetch(`${API_BASE}/diet_plans/${cardapioActivePlan.id}/meals/${mealId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ description, notes })
+        });
+        if (response.ok) {
+            closeEditPlanMealModal();
+            showToast("Refeição do plano atualizada!", "success");
+            loadDietPlans();
+            loadTodayCardapio();
+        } else {
+            const errorData = await response.json();
+            showToast(errorData.error || "Erro ao atualizar!", "error");
+        }
+    } catch (error) {
+        showToast("Erro de conexão!", "error");
+    }
+}
+
+function openSuggestDietModal() {
+    getElement("suggestDietFeedback").value = "";
+    getElement("suggestDietPreview").classList.add("hidden");
+    getElement("suggestDietApplyBtn").classList.add("hidden");
+    getElement("suggestDietGenerateBtn").classList.remove("hidden");
+    openAppModal(getElement("suggestDietModal"));
+}
+
+function closeSuggestDietModal() {
+    closeAppModal(getElement("suggestDietModal"));
+}
+
+async function generateDietDaySuggestion() {
+    const feedback = getElement("suggestDietFeedback").value.trim();
+    if (!feedback) {
+        showToast("Descreva a mudança desejada.", "error");
+        return;
+    }
+    const generateBtn = getElement("suggestDietGenerateBtn");
+    generateBtn.disabled = true;
+    generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Gerando...';
+    try {
+        const response = await fetch(`${API_BASE}/diet_plans/${cardapioActivePlan.id}/suggest`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ day: cardapioDay, feedback })
+        });
+        if (response.ok) {
+            const data = await response.json();
+            const previewEl = getElement("suggestDietPreview");
+            previewEl.innerHTML = data.meals.map(meal => `
+                <article class="suggest-meal">
+                    <div><strong>${escapeHtml(meal.meal_type)}</strong><p>${escapeHtml(Array.isArray(meal.items) ? meal.items.join(', ') : meal.description)}</p></div>
+                    <div class="cardapio-item__macros"><span>${Math.round(Number(meal.calories) || 0)} kcal</span><span>${Math.round(Number(meal.protein) || 0)}g prot.</span></div>
+                </article>`).join('');
+            previewEl.classList.remove("hidden");
+            getElement("suggestDietApplyBtn").classList.remove("hidden");
+            getElement("suggestDietGenerateBtn").classList.add("hidden");
+            getElement("suggestDietFeedback").disabled = true;
+        } else {
+            const errorData = await response.json();
+            showToast(errorData.error || "Erro ao gerar sugestão!", "error");
+        }
+    } catch (error) {
+        showToast("Erro de conexão!", "error");
+    } finally {
+        generateBtn.disabled = false;
+    }
+}
+
+async function applyDietDaySuggestion() {
+    const previewEl = getElement("suggestDietPreview");
+    const mealCards = previewEl.querySelectorAll(".suggest-meal");
+    if (!mealCards.length) return;
+    const meals = Array.from(mealCards).map(card => {
+        const strong = card.querySelector("strong")?.textContent || "";
+        const p = card.querySelector("p")?.textContent || "";
+        return { meal_type: strong, description: p, items: p.split(", ").filter(Boolean), order: 0 };
+    });
+    const applyBtn = getElement("suggestDietApplyBtn");
+    applyBtn.disabled = true;
+    try {
+        const response = await fetch(`${API_BASE}/diet_plans/${cardapioActivePlan.id}/days/${cardapioDay}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ meals })
+        });
+        if (response.ok) {
+            closeSuggestDietModal();
+            showToast("Cardápio do dia atualizado!", "success");
+            loadDietPlans();
+            loadTodayCardapio();
+        } else {
+            const errorData = await response.json();
+            showToast(errorData.error || "Erro ao aplicar!", "error");
+        }
+    } catch (error) {
+        showToast("Erro de conexão!", "error");
+    } finally {
+        applyBtn.disabled = false;
+    }
+}
+
+function renderMeasurementTable() {
+    const container = getElement("measurementTableBody");
+    if (!container) return;
+
+    if (!measurements.length) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <span><i class="fas fa-ruler-combined"></i></span>
+                <div><strong>Nenhuma medição encontrada</strong><p>Adicione uma medição para iniciar seu histórico.</p></div>
+                <button type="button" class="btn-primary" onclick="showAddMeasurementModal()">Adicionar medição</button>
+            </div>`;
+        return;
+    }
+
+    container.innerHTML = measurements.map(measurement => `
+        <article class="measurement-card">
+            <header><div><span class="measurement-card__date"><i class="far fa-calendar"></i> ${formatDate(measurement.date)}</span><h3>${measurement.weight != null ? `${escapeHtml(measurement.weight)} kg` : 'Medição corporal'}</h3></div><div class="entry-actions"><button type="button" onclick="editMeasurement(${Number(measurement.id)})" class="entry-action" aria-label="Editar medição"><i class="fas fa-pen"></i></button><button type="button" onclick="deleteMeasurement(${Number(measurement.id)})" class="entry-action entry-action--danger" aria-label="Excluir medição"><i class="fas fa-trash"></i></button></div></header>
+            <div class="measurement-card__metrics">
+                ${measurementMetric('Altura', measurement.height, ' cm')}
+                ${measurementMetric('Gordura', measurement.body_fat, '%')}
+                ${measurementMetric('Massa muscular', measurement.muscle_mass, ' kg')}
+                ${measurementMetric('Cintura', measurement.waist, ' cm')}
+                ${measurementMetric('Peito', measurement.chest, ' cm')}
+                ${measurementMetric('Braço', measurement.arm, ' cm')}
+                ${measurementMetric('Coxa', measurement.thigh, ' cm')}
+            </div>
+            ${measurement.notes ? `<p class="measurement-card__notes"><i class="far fa-note-sticky"></i> ${escapeHtml(measurement.notes)}</p>` : ''}
+        </article>`).join('');
 }
 
 
@@ -1574,7 +1902,7 @@ async function editDietEntry(id) {
     
     getElement("dietId").value = entry.id;
     getElement("dietDate").value = entry.date;
-    getElement("dietMealType").value = entry.meal_type;
+    getElement("dietMeal").value = entry.meal_type;
     getElement("dietDescription").value = entry.description;
     getElement("dietNotes").value = entry.notes || "";
     
@@ -1585,7 +1913,9 @@ async function editDietEntry(id) {
     getElement("dietFat").value = entry.fat || "";
 
     getElement("dietModalTitle").textContent = "Editar Registro de Dieta";
-    getElement("dietModal").style.display = "block";
+    syncDietDateChips();
+    syncChoiceCards();
+    openAppModal(getElement("dietModal"));
 }
 
 async function deleteDietEntry(id) {
@@ -1622,7 +1952,7 @@ async function editMeasurement(id) {
     getElement("measurementNotes").value = measurement.notes || "";
     
     getElement("measurementModalTitle").textContent = "Editar Medidas";
-    getElement("measurementModal").style.display = "block";
+    openAppModal(getElement("measurementModal"));
 }
 
 async function deleteMeasurement(id) {
@@ -1646,9 +1976,10 @@ async function deleteMeasurement(id) {
 function clearDietFilters() {
     const startDate = getElement("dietStartDate");
     const endDate = getElement("dietEndDate");
-    
-    if (startDate) startDate.value = "";
-    if (endDate) endDate.value = "";
+
+    const today = localDateInputValue();
+    if (startDate) startDate.value = today;
+    if (endDate) endDate.value = today;
     
     loadDietEntries();
 }
@@ -1672,7 +2003,7 @@ function clearChat() {
                 <i class="fas fa-robot"></i>
             </div>
             <div class="message-content">
-                <p>Olá! 👋 Sou seu assistente fitness pessoal. Como admin, posso gerar planos de dieta e treino. Como posso ajudá-lo hoje?</p>
+                <p>Olá! 👋 Sou seu assistente fitness pessoal. Posso gerar planos de dieta e treino. Como posso ajudá-lo hoje?</p>
             </div>
         </div>
     `;
@@ -1687,13 +2018,15 @@ async function checkUserProfile() {
         if (response.ok) {
             const data = await response.json();
             if (!data.profile) {
-                // Mostrar modal de perfil se não existir
                 setTimeout(() => {
+                    if (!currentUser) return;
                     const profileModal = getElement("profileModal");
                     if (profileModal) {
-                        profileModal.style.display = "block";
+                        openAppModal(profileModal);
                     }
                 }, 1000);
+            } else {
+                fillProfileForm(data.profile);
             }
         }
     } catch (error) {
