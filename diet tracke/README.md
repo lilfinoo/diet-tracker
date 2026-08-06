@@ -1,2 +1,0 @@
-# diet-tracker
-diet tracker
