@@ -12,6 +12,7 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.css">
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="fluid.css">
 </head>
 <body>
     <a class="skip-link" href="#appContent">Ir para o conteúdo</a>
@@ -424,10 +425,20 @@
                     </section>
 
                     <section class="profile-section">
-                        <div class="profile-section__label"><span class="profile-section__icon"><i class="fas fa-utensils"></i></span><div><strong>O que você comeu?</strong><small>Descreva os alimentos</small></div></div>
+                        <div class="profile-section__label"><span class="profile-section__icon"><i class="fas fa-utensils"></i></span><div><strong>O que você comeu?</strong><small>Descreva ou tire uma foto</small></div></div>
                         <div class="field-input">
                             <i class="fas fa-utensils field-input__icon" aria-hidden="true"></i>
-                            <input type="text" id="dietDescription" class="field-input__core" placeholder="Ex: 2 fatias de pão integral com queijo" required>
+                            <input type="text" id="dietDescription" class="field-input__core" placeholder="Ex: 2 fatias de pão integral com queijo">
+                        </div>
+                        <div class="diet-photo-row">
+                            <button type="button" class="btn-secondary diet-photo-btn" id="dietPhotoBtn">
+                                <i class="fas fa-camera"></i> Foto do prato
+                            </button>
+                            <input type="file" id="dietPhotoInput" accept="image/*" capture="environment" class="hidden">
+                            <div class="diet-photo-preview hidden" id="dietPhotoPreview">
+                                <img id="dietPhotoPreviewImg" alt="Prévia da refeição">
+                                <button type="button" class="diet-photo-remove" id="dietPhotoRemove" aria-label="Remover foto"><i class="fas fa-times"></i></button>
+                            </div>
                         </div>
                     </section>
 
@@ -660,6 +671,7 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.js"></script>
+    <script src="fluid.js"></script>
     <script src="js/exercise-media.js"></script>
     <script src="js/utils.js"></script>
     <script src="script.js"></script>

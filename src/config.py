@@ -18,15 +18,16 @@ class Config:
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "true"
-    MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", 16 * 1024))
+    MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", 10 * 1024 * 1024))
     CORS_ORIGINS = _csv("CORS_ORIGINS")
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
     GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
     GEMINI_CHAT_MODEL = os.getenv("GEMINI_CHAT_MODEL", "gemini-flash-lite-latest")
     GEMINI_STRUCTURED_MODEL = os.getenv("GEMINI_STRUCTURED_MODEL", "gemini-flash-lite-latest")
+    GEMINI_PLAN_MODEL = os.getenv("GEMINI_PLAN_MODEL", "gemini-flash-latest")
     GEMINI_CHAT_MAX_TOKENS = int(os.getenv("GEMINI_CHAT_MAX_TOKENS", "768"))
-    GEMINI_PLAN_MAX_TOKENS = int(os.getenv("GEMINI_PLAN_MAX_TOKENS", "6144"))
-    GEMINI_TIMEOUT = int(os.getenv("GEMINI_TIMEOUT", "90"))
+    GEMINI_PLAN_MAX_TOKENS = int(os.getenv("GEMINI_PLAN_MAX_TOKENS", "12288"))
+    GEMINI_TIMEOUT = int(os.getenv("GEMINI_TIMEOUT", "240"))
 
 
 class TestConfig(Config):

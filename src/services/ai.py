@@ -54,6 +54,8 @@ def _completion(
     json_response=False,
     model=None,
     json_schema=None,
+    image_bytes=None,
+    mime_type=None,
 ) -> str:
     api_key = current_app.config["GEMINI_API_KEY"]
     if not api_key:
@@ -69,12 +71,20 @@ def _completion(
         config_options["response_json_schema"] = json_schema
     config = types.GenerateContentConfig(**config_options)
     timeout = current_app.config.get("GEMINI_TIMEOUT", 90)
+    timeout_ms = timeout * 1000
     try:
         # Keep the HTTP client alive until the synchronous request has completed.
-        with genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=timeout)) as client:
+        with genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=timeout_ms)) as client:
+            if image_bytes and mime_type:
+                contents = [
+                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                    types.Part.from_text(text=prompt),
+                ]
+            else:
+                contents = prompt
             response = client.models.generate_content(
                 model=model or current_app.config["GEMINI_MODEL"],
-                contents=prompt,
+                contents=contents,
                 config=config,
             )
         candidate = next(iter(response.candidates or []), None)
@@ -110,18 +120,30 @@ def _completion(
         raise AIServiceError("Gemini provider request failed") from error
 
 
-def calculate_nutrition(food_description: str) -> dict:
+def calculate_nutrition(
+    food_description: str,
+    image_bytes: bytes | None = None,
+    mime_type: str | None = None,
+) -> dict:
+    has_image = bool(image_bytes and mime_type)
     is_vague = not re.search(
         r"\d|grama|colher|concha|fatia|ml|xícara|porção|unidade",
         food_description,
         re.IGNORECASE,
     )
-    prompt = f"""Analise a seguinte descrição de alimentos e forneça informações nutricionais.
+    if food_description:
+        prompt = f"""Analise a seguinte descrição de alimentos e forneça informações nutricionais.
 Descrição: {food_description}
 Responda somente com JSON: {{"calories": número, "protein": número, "carbs": número, "fat": número}}.
 Seja preciso e considere porções típicas mencionadas."""
-    if is_vague:
-        prompt += "\nSe não houver quantidades, assuma porções médias brasileiras."
+        if is_vague:
+            prompt += "\nSe não houver quantidades, assuma porções médias brasileiras."
+    else:
+        prompt = """Analise a foto do prato e forneça informações nutricionais.
+Responda somente com JSON: {"calories": número, "protein": número, "carbs": número, "fat": número}.
+Assuma porções médias brasileiras se não houver referência de tamanho."""
+    if has_image:
+        prompt += "\nA foto do prato está anexada: identifique os alimentos e estime as quantidades."
     data = _json_object(
         _completion(
             "Você é nutricionista. Retorne somente JSON válido.",
@@ -130,6 +152,8 @@ Seja preciso e considere porções típicas mencionadas."""
             0.3,
             json_response=True,
             model=current_app.config["GEMINI_STRUCTURED_MODEL"],
+            image_bytes=image_bytes,
+            mime_type=mime_type,
         )
     )
     try:
@@ -138,7 +162,7 @@ Seja preciso e considere porções típicas mencionadas."""
             "protein": float(data["protein"]),
             "carbs": float(data["carbs"]),
             "fat": float(data["fat"]),
-            "precision": "baixa" if is_vague else "alta",
+            "precision": "alta" if has_image or not is_vague else "baixa",
         }
     except (KeyError, TypeError, ValueError) as error:
         raise AIResponseError("Gemini nutrition response had invalid values") from error
@@ -266,17 +290,18 @@ REGRAS DE SELEÇÃO:
 - Nos dias repetidos da semana, mantenha a função muscular, mas varie exercício, faixa de repetições ou ênfase quando isso for seguro.
 
 PRESCRIÇÃO:
-- Adeque a quantidade de exercícios à duração indicada em programming_constraints.
+- Exatamente por duração: 20–30 min use de 3 a 5 exercícios; 45–60 min use de 4 a 7; 75–90 min use de 6 a 8 exercícios por dia. Nunca fuja desses intervalos.
+- Em cada exercício: sets entre 1 e 6; rest_seconds entre 20 e 300; reps sempre preenchido, curto (no máximo 30 caracteres, ex.: "10–12" ou "8–10 por perna").
 - Use séries, repetições, descanso e esforço coerentes com objetivo e experiência; iniciantes não devem receber volume ou técnicas avançadas excessivas.
 - Escreva em notes uma orientação técnica curta e específica, não frases genéricas.
-Cada dia deve ter entre 3 e 8 exercícios. Não faça diagnóstico, tratamento, promessa de resultado ou prescrição para dor/lesão."""
+Não faça diagnóstico, tratamento, promessa de resultado ou prescrição para dor/lesão."""
     return _json_object(_completion(
         system_instruction,
         json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
         current_app.config["GEMINI_PLAN_MAX_TOKENS"],
         0.25,
         json_response=True,
-        model=current_app.config["GEMINI_STRUCTURED_MODEL"],
+        model=current_app.config["GEMINI_PLAN_MODEL"],
         json_schema=schema,
     ))
 
@@ -342,7 +367,7 @@ Não prescreva tratamento, suplementos, dietas extremas ou resultados garantidos
         current_app.config["GEMINI_PLAN_MAX_TOKENS"],
         0.2,
         json_response=True,
-        model=current_app.config["GEMINI_STRUCTURED_MODEL"],
+        model=current_app.config["GEMINI_PLAN_MODEL"],
         json_schema=schema,
     ))
 

@@ -36,6 +36,8 @@ from src.services.workout_plans import (
     resolve_catalog_exercise,
     validate_workout_questionnaire,
 )
+import base64
+
 from datetime import datetime, timedelta
 from functools import wraps
 from sqlalchemy.exc import IntegrityError
@@ -399,11 +401,29 @@ def delete_diet_entry(entry_id):
 def get_ai_macros():
     data = json_body()
     description = str(data.get("description", "")).strip()
-    if not description:
-        return jsonify({"error": "Descrição do alimento é obrigatória"}), 400
-    
+    image = data.get("image") or {}
+    image_data = str(image.get("data", "")).strip()
+    mime_type = str(image.get("mime_type", "")).strip().lower()
+
+    image_bytes = None
+    if image_data:
+        allowed_mime = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
+        if mime_type not in allowed_mime:
+            return jsonify({"error": "Formato de imagem não suportado"}), 400
+        try:
+            image_bytes = base64.b64decode(image_data, validate=True)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Imagem inválida"}), 400
+        if not image_bytes:
+            return jsonify({"error": "Imagem inválida"}), 400
+        if len(image_bytes) > 8 * 1024 * 1024:
+            return jsonify({"error": "Imagem muito grande. Envie uma foto menor."}), 413
+
+    if not description and not image_bytes:
+        return jsonify({"error": "Descreva o alimento ou envie uma foto"}), 400
+
     try:
-        return jsonify(calculate_nutrition(description)), 200
+        return jsonify(calculate_nutrition(description, image_bytes, mime_type)), 200
     except AIResponseError:
         current_app.logger.warning("Gemini returned invalid nutrition JSON")
         return jsonify({"error": "A IA retornou macros incompletos. Tente novamente."}), 422
@@ -647,20 +667,36 @@ def create_guided_workout_plan():
     except PlanValidationError as error:
         return jsonify({"error": "Revise as preferências do treino.", "fields": error.errors}), 400
     profile = UserProfile.query.filter_by(user_id=user.id).first()
-    try:
-        generated = generate_workout_plan(questionnaire, profile)
-        plan_data = normalize_workout_output(generated, questionnaire)
-    except AIQuotaExceededError as error:
-        return jsonify({"error": str(error)}), 429
-    except AIResponseError:
-        current_app.logger.warning("Workout plan AI returned invalid JSON")
-        return jsonify({"error": "O treino gerado ficou incompleto. Tente novamente."}), 502
-    except AIServiceError:
-        current_app.logger.exception("Workout plan generation failed")
-        return jsonify({"error": "A IA não conseguiu gerar o treino agora."}), 503
-    except PlanValidationError as error:
-        current_app.logger.warning("Invalid generated workout plan: %s", error.errors)
-        return jsonify({"error": "O treino gerado ficou incompleto. Tente novamente."}), 502
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            generated = generate_workout_plan(questionnaire, profile)
+            plan_data = normalize_workout_output(generated, questionnaire)
+            break
+        except PlanValidationError as error:
+            current_app.logger.warning(
+                "Invalid generated workout plan (attempt %s/%s): %s",
+                attempt,
+                max_attempts,
+                list(error.errors)[:5],
+            )
+            if attempt < max_attempts:
+                continue
+            return jsonify({"error": "O treino gerado ficou incompleto. Tente novamente."}), 502
+        except AIResponseError:
+            current_app.logger.warning(
+                "Workout plan AI returned invalid/truncated output (attempt %s/%s)",
+                attempt,
+                max_attempts,
+            )
+            if attempt < max_attempts:
+                continue
+            return jsonify({"error": "O treino gerado ficou incompleto. Tente novamente."}), 502
+        except AIQuotaExceededError as error:
+            return jsonify({"error": str(error)}), 429
+        except AIServiceError:
+            current_app.logger.exception("Workout plan generation failed")
+            return jsonify({"error": "A IA não conseguiu gerar o treino agora."}), 503
 
     try:
         plan = WorkoutPlan(

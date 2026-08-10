@@ -1,3 +1,4 @@
+import base64
 import uuid
 
 import pytest
@@ -129,10 +130,82 @@ def test_macro_endpoint_reports_invalid_ai_json(client, monkeypatch):
     register(client)
     monkeypatch.setattr(
         "src.routes.user_routes.calculate_nutrition",
-        lambda description: (_ for _ in ()).throw(AIResponseError("invalid JSON")),
+        lambda description, image_bytes=None, mime_type=None: (_ for _ in ()).throw(
+            AIResponseError("invalid JSON")
+        ),
     )
     response = client.post("/api/diet/ai_macros", json={"description": "arroz"})
     assert response.status_code == 422
+
+
+def test_macro_endpoint_with_photo_passes_image_to_ai(client, monkeypatch):
+    register(client)
+    captured = {}
+
+    def fake_calculate(description, image_bytes, mime_type):
+        captured["image_bytes"] = image_bytes
+        captured["mime_type"] = mime_type
+        return {
+            "calories": 300,
+            "protein": 20,
+            "carbs": 30,
+            "fat": 10,
+            "precision": "alta",
+        }
+
+    monkeypatch.setattr("src.routes.user_routes.calculate_nutrition", fake_calculate)
+    gif = base64.b64encode(b"\xff\xd8\xff\xe0fakejpg").decode()
+    response = client.post(
+        "/api/diet/ai_macros",
+        json={"image": {"data": gif, "mime_type": "image/jpeg"}},
+    )
+    assert response.status_code == 200
+    assert captured["mime_type"] == "image/jpeg"
+    assert captured["image_bytes"] == b"\xff\xd8\xff\xe0fakejpg"
+
+
+def test_macro_endpoint_photo_without_description_is_valid(client, monkeypatch):
+    register(client)
+    monkeypatch.setattr(
+        "src.routes.user_routes.calculate_nutrition",
+        lambda description, image_bytes=None, mime_type=None: {
+            "calories": 1,
+            "protein": 1,
+            "carbs": 1,
+            "fat": 1,
+            "precision": "alta",
+        },
+    )
+    gif = base64.b64encode(b"jpeg-byte-content").decode()
+    response = client.post(
+        "/api/diet/ai_macros",
+        json={"image": {"data": gif, "mime_type": "image/png"}},
+    )
+    assert response.status_code == 200
+
+
+def test_macro_endpoint_requires_description_or_photo(client):
+    register(client)
+    response = client.post("/api/diet/ai_macros", json={})
+    assert response.status_code == 400
+
+
+def test_macro_endpoint_rejects_unsupported_image_mime(client):
+    register(client)
+    response = client.post(
+        "/api/diet/ai_macros",
+        json={"image": {"data": "abc", "mime_type": "image/svg+xml"}},
+    )
+    assert response.status_code == 400
+
+
+def test_macro_endpoint_rejects_invalid_image_base64(client):
+    register(client)
+    response = client.post(
+        "/api/diet/ai_macros",
+        json={"image": {"data": "!!not-base64!!", "mime_type": "image/jpeg"}},
+    )
+    assert response.status_code == 400
 
 
 def test_chat_opens_diet_questionnaire(app, client):

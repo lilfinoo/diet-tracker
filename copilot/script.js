@@ -31,9 +31,32 @@ function showToast(msg, tipo="success") {
     toast.className = "toast " + tipo;
     toast.innerText = msg;
     document.body.appendChild(toast);
+
+    const fluid = typeof Fluid !== "undefined" ? Fluid : null;
+    const reduced = typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (fluid && !reduced) {
+        toast.style.willChange = "transform, opacity";
+        toast.style.transform = "translate3d(0,-12px,0) scale(0.97)";
+        toast.style.opacity = "0";
+        requestAnimationFrame(() => {
+            fluid.animate(toast, { y: 0, scale: 1, opacity: 1 }, { response: 0.32, damping: 1.0 });
+        });
+        if (tipo === "success") fluid.haptic.tap();
+        else if (tipo === "error") fluid.haptic.snap();
+    }
+
     setTimeout(() => {
-        toast.remove();
-    }, 3000);
+        if (fluid && !reduced) {
+            fluid.animate(toast, { y: -10, opacity: 0 }, {
+                response: 0.25,
+                damping: 1.0,
+                onComplete() { toast.remove(); }
+            });
+        } else {
+            toast.remove();
+        }
+    }, 2900);
 }
 
 // Mensagem para login/registro/perfil
@@ -85,6 +108,38 @@ function hideGlobalLoading() {
     let loading = document.getElementById("globalLoading");
     if (loading) loading.remove();
 }
+
+async function downscaleImageFile(file, maxSize = 1024) {
+    const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error("Falha ao ler o arquivo"));
+        reader.readAsDataURL(file);
+    });
+    const img = await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("Falha ao decodificar a imagem"));
+        image.src = dataUrl;
+    });
+    let width = img.naturalWidth || img.width;
+    let height = img.naturalHeight || img.height;
+    const scale = Math.min(1, maxSize / Math.max(width, height));
+    if (scale < 1) {
+        width = Math.max(1, Math.round(width * scale));
+        height = Math.max(1, Math.round(height * scale));
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (ctx) ctx.drawImage(img, 0, 0, width, height);
+    const out = canvas.toDataURL("image/jpeg", 0.8);
+    return { dataUrl: out, base64: out.split(",")[1] };
+}
+
+// Foto selecionada para gerar macros por imagem (base64 já reduzido).
+let dietPhoto = null;
 
 // --- CONTROLES VISUAIS (cards de escolha, steppers, chips de data, revelar senha) ---
 function bindChoiceCardGrid(gridId, targetId) {
@@ -314,24 +369,56 @@ document.addEventListener('DOMContentLoaded', function() {
     // NOVO: Adiciona eventos para os novos modais de visualização de planos
     setupPlanViewModals();
 
+    addEventListenerSafe("dietPhotoBtn", "click", function() {
+        getElement("dietPhotoInput")?.click();
+    });
+
+    addEventListenerSafe("dietPhotoInput", "change", async function(e) {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        try {
+            const result = await downscaleImageFile(file, 1024);
+            dietPhoto = { data: result.base64, mime_type: file.type || "image/jpeg" };
+            const preview = getElement("dietPhotoPreview");
+            if (preview) preview.classList.remove("hidden");
+            const img = getElement("dietPhotoPreviewImg");
+            if (img) img.src = result.dataUrl;
+        } catch (error) {
+            dietPhoto = null;
+            showDietMessage("Não foi possível carregar a foto.", "error");
+        }
+    });
+
+    addEventListenerSafe("dietPhotoRemove", "click", function() {
+        dietPhoto = null;
+        const input = getElement("dietPhotoInput");
+        if (input) input.value = "";
+        const preview = getElement("dietPhotoPreview");
+        if (preview) preview.classList.add("hidden");
+        const img = getElement("dietPhotoPreviewImg");
+        if (img) img.removeAttribute("src");
+    });
+
     addEventListenerSafe("generateMacrosBtn", "click", async function() {
         const btnText = getElement("generateMacrosBtnText");
         const btnLoading = getElement("generateMacrosLoading");
         if (btnText) btnText.classList.add("hidden");
         if (btnLoading) btnLoading.classList.remove("hidden");
         const description = getElement("dietDescription")?.value.trim();
-        if (!description) {
-            showDietMessage("Descreva os alimentos antes de gerar macros.", "error");
+        if (!description && !dietPhoto) {
+            showDietMessage("Descreva o alimento ou envie uma foto para gerar macros.", "error");
             if (btnText) btnText.classList.remove("hidden");
             if (btnLoading) btnLoading.classList.add("hidden");
             return;
         }
         try {
+            const body = { description: description || null };
+            if (dietPhoto) body.image = dietPhoto;
             const response = await fetch(`${API_BASE}/diet/ai_macros`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 credentials: "include",
-                body: JSON.stringify({ description })
+                body: JSON.stringify(body)
             });
             const data = await response.json();
             if (response.ok) {
@@ -1117,10 +1204,52 @@ function openAppModal(modal) {
     document.body.classList.add("modal-open");
     const focusTarget = modal.querySelector(".btn-close, input:not([type='hidden']), select, textarea, button");
     if (focusTarget) requestAnimationFrame(() => focusTarget.focus());
+
+    const fluid = typeof Fluid !== "undefined" ? Fluid : null;
+    if (fluid) {
+        materializeModal(modal, fluid);
+        bindSheetDrag(modal);
+    }
 }
 
-function closeAppModal(modal) {
-    if (!modal) return;
+function materializeModal(modal, fluid) {
+    const content = modal.querySelector(".modal-content");
+    if (!content) return;
+    const reduced = typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    modal._fluidGen = (modal._fluidGen || 0) + 1;
+    modal._fluidClosing = false;
+    content.dataset.fluidMaterial = "true";
+
+    if (reduced) {
+        content.style.transform = "none";
+        content.style.opacity = "";
+        modal.style.opacity = "";
+        return;
+    }
+
+    content.style.willChange = "transform, opacity";
+    content.style.transform = "translate3d(0,26px,0) scale(0.96)";
+    content.style.opacity = "0";
+    modal.style.opacity = "0";
+    requestAnimationFrame(() => {
+        fluid.animate(content, { y: 0, scale: 1, opacity: 1 }, {
+            response: 0.42,
+            damping: 1.0,
+            from: { y: 26, scale: 0.96, opacity: 0 }
+        });
+        fluid.animate(modal, { opacity: 1 }, { response: 0.32, damping: 1.0 });
+    });
+}
+
+function finalizeModalClose(modal) {
+    const content = modal.querySelector(".modal-content");
+    if (content) {
+        content.style.transform = "none";
+        content.style.opacity = "";
+        content.classList.remove("is-dragging");
+    }
+    modal.style.opacity = "";
     modal.classList.remove("show");
     if (activeModal === modal) {
         activeModal = null;
@@ -1128,6 +1257,34 @@ function closeAppModal(modal) {
         if (modalTrigger instanceof HTMLElement) modalTrigger.focus();
         modalTrigger = null;
     }
+}
+
+function closeAppModal(modal) {
+    if (!modal) return;
+    const fluid = typeof Fluid !== "undefined" ? Fluid : null;
+    const content = modal.querySelector(".modal-content");
+    const gen = modal._fluidGen || 0;
+
+    modal._fluidClosing = true;
+    if (content) content.dataset.fluidMaterial = "true";
+
+    const done = () => {
+        // A newer open re-targeted this modal mid-close; do not yank it shut.
+        if ((modal._fluidGen || 0) !== gen) return;
+        finalizeModalClose(modal);
+    };
+
+    if (!fluid || !content || (typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches)) {
+        done();
+        return;
+    }
+
+    fluid.animate(content, { y: 26, scale: 0.96, opacity: 0 }, {
+        response: 0.3,
+        damping: 1.0,
+        onComplete: done
+    });
+    fluid.animate(modal, { opacity: 0 }, { response: 0.28, damping: 1.0 });
 }
 
 document.addEventListener("keydown", function(event) {
@@ -1141,6 +1298,13 @@ function showAddDietModal() {
     
     if (title) title.textContent = "Adicionar Registro de Dieta";
     if (form) form.reset();
+    dietPhoto = null;
+    const photoInput = getElement("dietPhotoInput");
+    if (photoInput) photoInput.value = "";
+    const photoPreview = getElement("dietPhotoPreview");
+    if (photoPreview) photoPreview.classList.add("hidden");
+    const photoImg = getElement("dietPhotoPreviewImg");
+    if (photoImg) photoImg.removeAttribute("src");
     
     // Set today's date
     const dietDate = getElement("dietDate");
@@ -2078,3 +2242,140 @@ async function loadPendingWorkoutSuggestions() {
 // Chamar ao carregar as abas (ajustado para os novos planos)
 // Esta função showTab já foi definida acima, esta é apenas uma nota.
 // A lógica de carregamento de planos já está dentro da showTab.
+
+// ============================================================================
+// Fluid UI — Apple-style interaction layer
+// ============================================================================
+// Instant press feedback (pointer-down), bottom-sheet drag-to-dismiss with
+// momentum projection + velocity handoff, and reduced-motion awareness.
+function reducedMotion() {
+    return typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+// --- 1. Press feedback: respond on pointer-down, cancel by dragging away ---
+(function pressFeedback() {
+    const PRESSABLE = ".btn, .nav-btn, .btn-close, .plan-card, .meal-card, .macro-card, .session-card, .exercise-card, .activity-card, .btn-view, .btn-add, .btn-edit, .btn-delete";
+
+    document.addEventListener("pointerdown", (e) => {
+        if (e.button !== undefined && e.button !== 0) return;
+        if (reducedMotion()) return;
+        const target = e.target;
+        if (!(target instanceof Element)) return;
+        const pressable = target.closest ? target.closest(PRESSABLE) : null;
+        if (!pressable) return;
+
+        pressable.classList.add("is-pressed");
+        const gx = e.clientX;
+        const gy = e.clientY;
+
+        const release = () => {
+            pressable.classList.remove("is-pressed");
+            window.removeEventListener("pointerup", release);
+            window.removeEventListener("pointercancel", release);
+            window.removeEventListener("pointermove", onMove);
+        };
+        const onMove = (ev) => {
+            // hysteresis: a 12px drag means it was a scroll/gesture, not a tap
+            if (Math.hypot(ev.clientX - gx, ev.clientY - gy) > 12) release();
+        };
+        window.addEventListener("pointerup", release);
+        window.addEventListener("pointercancel", release);
+        window.addEventListener("pointermove", onMove);
+    }, true);
+})();
+
+// --- 2. Bottom sheet: drag-to-dismiss (mobile), momentum + velocity snap ---
+function bindSheetDrag(modal) {
+    const content = modal.querySelector(".modal-content");
+    if (!content || content.dataset.fluidDragBound === "1") return;
+    if (typeof matchMedia === "undefined" || !matchMedia("(max-width: 600px)").matches) return;
+    content.dataset.fluidDragBound = "1";
+
+    if (!content.querySelector(".sheet-drag-handle")) {
+        const handle = document.createElement("div");
+        handle.className = "sheet-drag-handle";
+        content.prepend(handle);
+    }
+
+    let baseY = 0;
+    let lastY = 0;
+    let lastT = 0;
+    let vel = 0;
+    let moved = false;
+
+    content.addEventListener("pointerdown", (e) => {
+        if (e.button !== undefined && e.button !== 0) return;
+        const fromHandle = e.target.closest && e.target.closest(".sheet-drag-handle, .modal-header");
+        if (!fromHandle) return;
+        if (e.target.closest && e.target.closest("button, input, select, textarea, a, .btn-close")) return;
+        if (reducedMotion()) return;
+
+        if (content.setPointerCapture) content.setPointerCapture(e.pointerId);
+        baseY = e.clientY;
+        lastY = e.clientY;
+        lastT = performance.now();
+        vel = 0;
+        moved = false;
+        content.classList.add("is-dragging");
+
+        const onMove = (ev) => {
+            const dy = ev.clientY - baseY;
+            if (dy > 0) moved = true;
+            const now = performance.now();
+            const dt = Math.max(now - lastT, 8);
+            vel = (ev.clientY - lastY) / (dt / 1000);
+            lastY = ev.clientY;
+            lastT = now;
+            content.style.transform = "translate3d(0," + dy + "px,0) scale(1)";
+        };
+        const onUp = (ev) => {
+            content.classList.remove("is-dragging");
+            if (content.releasePointerCapture && ev.pointerId !== undefined) {
+                try { content.releasePointerCapture(ev.pointerId); } catch (err) {}
+            }
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+            window.removeEventListener("pointercancel", onUp);
+
+            const fluid = typeof Fluid !== "undefined" ? Fluid : null;
+            if (!moved) {
+                if (fluid) fluid.animate(content, { y: 0, scale: 1 }, { response: 0.3, damping: 1.0 });
+                return;
+            }
+            if (!fluid) {
+                closeAppModal(modal);
+                return;
+            }
+
+            const height = content.offsetHeight || 400;
+            const finalDy = ev.clientY - baseY;
+            const projected = finalDy + fluid.project(vel);
+            const dismiss = projected > height * 0.3 || vel > 700;
+            if (dismiss) {
+                fluid.haptic.snap();
+                fluid.animate(content, { y: height }, {
+                    response: 0.34,
+                    damping: 0.8,
+                    velocity: { y: vel },
+                    from: { y: finalDy, scale: 1, opacity: 1 },
+                    onComplete() {
+                        if (modal._fluidGen !== undefined) modal._fluidGen += 1; // invalidate any close
+                        finalizeModalClose(modal);
+                    }
+                });
+            } else {
+                fluid.haptic.tap();
+                fluid.animate(content, { y: 0 }, {
+                    response: 0.3,
+                    damping: 1.0,
+                    velocity: { y: vel },
+                    from: { y: finalDy, scale: 1, opacity: 1 }
+                });
+            }
+        };
+
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+        window.addEventListener("pointercancel", onUp);
+    });
+}

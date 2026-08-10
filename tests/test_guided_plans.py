@@ -141,6 +141,40 @@ def test_workout_validation_rejects_equivalent_chest_press_variations():
     assert "mesma variação biomecânica" in " ".join(error.value.errors.values())
 
 
+def test_workout_validation_allows_two_equivalent_chest_press_variations():
+    generated = generated_workout()
+    generated["days"][0]["exercises"] = prescribed_exercises(
+        "leg_press_45",
+        "supino_reto_halteres",
+        "supino_maquina",
+        "remada_maquina",
+        "prancha_frontal",
+    )
+
+    normalized = normalize_workout_output(generated, workout_questionnaire())
+
+    assert len(normalized["days"][0]["exercises"]) == 5
+
+
+def test_workout_validation_trims_exercises_beyond_duration_maximum():
+    generated = generated_workout()
+    generated["days"][0]["exercises"] = prescribed_exercises(
+        "leg_press_45",
+        "supino_reto_halteres",
+        "remada_maquina",
+        "prancha_frontal",
+        "ponte_de_gluteos",
+        "puxada_alta_frente",
+        "rosca_alternada",
+        "triceps_na_polia",
+    )
+
+    normalized = normalize_workout_output(generated, workout_questionnaire())
+
+    assert len(normalized["days"][0]["exercises"]) == 7
+    assert normalized["days"][0]["exercises"][-1]["catalog_key"] == "rosca_alternada"
+
+
 def test_workout_validation_accepts_complementary_chest_angles():
     generated = generated_workout()
     generated["days"][0]["exercises"] = prescribed_exercises(
@@ -240,6 +274,41 @@ def test_guided_workout_creation_and_temporary_replacement(app, client, monkeypa
         assert WorkoutSession.query.one().completed_at is not None
         assert WorkoutSessionExerciseCompletion.query.count() == 4
         assert WorkoutExercise.query.filter_by(id=exercise["id"]).one().name == "Leg press 45°"
+
+
+def test_guided_workout_retries_on_validation_error(app, client, monkeypatch):
+    register_premium(app, client)
+    calls = {"count": 0}
+
+    def flaky_generate(*args):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise PlanValidationError({"days.1": "Para 45 minutos, cada treino deve ter entre 4 e 7 exercícios."})
+        return generated_workout()
+
+    monkeypatch.setattr("src.routes.user_routes.generate_workout_plan", flaky_generate)
+
+    response = client.post("/api/workout_plans/generate", json=workout_questionnaire())
+
+    assert response.status_code == 201
+    assert calls["count"] == 2
+    with app.app_context():
+        assert WorkoutPlan.query.count() == 1
+
+
+def test_guided_workout_returns_502_when_retries_exhausted(app, client, monkeypatch):
+    register_premium(app, client)
+
+    def always_bad(*args):
+        raise PlanValidationError({"days.1": "Para 45 minutos, cada treino deve ter entre 4 e 7 exercícios."})
+
+    monkeypatch.setattr("src.routes.user_routes.generate_workout_plan", always_bad)
+
+    response = client.post("/api/workout_plans/generate", json=workout_questionnaire())
+
+    assert response.status_code == 502
+    with app.app_context():
+        assert WorkoutPlan.query.count() == 0
 
 
 def test_guided_diet_creation(app, client, monkeypatch):

@@ -1,0 +1,195 @@
+/* Fluid — Apple-inspired motion & material layer over styles.css.
+ * Kept as a separate, reversible stylesheet added after the base theme.
+ * Animates only compositor-friendly props (transform, opacity) by default.
+ * Reduced-motion / reduced-transparency / higher-contrast handled below.
+ */
+
+/* ---------- 1. Instant press feedback (respond on pointer-down) ---------- */
+:root {
+  --fluid-press: translateY(2px) scale(0.97);
+}
+
+.btn,
+.nav-btn,
+.btn-close,
+.plan-card,
+.meal-card,
+.macro-card,
+.session-card,
+.exercise-card,
+.btn-view,
+.btn-delete,
+.btn-add,
+.btn-edit {
+  /* keep the base hover lift but make the *press* state feel physical */
+  transition: transform var(--transition), box-shadow var(--transition);
+}
+
+.btn.is-pressed,
+.nav-btn.is-pressed,
+.btn-close.is-pressed,
+.plan-card.is-pressed,
+.meal-card.is-pressed,
+.macro-card.is-pressed,
+.activity-card.is-pressed,
+.btn-view.is-pressed,
+.btn-add.is-pressed,
+.btn-edit.is-pressed,
+.btn-delete.is-pressed {
+  transform: var(--fluid-press);
+  transition-duration: 80ms; /* near-instant going in */
+}
+.btn.is-pressed,
+.btn-primary.is-pressed {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+/* ---------- 2. Modal material: JS drives scale/translate/opacity ---------- */
+/* Base styles.css used a fixed keyframe entrance; hand it to the spring engine. */
+.modal-content {
+  will-change: transform, opacity;
+}
+.modal .modal-content[data-fluid-material="true"] {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal-content {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ---------- 3. Bottom sheet drag handle (mobile) ---------- */
+.sheet-drag-handle {
+  display: none;
+}
+@media (max-width: 600px) {
+  .sheet-drag-handle {
+    display: block;
+    width: 42px;
+    height: 4px;
+    margin: 0 auto 0.5rem;
+    border-radius: 999px;
+    background: var(--border-strong);
+    flex: none;
+  }
+}
+.modal-content.is-dragging {
+  cursor: grabbing;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+}
+.modal-content.is-dragging * {
+  pointer-events: none; /* let the whole surface travel, buttons won't hijack the drag */
+}
+
+/* ---------- 4. Translucent chrome & scroll edge fade (materials) ---------- */
+.header {
+  /* inherit the base blur but add saturation for a premium material */
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .header,
+  .nav {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: #0a120e;
+  }
+}
+
+/* ---------- 5. Typography: tracking & leading sized per role ---------- */
+.header h1,
+.stat-card h2,
+.section-title,
+.card h3,
+.plan-card h3,
+.meal-card h5 {
+  font-optical-sizing: auto;
+  letter-spacing: -0.02em;
+}
+.modal-header h3,
+.modal-content > h2 {
+  letter-spacing: -0.035em;
+}
+body,
+p,
+label,
+.btn,
+.plan-card p,
+.meal-card p,
+.stat-card p {
+  letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- 6. Accessibility gates ---------- */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .btn,
+  .nav-btn,
+  .plan-card,
+  .meal-card,
+  .macro-card,
+  .activity-card {
+    transition: none !important;
+    transform: none !important;
+  }
+  .is-pressed {
+    transform: none !important;
+  }
+}
+@media (prefers-contrast: more) {
+  .modal-content {
+    background: #0a1310;
+    border: 1px solid var(--border-strong);
+  }
+}
+
+/* ---------- 7. Scroll edge fade under sticky chrome ---------- */
+.header {
+  position: relative;
+}
+.header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 16px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(5, 11, 8, 0.55), transparent);
+}
+
+/* ---------- 8. Subtle entrance for repeated content ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  .macro-card,
+  .plan-card,
+  .meal-card,
+  .session-card {
+    animation: fluid-rise 420ms cubic-bezier(0.22, 0.61, 0.36, 1) backwards;
+  }
+  .plan-card:nth-child(2),
+  .meal-card:nth-child(2),
+  .macro-card:nth-child(2) {
+    animation-delay: 40ms;
+  }
+  .plan-card:nth-child(3),
+  .meal-card:nth-child(3),
+  .macro-card:nth-child(3) {
+    animation-delay: 80ms;
+  }
+}
+@keyframes fluid-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

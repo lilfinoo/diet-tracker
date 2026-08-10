@@ -364,12 +364,15 @@ def normalize_workout_output(data, questionnaire):
         exercises = day.get("exercises") if isinstance(day, dict) else None
         duration = questionnaire["session_duration"]
         minimum, maximum = (3, 5) if duration <= 30 else (4, 7) if duration <= 60 else (6, 8)
-        if not isinstance(exercises, list) or not minimum <= len(exercises) <= maximum:
+        if isinstance(exercises, list) and len(exercises) > maximum:
+            # The generator orders accessories and core last, so retain the primary work.
+            exercises = exercises[:maximum]
+        if not isinstance(exercises, list) or len(exercises) < minimum:
             errors[f"days.{day_index}"] = f"Para {duration} minutos, cada treino deve ter entre {minimum} e {maximum} exercícios."
             continue
         normalized_exercises = []
         used_keys = set()
-        used_training_roles = set()
+        training_role_counts = {}
         group_counts = {}
         for exercise_index, exercise in enumerate(exercises, start=1):
             if not isinstance(exercise, dict):
@@ -387,7 +390,7 @@ def normalize_workout_output(data, questionnaire):
                 continue
             role = training_role(catalog_item)
             group = catalog_item["substitution_group"]
-            if role and role in used_training_roles:
+            if role and training_role_counts.get(role, 0) >= 2:
                 errors[f"days.{day_index}.exercises.{exercise_index}"] = "O treino repetiu a mesma variação biomecânica."
                 continue
             dedicated_chest_day = (
@@ -410,7 +413,7 @@ def normalize_workout_output(data, questionnaire):
                 continue
             used_keys.add(catalog_item["key"])
             if role:
-                used_training_roles.add(role)
+                training_role_counts[role] = training_role_counts.get(role, 0) + 1
             group_counts[group] = group_counts.get(group, 0) + 1
             normalized_exercises.append({
                 "catalog_key": catalog_item["key"],

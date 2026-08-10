@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#211935">
+    <meta name="description" content="Mewtwo Psi Strike: uma campanha de plataforma e tiro em três fases.">
+    <title>Mewtwo: Psi Strike - Campanha</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <main class="game-shell" aria-label="Mewtwo Psi Strike">
+      <div class="marquee" aria-hidden="true">
+        <span>MEWTWO</span><strong>PSI STRIKE</strong><i>3 FASES · 1 CONFRONTO FINAL</i>
+      </div>
+
+      <section class="screen-wrap">
+        <canvas id="game" width="1280" height="720" aria-label="Jogo de plataforma Pokémon com Mewtwo"></canvas>
+
+        <div id="start-screen" class="overlay is-visible">
+          <div class="title-lockup">
+            <span class="eyebrow">CAMPANHA · INCIDENTE PSI</span>
+            <h1><span>MEWTWO</span><b>PSI</b></h1>
+            <p>Atravesse a Rota Psíquica e a Caverna de Cristal.<br>Algo desperta no laboratório final.</p>
+            <button id="start-button" class="primary-button">INICIAR CAMPANHA</button>
+            <div class="key-guide">
+              <span><kbd>A</kbd><kbd>D</kbd> mover</span>
+              <span><kbd>W</kbd> / <kbd>ESPAÇO</kbd> pular</span>
+              <span><kbd>J</kbd> / <kbd>F</kbd> poder psi</span>
+              <span><kbd>R</kbd> recuperar energia</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="message-screen" class="overlay result-screen" aria-live="polite">
+          <div class="result-card">
+            <span id="result-kicker" class="eyebrow">BATALHA ENCERRADA</span>
+            <h2 id="result-title">FORA DE COMBATE</h2>
+            <p id="result-copy"></p>
+            <button id="restart-button" class="primary-button">JOGAR NOVAMENTE</button>
+          </div>
+        </div>
+
+        <button id="pause-button" class="pause-button" aria-label="Pausar jogo">Ⅱ</button>
+        <div id="rotate-hint">Gire o celular para jogar melhor</div>
+
+        <div class="touch-controls" aria-label="Controles de toque">
+          <div class="touch-group movement">
+            <button data-control="left" aria-label="Mover para esquerda">◀</button>
+            <button data-control="right" aria-label="Mover para direita">▶</button>
+          </div>
+          <div class="touch-group actions">
+            <button data-control="jump" class="jump" aria-label="Pular">↑</button>
+            <button data-control="shoot" class="shoot" aria-label="Atirar">●</button>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        <span id="stage-footer">FASE 01 · ROTA PSÍQUICA</span>
+        <span>PRESSIONE <kbd>P</kbd> PARA PAUSAR</span>
+        <span>FAN GAME · ARTE PROCEDURAL</span>
+      </footer>
+    </main>
+    <script src="game.js"></script>
+  </body>
+</html>
