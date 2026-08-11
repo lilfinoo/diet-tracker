@@ -10,7 +10,7 @@ db = SQLAlchemy()
 class User(db.Model):
     id = db.Column(UUIDType(binary=False), primary_key=True, default=uuid.uuid4)
     username = db.Column(db.String(80), unique=True, nullable=False)
-    password_hash = db.Column(db.String(120), nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
     is_banned = db.Column(db.Boolean, default=False, nullable=False)
     banned_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
