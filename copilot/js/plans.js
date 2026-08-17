@@ -21,6 +21,10 @@
         moderate: "Moderado",
         flexible: "Flexível"
     };
+    const CHANGE_PACES = {
+        conservative: "Conservador",
+        moderate: "Moderado"
+    };
     const INGREDIENT_POOL = [];
     let ingredientPoolLoading = null;
     const WORKOUT_GOALS = {
@@ -43,11 +47,11 @@
         abcde: "ABCDE"
     };
     const SPLITS_BY_DAYS = {
-        2: ["full_body"],
-        3: ["full_body", "abc"],
-        4: ["upper_lower", "abcd"],
-        5: ["abcde"],
-        6: ["abc"]
+        2: ["full_body", "upper_lower"],
+        3: ["full_body", "upper_lower", "abc"],
+        4: ["full_body", "upper_lower", "abc", "abcd"],
+        5: ["full_body", "upper_lower", "abc", "abcd", "abcde"],
+        6: ["full_body", "upper_lower", "abc", "abcd", "abcde"]
     };
     const WORKOUT_EQUIPMENT = {
         full_gym: "Academia completa",
@@ -81,6 +85,12 @@
             goal: 0,
             meals_per_day: 0,
             diet_pattern: 0,
+            training_days_per_week: 0,
+            change_pace: 0,
+            target_calories: 2,
+            target_protein: 2,
+            target_carbs: 2,
+            target_fat: 2,
             allergies: 1,
             intolerances: 1,
             disliked_foods: 1,
@@ -108,6 +118,8 @@
             goal: "",
             meals_per_day: "3",
             diet_pattern: "omnivore",
+            training_days_per_week: "3",
+            change_pace: "conservative",
             allergies: "",
             intolerances: "",
             disliked_foods: "",
@@ -115,6 +127,10 @@
             budget: "moderate",
             prep_minutes: "30",
             available_ingredients: "",
+            target_calories: "",
+            target_protein: "",
+            target_carbs: "",
+            target_fat: "",
             notes: ""
         };
     }
@@ -147,11 +163,15 @@
         sessionError: "",
         pendingAction: "",
         replacementPanels: new Map(),
+        exerciseCatalog: [],
+        addExerciseOpen: false,
+        catalogLoading: false,
         requestToken: 0,
         viewVersion: 0
     };
     let activeWorkoutSummary = null;
     let activeWizardType = null;
+    let professionalWizardContext = null;
     let workoutTimerInterval = null;
     let workoutSyncInterval = null;
     let activeDockRequestToken = 0;
@@ -278,7 +298,7 @@
     }
 
     function parseIngredientTokens(value) {
-        return String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+        return String(value || "").split(";").map((item) => item.trim()).filter(Boolean);
     }
 
     function ingredientLastToken(value) {
@@ -297,19 +317,19 @@
     function ingredientOptions(query) {
         const q = String(query || "").toLowerCase();
         const matches = q ? INGREDIENT_POOL.filter((name) => name.toLowerCase().indexOf(q) !== -1) : INGREDIENT_POOL;
-        return matches.slice(0, 60).map((name) => `<option value="${esc(name)}"></option>`).join("");
+        return matches.map((name) => `<option value="${esc(name)}"></option>`).join("");
     }
 
     function addIngredient(value) {
         const state = wizardMemory[activeWizardType];
         const answers = state.answers;
-        const token = String(value || "").trim().replace(/^,+|,+$/g, "");
+        const token = String(value || "").trim().replace(/^;+|;+$/g, "");
         if (!token) return;
         const tokens = parseIngredientTokens(answers.available_ingredients);
         if (tokens.indexOf(token) !== -1) return;
         tokens.push(token);
         if (tokens.length > 24) return;
-        answers.available_ingredients = tokens.join(", ");
+        answers.available_ingredients = tokens.join("; ");
         delete state.fieldErrors.available_ingredients;
         const chips = byId("ingredient-chips");
         if (chips) chips.innerHTML = ingredientChipsMarkup(answers.available_ingredients);
@@ -319,7 +339,7 @@
         const state = wizardMemory[activeWizardType];
         if (!state) return;
         const tokens = parseIngredientTokens(state.answers.available_ingredients).filter((token) => token !== String(value));
-        state.answers.available_ingredients = tokens.join(", ");
+        state.answers.available_ingredients = tokens.join("; ");
         const chips = byId("ingredient-chips");
         if (chips) chips.innerHTML = ingredientChipsMarkup(state.answers.available_ingredients);
     }
@@ -337,6 +357,10 @@
                         <select id="wizard-diet-pattern" name="diet_pattern"${invalidAttributes("diet_pattern", state)}>${selectOptions(DIET_PATTERNS, answers.diet_pattern)}</select>
                         ${fieldError("diet_pattern", state)}
                     </div>
+                </div>
+                <div class="wizard-field-row">
+                    <div class="wizard-field"><label for="wizard-training-days">Treinos por semana</label><select id="wizard-training-days" name="training_days_per_week"${invalidAttributes("training_days_per_week", state)}>${selectOptions({ 0: "Não treino", 1: "1 dia", 2: "2 dias", 3: "3 dias", 4: "4 dias", 5: "5 dias", 6: "6 dias", 7: "7 dias" }, answers.training_days_per_week)}</select>${fieldError("training_days_per_week", state)}</div>
+                    <fieldset class="wizard-fieldset"><legend>Ritmo da mudança</legend>${radioCards("change_pace", CHANGE_PACES, answers.change_pace, state, true)}<small class="wizard-field-hint">O ritmo moderado ainda usa limites conservadores de segurança.</small></fieldset>
                 </div>`;
         }
         if (state.step === 1) {
@@ -358,7 +382,7 @@
             <div class="wizard-field wizard-field--ingredients">
                 <label for="wizard-ingredient-input">Selecionar ingredientes <span>opcional</span></label>
                 <div class="ingredient-picker">
-                    <input id="wizard-ingredient-input" name="available_ingredients" list="wizard-ingredient-options" placeholder="Digite um ingrediente e pressione Enter" autocomplete="off" maxlength="970" value="${esc(answers.available_ingredients)}"${invalidAttributes("available_ingredients", state)}>
+                    <input id="wizard-ingredient-input" name="available_ingredients" list="wizard-ingredient-options" placeholder="Digite um ingrediente e pressione Enter" autocomplete="off" maxlength="160" value=""${invalidAttributes("available_ingredients", state)}>
                     <datalist id="wizard-ingredient-options">${ingredientOptions(ingredientLastToken(answers.available_ingredients))}</datalist>
                     <button type="button" class="ingredient-add" data-add-ingredient aria-label="Adicionar ingrediente"><i class="fas fa-plus" aria-hidden="true"></i></button>
                 </div>
@@ -366,6 +390,16 @@
                 <small class="wizard-field-hint">Informe o que você tem em casa. A IA monta o plano usando principalmente esses ingredientes.</small>
                 ${fieldError("available_ingredients", state)}
             </div>
+            <fieldset class="wizard-fieldset">
+                <legend>Metas nutricionais <span>opcional</span></legend>
+                <p class="wizard-field-hint">Preencha somente o que desejar. Campos vazios serão calculados com idade, sexo, altura, peso, atividade, treinos e objetivo.</p>
+                <div class="wizard-field-grid">
+                    <div class="wizard-field"><label for="wizard-target-calories">Calorias por dia</label><input id="wizard-target-calories" name="target_calories" type="number" min="800" max="7000" step="1" value="${esc(answers.target_calories)}" placeholder="Automático"${invalidAttributes("target_calories", state)}>${fieldError("target_calories", state)}</div>
+                    <div class="wizard-field"><label for="wizard-target-protein">Proteína (g)</label><input id="wizard-target-protein" name="target_protein" type="number" min="20" max="500" step="1" value="${esc(answers.target_protein)}" placeholder="Automático"${invalidAttributes("target_protein", state)}>${fieldError("target_protein", state)}</div>
+                    <div class="wizard-field"><label for="wizard-target-carbs">Carboidratos (g)</label><input id="wizard-target-carbs" name="target_carbs" type="number" min="20" max="1200" step="1" value="${esc(answers.target_carbs)}" placeholder="Automático"${invalidAttributes("target_carbs", state)}>${fieldError("target_carbs", state)}</div>
+                    <div class="wizard-field"><label for="wizard-target-fat">Gorduras (g)</label><input id="wizard-target-fat" name="target_fat" type="number" min="15" max="300" step="1" value="${esc(answers.target_fat)}" placeholder="Automático"${invalidAttributes("target_fat", state)}>${fieldError("target_fat", state)}</div>
+                </div>
+            </fieldset>
             <div class="wizard-field"><label for="wizard-diet-notes">Observações finais <span>opcional</span></label><textarea id="wizard-diet-notes" name="notes" rows="3" maxlength="500" placeholder="Conte algo importante sobre sua rotina."${invalidAttributes("notes", state)}>${esc(answers.notes)}</textarea><small class="wizard-character-count">${String(answers.notes || "").length}/500</small>${fieldError("notes", state)}</div>
             ${renderWizardReview("diet", answers)}`;
     }
@@ -402,7 +436,7 @@
             return `
                 <div class="wizard-step-heading" tabindex="-1"><span>Etapa 2 de 3</span><h4>Estrutura do treino</h4><p>A divisão já está limitada às opções compatíveis com sua frequência.</p></div>
                 <div class="wizard-field-row">
-                    <fieldset class="wizard-fieldset"><legend>Divisão semanal</legend><p class="wizard-field-hint">Recomendação: ${esc(labelFor(SPLIT_TYPES, recommendedSplit(answers.days_per_week, answers.experience_level)))}</p>${radioCards("split_type", compatibleSplits(answers.days_per_week), answers.split_type, state, true)}</fieldset>
+                    <fieldset class="wizard-fieldset"><legend>Divisão semanal</legend><p class="wizard-field-hint"><strong>Recomendação para você:</strong> ${esc(labelFor(SPLIT_TYPES, recommendedSplit(answers.days_per_week, answers.experience_level)))}. Você pode escolher outra estrutura abaixo.</p>${radioCards("split_type", compatibleSplits(answers.days_per_week), answers.split_type, state, true)}</fieldset>
                     <div class="wizard-field"><label for="wizard-session-duration">Duração por sessão</label><select id="wizard-session-duration" name="session_duration"${invalidAttributes("session_duration", state)}>${selectOptions({ 20: "20 minutos", 30: "30 minutos", 45: "45 minutos", 60: "60 minutos", 75: "75 minutos", 90: "90 minutos" }, answers.session_duration)}</select>${fieldError("session_duration", state)}</div>
                 </div>
                 <fieldset class="wizard-fieldset"><legend>Equipamentos disponíveis</legend><p class="wizard-field-hint">Marque tudo o que costuma estar ao seu alcance.</p>${checkboxCards("equipment", WORKOUT_EQUIPMENT, answers.equipment, state)}</fieldset>`;
@@ -422,6 +456,7 @@
             ? [
                 ["Objetivo", labelFor(DIET_GOALS, answers.goal)],
                 ["Rotina", `${answers.meals_per_day} refeições, dieta ${labelFor(DIET_PATTERNS, answers.diet_pattern).toLowerCase()}`],
+                ["Meta energética", `${answers.training_days_per_week} treino(s)/semana, ritmo ${labelFor(CHANGE_PACES, answers.change_pace).toLowerCase()}`],
                 ["Preparo", `${labelFor(BUDGETS, answers.budget)}, até ${answers.prep_minutes} min`]
             ]
             : [
@@ -500,8 +535,9 @@
         }
     }
 
-    function openPlanWizard(type) {
+    function openPlanWizard(type, context = null) {
         if (type !== "diet" && type !== "workout") return;
+        professionalWizardContext = context;
         activeWizardType = type;
         const modal = byId("guidedPlanModal");
         if (!modal) return;
@@ -509,6 +545,44 @@
         modal.setAttribute("aria-hidden", "false");
         openAppModal(modal);
         requestAnimationFrame(() => byId("planWizardStep")?.querySelector(".wizard-step-heading")?.focus());
+    }
+
+    function openProfessionalPlanWizard(type, studentId) {
+        wizardMemory[type] = {
+            step: 0,
+            answers: type === "diet" ? defaultDietAnswers() : defaultWorkoutAnswers(),
+            error: "",
+            fieldErrors: {},
+            generating: false
+        };
+        openPlanWizard(type, { type, studentId });
+    }
+
+    function openDietPlanWizardWithPlan(plan) {
+        const questionnaire = plan?.questionnaire || {};
+        const targets = plan?.nutrition_targets || {};
+        const answers = defaultDietAnswers();
+        Object.assign(answers, {
+            goal: questionnaire.goal || answers.goal,
+            meals_per_day: String(questionnaire.meals_per_day || answers.meals_per_day),
+            diet_pattern: questionnaire.diet_pattern || answers.diet_pattern,
+            training_days_per_week: String(questionnaire.training_days_per_week ?? answers.training_days_per_week),
+            change_pace: questionnaire.change_pace || answers.change_pace,
+            allergies: asArray(questionnaire.allergies).join(", "),
+            intolerances: asArray(questionnaire.intolerances).join(", "),
+            disliked_foods: asArray(questionnaire.disliked_foods).join(", "),
+            preferred_foods: asArray(questionnaire.preferred_foods).join(", "),
+            budget: questionnaire.budget || answers.budget,
+            prep_minutes: String(questionnaire.prep_minutes || answers.prep_minutes),
+            available_ingredients: asArray(questionnaire.available_ingredients).join("; "),
+            target_calories: targets.targetCalories ?? "",
+            target_protein: targets.targetProtein ?? "",
+            target_carbs: targets.targetCarbs ?? "",
+            target_fat: targets.targetFat ?? "",
+            notes: questionnaire.notes || ""
+        });
+        wizardMemory.diet = { step: 2, answers, error: "", fieldErrors: {}, generating: false };
+        openPlanWizard("diet");
     }
 
     function closePlanWizard() {
@@ -534,6 +608,8 @@
                 if (!DIET_GOALS[answers.goal]) errors.goal = "Selecione seu objetivo principal.";
                 if (!["3", "4", "5"].includes(String(answers.meals_per_day))) errors.meals_per_day = "Escolha quantas refeições deseja.";
                 if (!DIET_PATTERNS[answers.diet_pattern]) errors.diet_pattern = "Selecione um padrão alimentar.";
+                if (!Array.from({ length: 8 }, (_, index) => String(index)).includes(String(answers.training_days_per_week))) errors.training_days_per_week = "Escolha entre 0 e 7 dias.";
+                if (!CHANGE_PACES[answers.change_pace]) errors.change_pace = "Selecione um ritmo.";
             } else if (step === 1) {
                 const fields = {
                     allergies: "Alergias",
@@ -548,9 +624,18 @@
             } else {
                 if (!BUDGETS[answers.budget]) errors.budget = "Selecione uma faixa de orçamento.";
                 if (!["15", "30", "45", "60"].includes(String(answers.prep_minutes))) errors.prep_minutes = "Selecione o tempo de preparo.";
-                const ingredientMessage = validateTextList(answers.available_ingredients, "Ingredientes");
+                const ingredients = parseIngredientTokens(answers.available_ingredients);
+                const ingredientMessage = ingredients.length > 24 || ingredients.some((item) => item.length > 80)
+                    ? "Ingredientes: informe no máximo 24 itens de até 80 caracteres."
+                    : "";
                 if (ingredientMessage) errors.available_ingredients = ingredientMessage;
                 if (String(answers.notes || "").length > 500) errors.notes = "Resuma as observações em até 500 caracteres.";
+                const targetLimits = { target_calories: [800, 7000], target_protein: [20, 500], target_carbs: [20, 1200], target_fat: [15, 300] };
+                Object.entries(targetLimits).forEach(([field, [minimum, maximum]]) => {
+                    if (answers[field] === "") return;
+                    const value = Number(answers[field]);
+                    if (!Number.isFinite(value) || value < minimum || value > maximum) errors[field] = `Informe um valor entre ${minimum} e ${maximum}.`;
+                });
             }
         } else if (step === 0) {
             if (!WORKOUT_GOALS[answers.goal]) errors.goal = "Selecione seu objetivo principal.";
@@ -584,13 +669,21 @@
                 goal: answers.goal,
                 meals_per_day: Number(answers.meals_per_day),
                 diet_pattern: answers.diet_pattern,
+                training_days_per_week: Number(answers.training_days_per_week),
+                change_pace: answers.change_pace,
                 allergies: parseTextList(answers.allergies),
                 intolerances: parseTextList(answers.intolerances),
                 disliked_foods: parseTextList(answers.disliked_foods),
                 preferred_foods: parseTextList(answers.preferred_foods),
                 budget: answers.budget,
                 prep_minutes: Number(answers.prep_minutes),
-                available_ingredients: parseTextList(answers.available_ingredients),
+                available_ingredients: parseIngredientTokens(answers.available_ingredients),
+                custom_targets: {
+                    calories: answers.target_calories === "" ? null : Number(answers.target_calories),
+                    protein: answers.target_protein === "" ? null : Number(answers.target_protein),
+                    carbs: answers.target_carbs === "" ? null : Number(answers.target_carbs),
+                    fat: answers.target_fat === "" ? null : Number(answers.target_fat)
+                },
                 notes: String(answers.notes || "").trim()
             };
         }
@@ -623,12 +716,25 @@
             showWizardErrors(type, errors, "Revise os campos destacados antes de gerar o plano.");
             return;
         }
+        if (!window.currentUser) {
+            closePlanWizard();
+            window.requireAuth?.(`Entre para gerar seu plano de ${type === "diet" ? "dieta" : "treino"}.`, {
+                premium: true,
+                requiresProfile: type === "diet",
+                resume: () => openPlanWizard(type)
+            });
+            return;
+        }
+        if (!window.requireAuth?.(`Entre para gerar seu plano de ${type === "diet" ? "dieta" : "treino"}.`, { premium: true })) return;
 
         state.generating = true;
         renderWizard();
         let result;
         try {
-            result = await apiRequest(`/${type === "diet" ? "diet_plans" : "workout_plans"}/generate`, {
+            const path = professionalWizardContext
+                ? `/professional/students/${apiSegment(professionalWizardContext.studentId)}/${type === "diet" ? "diet-plans" : "workout-plans"}/generate`
+                : `/${type === "diet" ? "diet_plans" : "workout_plans"}/generate`;
+            result = await apiRequest(path, {
                 method: "POST",
                 body: buildWizardPayload(type)
             });
@@ -651,7 +757,13 @@
             generating: false
         };
         closePlanWizard();
-        showToast(type === "diet" ? "Plano alimentar criado!" : "Plano de treino criado!", "success");
+        const professionalContext = professionalWizardContext;
+        professionalWizardContext = null;
+        showToast(professionalContext ? "Rascunho criado para revisão." : type === "diet" ? "Plano alimentar criado!" : "Plano de treino criado!", "success");
+        if (professionalContext) {
+            window.openProfessionalStudent?.(professionalContext.studentId);
+            return;
+        }
         showTab(type === "diet" ? "diet_plans" : "workout_plans");
         if (planId) {
             if (type === "diet") await viewDietPlan(planId);
@@ -664,6 +776,7 @@
         const control = event.target;
         if (!control.name) return;
         const state = wizardMemory[activeWizardType];
+        if (control.id === "wizard-ingredient-input") return;
         if (control.type === "checkbox") {
             const current = new Set(asArray(state.answers[control.name]));
             if (control.checked) current.add(control.value);
@@ -686,7 +799,7 @@
     function handleWizardKeydown(event) {
         const control = event.target;
         if (!activeWizardType || control.id !== "wizard-ingredient-input") return;
-        if (event.key === "Enter" || event.key === "," || event.key === ";") {
+        if (event.key === "Enter" || event.key === ";") {
             event.preventDefault();
             addIngredient(control.value);
             control.value = "";
@@ -791,6 +904,11 @@
     }
 
     async function loadDietPlans() {
+        if (!window.currentUser) {
+            const container = byId("dietPlansTableBody");
+            if (container) container.innerHTML = '<div class="guest-presentation guest-presentation--standalone"><i class="fas fa-bowl-food"></i><div><strong>Cardápios alinhados ao seu objetivo</strong><p>Explore o questionário e gere planos personalizados com IA Premium.</p></div></div>';
+            return [];
+        }
         const container = byId("dietPlansTableBody");
         if (container) {
             container.setAttribute("aria-busy", "true");
@@ -810,6 +928,11 @@
     }
 
     async function loadWorkoutPlans() {
+        if (!window.currentUser) {
+            const container = byId("workoutPlansTableBody");
+            if (container) container.innerHTML = '<div class="guest-presentation guest-presentation--standalone"><i class="fas fa-dumbbell"></i><div><strong>Organize e execute seus treinos</strong><p>Explore o gerador e salve planos para acompanhar cada sessão.</p></div></div>';
+            return [];
+        }
         const container = byId("workoutPlansTableBody");
         if (container) {
             container.setAttribute("aria-busy", "true");
@@ -864,6 +987,41 @@
         return `<div class="meal-macros" aria-label="Macronutrientes estimados">${values.map(([value, label]) => `<span><b>${esc(value ?? "—")}</b><small>${esc(label)}</small></span>`).join("")}</div>`;
     }
 
+    function dietNutritionTotals(meals) {
+        return asArray(meals).reduce((totals, meal) => {
+            ["calories", "protein", "carbs", "fat"].forEach((nutrient) => {
+                const value = Number(meal?.[nutrient]);
+                if (Number.isFinite(value)) totals[nutrient] += value;
+            });
+            return totals;
+        }, { calories: 0, protein: 0, carbs: 0, fat: 0 });
+    }
+
+    function renderDietNutritionSummary(totals, targets, label) {
+        const nutrients = [
+            ["calories", "targetCalories", "Calorias", "kcal", "fa-fire"],
+            ["protein", "targetProtein", "Proteínas", "g", "fa-drumstick-bite"],
+            ["carbs", "targetCarbs", "Carboidratos", "g", "fa-wheat-awn"],
+            ["fat", "targetFat", "Gorduras", "g", "fa-droplet"]
+        ];
+        return `<section class="diet-nutrition-summary" aria-label="${esc(label)}">
+            <header><div><span>Resumo nutricional</span><h4>${esc(label)}</h4></div><small>Estimativas do cardápio</small></header>
+            <div class="diet-nutrition-grid">${nutrients.map(([key, targetKey, name, unit, icon]) => {
+                const value = Math.round(Number(totals[key]) || 0);
+                const target = Math.round(Number(targets?.[targetKey]) || 0);
+                const percentage = target ? Math.round((value / target) * 100) : 0;
+                const progress = Math.min(Math.max(percentage, 0), 100);
+                const status = target && Math.abs(percentage - 100) <= 10 ? " na-meta" : "";
+                return `<article class="diet-nutrition-stat${status}">
+                    <div><i class="fas ${icon}" aria-hidden="true"></i><span>${name}</span></div>
+                    <strong>${value}<small>${unit}</small></strong>
+                    <p>${target ? `Meta: ${target} ${unit} · ${percentage}%` : "Sem meta definida"}</p>
+                    <span class="diet-nutrition-progress"><i style="width:${progress}%"></i></span>
+                </article>`;
+            }).join("")}</div>
+        </section>`;
+    }
+
     function renderSubstitutions(substitutions) {
         const safeSubstitutions = asArray(substitutions);
         if (!safeSubstitutions.length) return "";
@@ -879,7 +1037,11 @@
     }
 
     function renderMealCard(meal, index) {
-        const items = asArray(meal.items).filter((item) => item != null && String(item).trim());
+        const items = asArray(meal.items).map((item) => {
+            if (!item || typeof item !== "object") return String(item || "");
+            const quantity = Number(item.quantity);
+            return `${Number.isFinite(quantity) ? quantity : ""} ${item.unit || "g"} de ${item.name || item.foodId || "alimento"}`.trim();
+        }).filter((item) => item.trim());
         const prepMinutes = meal.prep_minutes != null ? `${esc(meal.prep_minutes)} min` : "";
         return `
             <article class="meal-card meal-card--detailed">
@@ -905,6 +1067,7 @@
         if (!plan || !details) return;
         const groups = groupDietMeals(plan);
         if (dietView.selectedDay >= groups.length) dietView.selectedDay = 0;
+        const targets = plan.nutrition_targets || {};
         const summary = `
             <section class="plan-summary">
                 <div class="plan-summary__icon"><i class="fas fa-apple-alt" aria-hidden="true"></i></div>
@@ -915,16 +1078,23 @@
             details.innerHTML = `${summary}<div class="plan-details-empty">Nenhuma refeição detalhada para este plano.</div>`;
             return;
         }
+        const averageTotals = groups.reduce((totals, group) => {
+            const dayTotals = dietNutritionTotals(group.meals);
+            Object.keys(totals).forEach((key) => { totals[key] += dayTotals[key] / groups.length; });
+            return totals;
+        }, { calories: 0, protein: 0, carbs: 0, fat: 0 });
+        const nutritionOverview = renderDietNutritionSummary(averageTotals, targets, "Média diária do plano");
         const tabs = `
             <div class="plan-day-tabs" role="tablist" aria-label="Dias do plano alimentar">
-                ${groups.map((group, index) => `<button type="button" role="tab" id="diet-day-tab-${index}" aria-controls="diet-day-panel-${index}" aria-selected="${index === dietView.selectedDay}" tabindex="${index === dietView.selectedDay ? "0" : "-1"}" class="plan-day-tab${index === dietView.selectedDay ? " active" : ""}" data-diet-day-index="${index}"><span>Dia ${index + 1}</span><strong>${esc(group.name)}</strong></button>`).join("")}
+                ${groups.map((group, index) => `<button type="button" role="tab" id="diet-day-tab-${index}" aria-controls="diet-day-panel-${index}" aria-selected="${index === dietView.selectedDay}" tabindex="${index === dietView.selectedDay ? "0" : "-1"}" class="plan-day-tab${index === dietView.selectedDay ? " active" : ""}" data-diet-day-index="${index}"><span>Dia ${index + 1}</span><strong>${esc(group.name)}</strong><small>${Math.round(dietNutritionTotals(group.meals).calories)} kcal</small></button>`).join("")}
             </div>`;
         const sections = groups.map((group, index) => `
             <section id="diet-day-panel-${index}" role="tabpanel" aria-labelledby="diet-day-tab-${index}" class="plan-details-section diet-day-panel${index === dietView.selectedDay ? "" : " hidden"}">
                 <div class="plan-section-title"><span><i class="far fa-calendar-check" aria-hidden="true"></i> ${esc(group.name)}</span><small>${group.meals.length} refeição(ões)</small></div>
+                ${renderDietNutritionSummary(dietNutritionTotals(group.meals), targets, `Totais de ${group.name}`)}
                 <div class="meal-list">${group.meals.map(renderMealCard).join("")}</div>
             </section>`).join("");
-        details.innerHTML = `${summary}${tabs}${sections}`;
+        details.innerHTML = `${summary}${nutritionOverview}${tabs}${sections}`;
     }
 
     async function viewDietPlan(id) {
@@ -1025,6 +1195,10 @@
     }
 
     async function loadActiveWorkoutDock() {
+        if (!window.currentUser) {
+            clearActiveWorkoutDock();
+            return;
+        }
         const token = ++activeDockRequestToken;
         let result = null;
         try {
@@ -1076,8 +1250,12 @@
 
     function exerciseImageMarkup(exercise) {
         const imagePath = exerciseImage(exercise);
+        const fallbackPath = typeof exerciseFallbackImagePath === "function"
+            ? exerciseFallbackImagePath(exercise?.catalog_key)
+            : "";
         if (imagePath) {
-            return `<img class="exercise-demonstration-image" src="${esc(imagePath)}" alt="Demonstração de ${esc(exercise?.name || "exercício")}" loading="lazy">`;
+            const fallback = fallbackPath && fallbackPath !== imagePath ? ` data-fallback-src="${esc(fallbackPath)}"` : "";
+            return `<img class="exercise-demonstration-image" src="${esc(imagePath)}"${fallback} alt="Demonstração de ${esc(exercise?.name || "exercício")}" loading="lazy">`;
         }
         return '<span class="exercise-image-placeholder" role="img" aria-label="Imagem não disponível"><i class="fas fa-dumbbell" aria-hidden="true"></i></span>';
     }
@@ -1088,6 +1266,7 @@
 
     function renderReplacementPanel(exercise, panel) {
         if (!panel) return "";
+        const permanent = panel.mode === "permanent";
         const panelId = `replacement-panel-${esc(exercise.id)}`;
         if (panel.loading) {
             return `<section id="${panelId}" class="replacement-panel" tabindex="-1" aria-live="polite"><div class="replacement-panel__loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Buscando alternativas seguras...</span></div></section>`;
@@ -1095,7 +1274,7 @@
         return `
             <section id="${panelId}" class="replacement-panel" tabindex="-1" aria-labelledby="replacement-title-${esc(exercise.id)}">
                 <div class="replacement-panel__header">
-                    <div><span>Somente nesta sessão</span><h6 id="replacement-title-${esc(exercise.id)}">Trocar ${esc(exercise.name)}</h6><p>Alternativas compatíveis com o mesmo padrão de movimento.</p></div>
+                    <div><span>${permanent ? "Alteração permanente" : "Somente nesta sessão"}</span><h6 id="replacement-title-${esc(exercise.id)}">Trocar ${esc(exercise.name)}</h6><p>Alternativas compatíveis com o mesmo padrão de movimento.</p></div>
                     <button type="button" class="replacement-close" data-workout-action="close-replacements" data-exercise-id="${esc(exercise.id)}" aria-label="Fechar alternativas"><i class="fas fa-xmark" aria-hidden="true"></i></button>
                 </div>
                 ${panel.error ? `<p class="session-inline-error" role="alert">${esc(panel.error)}</p>` : ""}
@@ -1105,7 +1284,7 @@
                         <article class="replacement-option">
                             ${exerciseImageMarkup(option)}
                             <div class="replacement-option__body"><h6>${esc(option.name)}</h6><p>${esc(option.rationale || "Mantém o foco do exercício original.")}</p><span><i class="fas fa-dumbbell" aria-hidden="true"></i> ${esc(equipmentLabel(option.equipment))}</span></div>
-                            <button type="button" class="replacement-apply" data-workout-action="apply-replacement" data-exercise-id="${esc(exercise.id)}" data-catalog-key="${esc(option.catalog_key)}"${panel.applying === option.catalog_key ? " disabled" : ""}>${panel.applying === option.catalog_key ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Aplicando' : "Usar hoje"}</button>
+                            <button type="button" class="replacement-apply" data-workout-action="${permanent ? "apply-permanent-replacement" : "apply-replacement"}" data-exercise-id="${esc(exercise.id)}" data-catalog-key="${esc(option.catalog_key)}"${panel.applying === option.catalog_key ? " disabled" : ""}>${panel.applying === option.catalog_key ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Aplicando' : permanent ? "Trocar no plano" : "Usar hoje"}</button>
                         </article>`).join("")}
                 </div>
                 ${!panel.error && !asArray(panel.options).length ? '<div class="replacement-empty"><i class="fas fa-circle-info" aria-hidden="true"></i><span>Nenhuma alternativa disponível para os equipamentos do plano.</span></div>' : ""}
@@ -1134,9 +1313,27 @@
                     ${exercise.effort_guidance ? `<p class="exercise-guidance"><i class="fas fa-gauge-high" aria-hidden="true"></i><span><strong>Esforço</strong>${esc(exercise.effort_guidance)}</span></p>` : ""}
                     ${exercise.notes ? `<p class="plan-note"><i class="fas fa-info-circle" aria-hidden="true"></i> ${esc(exercise.notes)}</p>` : ""}
                 </div>
-                ${active ? `<div class="exercise-session-actions"><button type="button" class="machine-busy-button" data-workout-action="replacement-options" data-exercise-id="${esc(originalExercise.id)}" aria-expanded="${Boolean(panel)}" aria-controls="replacement-panel-${esc(originalExercise.id)}"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> Máquina ocupada</button>${override ? `<button type="button" class="restore-exercise-button" data-workout-action="restore-exercise" data-exercise-id="${esc(originalExercise.id)}"${workoutView.pendingAction === `restore-${originalExercise.id}` ? " disabled" : ""}><i class="fas fa-rotate-left" aria-hidden="true"></i> Restaurar original</button>` : ""}</div>` : ""}
+                ${active
+                    ? `<div class="exercise-session-actions"><button type="button" class="machine-busy-button" data-workout-action="replacement-options" data-exercise-id="${esc(originalExercise.id)}" aria-expanded="${Boolean(panel)}" aria-controls="replacement-panel-${esc(originalExercise.id)}"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> Máquina ocupada</button>${override ? `<button type="button" class="restore-exercise-button" data-workout-action="restore-exercise" data-exercise-id="${esc(originalExercise.id)}"${workoutView.pendingAction === `restore-${originalExercise.id}` ? " disabled" : ""}><i class="fas fa-rotate-left" aria-hidden="true"></i> Restaurar original</button>` : ""}</div>`
+                    : `<div class="workout-edit-actions"><button type="button" data-workout-action="permanent-replacement-options" data-exercise-id="${esc(originalExercise.id)}" aria-expanded="${Boolean(panel)}" aria-controls="replacement-panel-${esc(originalExercise.id)}"><i class="fas fa-shuffle" aria-hidden="true"></i> Substituir</button><button type="button" class="workout-remove-exercise" data-workout-action="delete-plan-exercise" data-exercise-id="${esc(originalExercise.id)}"><i class="fas fa-trash" aria-hidden="true"></i> Remover</button></div>`}
                 ${renderReplacementPanel(originalExercise, panel)}
             </article>`;
+    }
+
+    function renderAddExercisePanel(day) {
+        if (!workoutView.addExerciseOpen) return "";
+        if (workoutView.catalogLoading) return '<div class="workout-add-panel"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Carregando exercícios compatíveis...</div>';
+        const existingKeys = new Set(asArray(day.exercises).map((exercise) => exercise.catalog_key));
+        const options = asArray(workoutView.exerciseCatalog).filter((item) => !existingKeys.has(item.key));
+        return `<section class="workout-add-panel" aria-label="Adicionar exercício">
+            <div class="workout-add-panel__heading"><div><span>Editar plano</span><h5>Adicionar exercício</h5></div><button type="button" data-workout-action="toggle-add-exercise" aria-label="Fechar"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
+            ${options.length ? `<div class="workout-add-fields">
+                <label>Exercício<input id="workoutAddExerciseName" list="workoutAddExerciseOptions" maxlength="100" placeholder="Digite ou escolha uma opção"><datalist id="workoutAddExerciseOptions">${options.map((item) => `<option value="${esc(item.name)}">${esc(equipmentLabel(item.equipment))}</option>`).join("")}</datalist><small>Você também pode cadastrar um nome personalizado.</small></label>
+                <label>Séries<input id="workoutAddSets" type="number" min="1" max="10" value="3"></label>
+                <label>Repetições<input id="workoutAddReps" maxlength="30" value="8-12"></label>
+                <label>Descanso<input id="workoutAddRest" type="number" min="0" max="600" value="60"></label>
+            </div><button type="button" class="btn-primary workout-add-save" data-workout-action="add-plan-exercise"${workoutView.pendingAction === "add-exercise" ? " disabled" : ""}><i class="fas fa-plus" aria-hidden="true"></i> ${workoutView.pendingAction === "add-exercise" ? "Adicionando..." : "Adicionar ao treino"}</button>` : '<p class="replacement-empty">Todos os exercícios compatíveis já estão neste treino.</p>'}
+        </section>`;
     }
 
     function renderActiveWorkout(day) {
@@ -1182,7 +1379,9 @@
             <section class="active-workout-shell">
                 ${toolbar}
                 ${workoutView.sessionError ? `<p class="session-inline-error" role="alert"><i class="fas fa-circle-exclamation" aria-hidden="true"></i> ${esc(workoutView.sessionError)}</p>` : ""}
-                <article class="current-exercise-stage">
+                <article class="current-exercise-stage" data-workout-swipe-card data-exercise-id="${esc(currentOriginal.id)}" aria-describedby="workoutSwipeHint">
+                    <span class="workout-swipe-action workout-swipe-action--complete" aria-hidden="true"><i class="fas fa-check"></i> Concluir</span>
+                    <span class="workout-swipe-action workout-swipe-action--replace" aria-hidden="true"><i class="fas fa-shuffle"></i> Alternativas</span>
                     <figure class="current-exercise-media">${exerciseImageMarkup(exercise)}</figure>
                     <div class="current-exercise-content">
                         <span class="current-exercise-kicker">Exercício ${currentPosition} de ${exercises.length}</span>
@@ -1200,6 +1399,7 @@
                         </div>
                     </div>
                 </article>
+                <p id="workoutSwipeHint" class="workout-swipe-hint"><span><i class="fas fa-arrow-left" aria-hidden="true"></i> Alternativas</span><span><i class="fas fa-arrow-right" aria-hidden="true"></i> Concluir</span></p>
                 ${renderReplacementPanel(currentOriginal, panel)}
                 <details class="active-workout-queue"><summary><span>Sequência do treino</span><strong>${completedCount}/${exercises.length} concluídos</strong></summary><ol>${queue}</ol></details>
                 <button type="button" class="finish-workout-link" data-workout-action="finish-session"><i class="fas fa-stop-circle" aria-hidden="true"></i> Encerrar treino antes de concluir tudo</button>
@@ -1248,7 +1448,8 @@
             <section id="workout-day-panel" role="tabpanel" aria-labelledby="workout-day-tab-${workoutView.selectedDay}" class="workout-day-panel">
                 <div class="workout-day-header"><div><span>Treino selecionado</span><h4>${esc(day.title)}</h4>${day.focus ? `<p>${esc(day.focus)}</p>` : ""}</div>${sessionControls}</div>
                 ${workoutView.sessionError ? `<p class="session-inline-error" role="alert"><i class="fas fa-circle-exclamation" aria-hidden="true"></i> ${esc(workoutView.sessionError)}</p>` : ""}
-                <div class="plan-section-title"><span><i class="fas fa-bolt" aria-hidden="true"></i> Sequência do dia</span><small>${asArray(day.exercises).length} exercícios</small></div>
+                <div class="plan-section-title workout-plan-edit-heading"><span><i class="fas fa-bolt" aria-hidden="true"></i> Sequência do dia</span><div><small>${asArray(day.exercises).length} exercícios</small><button type="button" data-workout-action="toggle-add-exercise"><i class="fas fa-plus" aria-hidden="true"></i> Adicionar</button></div></div>
+                ${renderAddExercisePanel(day)}
                 <div class="exercise-list">${asArray(day.exercises).length ? asArray(day.exercises).map(renderExerciseCard).join("") : '<div class="plan-details-empty">Nenhum exercício neste dia.</div>'}</div>
                 ${sessionFooter}
             </section>`;
@@ -1311,6 +1512,7 @@
             const reopenSelectedDay = String(workoutView.plan?.id) === String(plan.id)
                 ? workoutView.selectedDay
                 : 0;
+            if (String(workoutView.plan?.id || "") !== String(plan.id)) workoutView.exerciseCatalog = [];
             workoutView.plan = plan;
             workoutView.days = normalizedWorkoutDays(plan);
             const preferredDayIndex = preferredDayId == null
@@ -1323,6 +1525,7 @@
             workoutView.sessionError = "";
             workoutView.pendingAction = "";
             workoutView.replacementPanels.clear();
+            workoutView.addExerciseOpen = false;
             const title = byId("viewWorkoutPlanTitle");
             if (title) title.textContent = plan.title || "Plano de Treino";
             renderWorkoutDetail();
@@ -1387,12 +1590,13 @@
         const viewVersion = workoutView.viewVersion;
         const key = String(exercise.id);
         const payload = replacementPayload(exercise);
-        workoutView.replacementPanels.set(key, { loading: true, options: [], message: "", error: "", payload });
+        workoutView.replacementPanels.set(key, { mode: "session", loading: true, options: [], message: "", error: "", payload });
         renderWorkoutDetail({ preserveScroll: true, focusSelector: `#replacement-panel-${exercise.id}` });
         try {
             const result = await apiRequest(`/workout_sessions/${apiSegment(session.id)}/exercises/${apiSegment(exercise.id)}/replacement_options`, { method: "POST", body: payload });
             if (viewVersion !== workoutView.viewVersion || workoutView.session?.id !== session.id) return;
             workoutView.replacementPanels.set(key, {
+                mode: "session",
                 loading: false,
                 options: asArray(result.options).slice(0, 3),
                 message: result.message || "",
@@ -1401,7 +1605,7 @@
             });
         } catch (error) {
             if (viewVersion !== workoutView.viewVersion) return;
-            workoutView.replacementPanels.set(key, { loading: false, options: [], message: "", error: error.message, payload });
+            workoutView.replacementPanels.set(key, { mode: "session", loading: false, options: [], message: "", error: error.message, payload });
         }
         if (viewVersion !== workoutView.viewVersion) return;
         renderWorkoutDetail({ preserveScroll: true, focusSelector: `#replacement-panel-${exercise.id}` });
@@ -1439,6 +1643,119 @@
             panel.applying = "";
             panel.error = error.message;
             renderWorkoutDetail({ preserveScroll: true, focusSelector: `#replacement-panel-${exercise.id}` });
+        }
+    }
+
+    function applyWorkoutPlanUpdate(result, preferredDayId) {
+        if (!result?.plan) return;
+        workoutView.plan = result.plan;
+        workoutView.days = normalizedWorkoutDays(result.plan);
+        const selectedIndex = workoutView.days.findIndex((day) => String(day.id) === String(preferredDayId));
+        workoutView.selectedDay = selectedIndex >= 0 ? selectedIndex : 0;
+        workoutView.replacementPanels.clear();
+        workoutView.addExerciseOpen = false;
+        renderWorkoutDetail({ preserveScroll: true });
+    }
+
+    async function openPermanentReplacementOptions(exerciseId) {
+        const exercise = findSelectedExercise(exerciseId);
+        if (!exercise || workoutView.session || !workoutView.plan?.id) return;
+        const key = String(exercise.id);
+        workoutView.replacementPanels.set(key, { mode: "permanent", loading: true, options: [], message: "", error: "" });
+        renderWorkoutDetail({ preserveScroll: true, focusSelector: `#replacement-panel-${exercise.id}` });
+        try {
+            const result = await apiRequest(`/workout_plans/${apiSegment(workoutView.plan.id)}/exercises/${apiSegment(exercise.id)}/replacement_options`);
+            workoutView.replacementPanels.set(key, { mode: "permanent", loading: false, options: asArray(result.options), message: "", error: "" });
+        } catch (error) {
+            workoutView.replacementPanels.set(key, { mode: "permanent", loading: false, options: [], message: "", error: error.message });
+        }
+        renderWorkoutDetail({ preserveScroll: true, focusSelector: `#replacement-panel-${exercise.id}` });
+    }
+
+    async function applyPermanentReplacement(exerciseId, catalogKey) {
+        const exercise = findSelectedExercise(exerciseId);
+        const panel = workoutView.replacementPanels.get(String(exerciseId));
+        const dayId = selectedWorkoutDay()?.id;
+        if (!exercise || panel?.mode !== "permanent" || panel.applying) return;
+        panel.applying = catalogKey;
+        renderWorkoutDetail({ preserveScroll: true });
+        try {
+            const result = await apiRequest(`/workout_plans/${apiSegment(workoutView.plan.id)}/exercises/${apiSegment(exercise.id)}`, {
+                method: "PATCH",
+                body: { catalog_key: catalogKey }
+            });
+            applyWorkoutPlanUpdate(result, dayId);
+            showToast("Exercício substituído no plano.", "success");
+        } catch (error) {
+            panel.applying = "";
+            panel.error = error.message;
+            renderWorkoutDetail({ preserveScroll: true, focusSelector: `#replacement-panel-${exercise.id}` });
+        }
+    }
+
+    async function toggleAddPlanExercise() {
+        if (workoutView.session) return;
+        workoutView.addExerciseOpen = !workoutView.addExerciseOpen;
+        if (!workoutView.addExerciseOpen || workoutView.exerciseCatalog.length) {
+            renderWorkoutDetail({ preserveScroll: true });
+            return;
+        }
+        workoutView.catalogLoading = true;
+        renderWorkoutDetail({ preserveScroll: true });
+        try {
+            const result = await apiRequest(`/workout_plans/${apiSegment(workoutView.plan.id)}/exercises/catalog`);
+            workoutView.exerciseCatalog = asArray(result.items);
+        } catch (error) {
+            workoutView.addExerciseOpen = false;
+            showToast(error.message, "error");
+        } finally {
+            workoutView.catalogLoading = false;
+            renderWorkoutDetail({ preserveScroll: true });
+        }
+    }
+
+    async function addPlanExercise() {
+        const day = selectedWorkoutDay();
+        if (!day?.id || workoutView.pendingAction) return;
+        const exerciseName = byId("workoutAddExerciseName")?.value?.trim() || "";
+        const catalogItem = workoutView.exerciseCatalog.find((item) => String(item.name).toLocaleLowerCase() === exerciseName.toLocaleLowerCase());
+        const payload = {
+            catalog_key: catalogItem?.key || null,
+            name: exerciseName,
+            sets: Number(byId("workoutAddSets")?.value),
+            reps: byId("workoutAddReps")?.value,
+            rest_seconds: Number(byId("workoutAddRest")?.value)
+        };
+        workoutView.pendingAction = "add-exercise";
+        renderWorkoutDetail({ preserveScroll: true });
+        try {
+            const result = await apiRequest(`/workout_plans/${apiSegment(workoutView.plan.id)}/days/${apiSegment(day.id)}/exercises`, {
+                method: "POST",
+                body: payload
+            });
+            workoutView.pendingAction = "";
+            applyWorkoutPlanUpdate(result, day.id);
+            showToast("Exercício adicionado ao treino.", "success");
+        } catch (error) {
+            workoutView.pendingAction = "";
+            showToast(error.message, "error");
+            renderWorkoutDetail({ preserveScroll: true });
+        }
+    }
+
+    async function deletePlanExercise(exerciseId) {
+        const exercise = findSelectedExercise(exerciseId);
+        const dayId = selectedWorkoutDay()?.id;
+        if (!exercise || workoutView.pendingAction || !window.confirm(`Remover ${exercise.name} deste plano?`)) return;
+        workoutView.pendingAction = `delete-${exercise.id}`;
+        try {
+            const result = await apiRequest(`/workout_plans/${apiSegment(workoutView.plan.id)}/exercises/${apiSegment(exercise.id)}`, { method: "DELETE" });
+            workoutView.pendingAction = "";
+            applyWorkoutPlanUpdate(result, dayId);
+            showToast("Exercício removido do plano.", "success");
+        } catch (error) {
+            workoutView.pendingAction = "";
+            showToast(error.message, "error");
         }
     }
 
@@ -1562,6 +1879,40 @@
     }
 
     function initializePlanExperience() {
+        let workoutSwipe = null;
+        let workoutSwipeCommitting = false;
+
+        function resetWorkoutSwipe(card) {
+            if (!card) return;
+            card.classList.remove("is-dragging", "is-swiping-left", "is-swiping-right");
+            card.style.removeProperty("--swipe-x");
+        }
+
+        function finishWorkoutSwipe(event) {
+            const swipe = workoutSwipe;
+            workoutSwipe = null;
+            if (!swipe) return;
+            const { card, exerciseId, horizontal, distance } = swipe;
+            if (card.hasPointerCapture?.(event.pointerId)) card.releasePointerCapture(event.pointerId);
+            const threshold = Math.min(150, card.clientWidth * 0.28);
+            if (!horizontal || Math.abs(distance) < threshold || workoutSwipeCommitting) {
+                resetWorkoutSwipe(card);
+                return;
+            }
+
+            workoutSwipeCommitting = true;
+            card.classList.remove("is-dragging");
+            card.classList.add(distance > 0 ? "is-committing-right" : "is-committing-left");
+            window.setTimeout(() => {
+                const action = distance > 0
+                    ? completeWorkoutExercise(exerciseId)
+                    : openReplacementOptions(exerciseId);
+                Promise.resolve(action).finally(() => {
+                    workoutSwipeCommitting = false;
+                });
+            }, 150);
+        }
+
         const form = byId("guidedPlanForm");
         form?.addEventListener("submit", handleWizardSubmit);
         form?.addEventListener("input", handleWizardInput);
@@ -1589,11 +1940,11 @@
         if (!workoutTimerInterval) workoutTimerInterval = window.setInterval(updateWorkoutTimer, 1000);
         if (!workoutSyncInterval) {
             workoutSyncInterval = window.setInterval(() => {
-                if (!byId("mainScreen")?.classList.contains("hidden")) loadActiveWorkoutDock();
+                if (window.currentUser && !byId("mainScreen")?.classList.contains("hidden")) loadActiveWorkoutDock();
             }, 30000);
         }
         document.addEventListener("visibilitychange", () => {
-            if (document.visibilityState === "visible" && !byId("mainScreen")?.classList.contains("hidden")) {
+            if (window.currentUser && document.visibilityState === "visible" && !byId("mainScreen")?.classList.contains("hidden")) {
                 loadActiveWorkoutDock();
             }
         });
@@ -1659,11 +2010,21 @@
                 await startWorkoutSession();
             } else if (action === "replacement-options") {
                 await openReplacementOptions(exerciseId);
+            } else if (action === "permanent-replacement-options") {
+                await openPermanentReplacementOptions(exerciseId);
             } else if (action === "close-replacements") {
                 workoutView.replacementPanels.delete(String(exerciseId));
                 renderWorkoutDetail({ preserveScroll: true, focusSelector: `[data-workout-action="replacement-options"][data-exercise-id="${exerciseId}"]` });
             } else if (action === "apply-replacement") {
                 await applyReplacement(exerciseId, control.dataset.catalogKey);
+            } else if (action === "apply-permanent-replacement") {
+                await applyPermanentReplacement(exerciseId, control.dataset.catalogKey);
+            } else if (action === "toggle-add-exercise") {
+                await toggleAddPlanExercise();
+            } else if (action === "add-plan-exercise") {
+                await addPlanExercise();
+            } else if (action === "delete-plan-exercise") {
+                await deletePlanExercise(exerciseId);
             } else if (action === "restore-exercise") {
                 await restoreExercise(exerciseId);
             } else if (action === "complete-exercise") {
@@ -1671,6 +2032,46 @@
             } else if (action === "finish-session") {
                 await finishWorkoutSession();
             }
+        });
+        byId("viewWorkoutPlanDetails")?.addEventListener("pointerdown", (event) => {
+            const card = event.target.closest("[data-workout-swipe-card]");
+            if (!card || workoutSwipeCommitting || event.button > 0 || event.target.closest("button, a, input, select, textarea")) return;
+            workoutSwipe = {
+                card,
+                exerciseId: card.dataset.exerciseId,
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startY: event.clientY,
+                distance: 0,
+                horizontal: null,
+            };
+            card.setPointerCapture?.(event.pointerId);
+        });
+        byId("viewWorkoutPlanDetails")?.addEventListener("pointermove", (event) => {
+            if (!workoutSwipe || workoutSwipe.pointerId !== event.pointerId) return;
+            const deltaX = event.clientX - workoutSwipe.startX;
+            const deltaY = event.clientY - workoutSwipe.startY;
+            if (workoutSwipe.horizontal === null && Math.max(Math.abs(deltaX), Math.abs(deltaY)) > 8) {
+                workoutSwipe.horizontal = Math.abs(deltaX) > Math.abs(deltaY);
+            }
+            if (!workoutSwipe.horizontal) return;
+            event.preventDefault();
+            const distance = Math.max(-workoutSwipe.card.clientWidth * 0.9, Math.min(deltaX, workoutSwipe.card.clientWidth * 0.9));
+            workoutSwipe.distance = distance;
+            workoutSwipe.card.classList.add("is-dragging");
+            workoutSwipe.card.classList.toggle("is-swiping-right", distance > 0);
+            workoutSwipe.card.classList.toggle("is-swiping-left", distance < 0);
+            workoutSwipe.card.style.setProperty("--swipe-x", `${distance}px`);
+        });
+        byId("viewWorkoutPlanDetails")?.addEventListener("pointerup", (event) => {
+            if (workoutSwipe?.pointerId === event.pointerId) finishWorkoutSwipe(event);
+        });
+        byId("viewWorkoutPlanDetails")?.addEventListener("pointercancel", (event) => {
+            if (!workoutSwipe || workoutSwipe.pointerId !== event.pointerId) return;
+            const { card } = workoutSwipe;
+            resetWorkoutSwipe(card);
+            workoutSwipe = null;
+            if (card.hasPointerCapture?.(event.pointerId)) card.releasePointerCapture(event.pointerId);
         });
         byId("viewWorkoutPlanDetails")?.addEventListener("keydown", async (event) => {
             const tab = event.target.closest('[data-workout-action="select-day"]');
@@ -1690,6 +2091,9 @@
     }
 
     window.openPlanWizard = openPlanWizard;
+    window.openProfessionalPlanWizard = openProfessionalPlanWizard;
+    window.buildPlanWizardPayload = buildWizardPayload;
+    window.openDietPlanWizardWithPlan = openDietPlanWizardWithPlan;
     window.handlePlanChatAction = handlePlanChatAction;
     window.loadDietPlans = loadDietPlans;
     window.loadWorkoutPlans = loadWorkoutPlans;

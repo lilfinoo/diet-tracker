@@ -16,6 +16,7 @@ class User(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_premium = db.Column(db.Boolean, default=False, nullable=False)
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
+    is_professional = db.Column(db.Boolean, default=False, nullable=False)
 
     # Relacionamentos
     diet_entries = db.relationship("DietEntry", backref="user", lazy=True, cascade="all, delete-orphan")
@@ -24,8 +25,20 @@ class User(db.Model):
     chat_messages = db.relationship("ChatMessage", backref="user", lazy=True, cascade="all, delete-orphan")
     
     # NOVOS RELACIONAMENTOS PARA PLANOS
-    workout_plans = db.relationship("WorkoutPlan", backref="user", lazy=True, cascade="all, delete-orphan")
-    diet_plans = db.relationship("DietPlan", backref="user", lazy=True, cascade="all, delete-orphan")
+    workout_plans = db.relationship(
+        "WorkoutPlan",
+        backref="user",
+        lazy=True,
+        cascade="all, delete-orphan",
+        foreign_keys="WorkoutPlan.user_id",
+    )
+    diet_plans = db.relationship(
+        "DietPlan",
+        backref="user",
+        lazy=True,
+        cascade="all, delete-orphan",
+        foreign_keys="DietPlan.user_id",
+    )
     workout_sessions = db.relationship("WorkoutSession", backref="user", lazy=True, cascade="all, delete-orphan")
 
     def set_password(self, password):
@@ -58,6 +71,7 @@ class User(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "is_admin": self.is_admin,
             "is_premium": self.is_premium,
+            "is_professional": self.is_professional,
             "diet_entries_count": count("diet_entries", lambda: self.diet_entries),
             "measurements_count": count("measurements", lambda: self.measurements),
             "chat_messages_count": count("chat_messages", lambda: self.chat_messages),
@@ -183,9 +197,19 @@ class Measurement(db.Model):
 # --- NOVOS MODELOS PARA PLANOS DE TREINO E DIETA ---
 
 class WorkoutPlan(db.Model):
-    __table_args__ = (db.Index("ix_workout_plan_user_created_at", "user_id", "created_at"),)
+    __table_args__ = (
+        db.CheckConstraint("status IN ('draft', 'published', 'archived')", name="ck_workout_plan_status"),
+        db.CheckConstraint("source IN ('manual', 'ai', 'legacy')", name="ck_workout_plan_source"),
+        db.Index("ix_workout_plan_user_created_at", "user_id", "created_at"),
+    )
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(UUIDType(binary=False), db.ForeignKey('user.id'), nullable=False) # <--- Mude para UUIDType
+    author_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=False)
+    published_by_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=True)
+    supersedes_plan_id = db.Column(db.Integer, db.ForeignKey("workout_plan.id"), nullable=True)
+    status = db.Column(db.String(20), default="published", nullable=False)
+    source = db.Column(db.String(20), default="manual", nullable=False)
+    published_at = db.Column(db.DateTime, nullable=True)
     title = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text, nullable=True) # Descrição geral do plano
     split_type = db.Column(db.String(32), nullable=True)
@@ -200,11 +224,25 @@ class WorkoutPlan(db.Model):
     days = db.relationship("WorkoutDay", back_populates="plan", order_by="WorkoutDay.order", cascade="all, delete-orphan")
     exercises = db.relationship("WorkoutExercise", backref="plan", order_by="WorkoutExercise.order", cascade="all, delete-orphan")
     sessions = db.relationship("WorkoutSession", back_populates="plan", cascade="all, delete")
+    author = db.relationship("User", foreign_keys=[author_user_id])
+    published_by = db.relationship("User", foreign_keys=[published_by_user_id])
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("author_user_id", kwargs.get("user_id"))
+        if kwargs.get("status", "published") == "published":
+            kwargs.setdefault("published_at", datetime.utcnow())
+        super().__init__(**kwargs)
 
     def to_dict(self):
         return {
             "id": self.id,
             "user_id": self.user_id,
+            "author_user_id": self.author_user_id,
+            "author_username": self.author.username if self.author else None,
+            "status": self.status,
+            "source": self.source,
+            "published_at": self.published_at.isoformat() if self.published_at else None,
+            "supersedes_plan_id": self.supersedes_plan_id,
             "title": self.title,
             "description": self.description,
             "split_type": self.split_type,
@@ -220,6 +258,7 @@ class WorkoutPlan(db.Model):
 
     def to_dict_full(self):
         data = self.to_dict()
+        data["questionnaire"] = self.questionnaire_data or {}
         data["exercises"] = [exercise.to_dict() for exercise in self.exercises]
         if self.days:
             data["days"] = [day.to_dict_full() for day in self.days]
@@ -409,14 +448,32 @@ class WorkoutSessionExerciseCompletion(db.Model):
         nullable=False,
     )
     completed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-
     session = db.relationship("WorkoutSession", back_populates="completions")
     exercise = db.relationship("WorkoutExercise")
 
+
+class ExerciseMediaReview(db.Model):
+    catalog_key = db.Column(db.String(80), primary_key=True)
+    provider_id = db.Column(db.String(32), nullable=False)
+    provider_name = db.Column(db.String(200), nullable=False)
+    provider_equipment = db.Column(db.String(100), nullable=True)
+    status = db.Column(db.String(20), nullable=False, default="approved")
+    reviewed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
 class DietPlan(db.Model):
-    __table_args__ = (db.Index("ix_diet_plan_user_created_at", "user_id", "created_at"),)
+    __table_args__ = (
+        db.CheckConstraint("status IN ('draft', 'published', 'archived')", name="ck_diet_plan_status"),
+        db.CheckConstraint("source IN ('manual', 'ai', 'legacy')", name="ck_diet_plan_source"),
+        db.Index("ix_diet_plan_user_created_at", "user_id", "created_at"),
+    )
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=False)
+    author_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=False)
+    published_by_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=True)
+    supersedes_plan_id = db.Column(db.Integer, db.ForeignKey("diet_plan.id"), nullable=True)
+    status = db.Column(db.String(20), default="published", nullable=False)
+    source = db.Column(db.String(20), default="manual", nullable=False)
+    published_at = db.Column(db.DateTime, nullable=True)
     title = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text, nullable=True) # Descrição geral do plano
     schema_version = db.Column(db.Integer, default=1, nullable=False)
@@ -429,17 +486,32 @@ class DietPlan(db.Model):
     
     # Relacionamento com refeições específicas do plano
     meals = db.relationship("DietPlanMeal", backref="plan", lazy=True, cascade="all, delete-orphan")
+    author = db.relationship("User", foreign_keys=[author_user_id])
+    published_by = db.relationship("User", foreign_keys=[published_by_user_id])
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("author_user_id", kwargs.get("user_id"))
+        if kwargs.get("status", "published") == "published":
+            kwargs.setdefault("published_at", datetime.utcnow())
+        super().__init__(**kwargs)
 
     def to_dict(self):
         return {
             "id": self.id,
             "user_id": self.user_id,
+            "author_user_id": self.author_user_id,
+            "author_username": self.author.username if self.author else None,
+            "status": self.status,
+            "source": self.source,
+            "published_at": self.published_at.isoformat() if self.published_at else None,
+            "supersedes_plan_id": self.supersedes_plan_id,
             "title": self.title,
             "description": self.description,
             "schema_version": self.schema_version,
             "plan_mode": self.plan_mode,
             "goal_code": self.goal_code,
             "meals_per_day": self.meals_per_day,
+            "nutrition_targets": (self.generation_context or {}).get("nutrition_targets"),
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "meals_count": len(self.meals) # Exemplo
@@ -447,6 +519,7 @@ class DietPlan(db.Model):
 
     def to_dict_full(self):
         data = self.to_dict()
+        data["questionnaire"] = (self.generation_context or {}).get("questionnaire")
         data["meals"] = [meal.to_dict() for meal in self.meals]
         return data
 
@@ -485,3 +558,82 @@ class DietPlanMeal(db.Model):
             "substitutions": self.substitutions or [],
             "order": self.order
         }
+
+
+class ProfessionalStudentRelationship(db.Model):
+    __table_args__ = (
+        db.CheckConstraint(
+            "student_user_id IS NULL OR professional_user_id != student_user_id",
+            name="ck_professional_student_distinct_users",
+        ),
+        db.CheckConstraint(
+            "status IN ('pending', 'active', 'declined', 'revoked', 'expired')",
+            name="ck_professional_student_status",
+        ),
+        db.Index("ix_professional_student_professional_status", "professional_user_id", "status"),
+        db.Index(
+            "uq_professional_student_active_student",
+            "student_user_id",
+            unique=True,
+            postgresql_where=db.text("status = 'active'"),
+            sqlite_where=db.text("status = 'active'"),
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    professional_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=False)
+    student_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=True)
+    status = db.Column(db.String(20), default="pending", nullable=False)
+    invite_token_hash = db.Column(db.String(64), unique=True, nullable=False)
+    invite_expires_at = db.Column(db.DateTime, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    accepted_at = db.Column(db.DateTime, nullable=True)
+    revoked_at = db.Column(db.DateTime, nullable=True)
+    revoked_by_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=True)
+
+    professional = db.relationship("User", foreign_keys=[professional_user_id])
+    student = db.relationship("User", foreign_keys=[student_user_id])
+    revoked_by = db.relationship("User", foreign_keys=[revoked_by_user_id])
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "professional": {
+                "id": self.professional.id,
+                "username": self.professional.username,
+            },
+            "student": {
+                "id": self.student.id,
+                "username": self.student.username,
+            } if self.student else None,
+            "status": self.status,
+            "invite_expires_at": self.invite_expires_at.isoformat(),
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "accepted_at": self.accepted_at.isoformat() if self.accepted_at else None,
+            "revoked_at": self.revoked_at.isoformat() if self.revoked_at else None,
+        }
+
+
+class DelegatedActionAudit(db.Model):
+    __table_args__ = (
+        db.Index("ix_delegated_audit_actor_created", "actor_user_id", "created_at"),
+        db.Index("ix_delegated_audit_subject_created", "subject_user_id", "created_at"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    actor_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=False)
+    subject_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=False)
+    relationship_id = db.Column(
+        db.Integer,
+        db.ForeignKey("professional_student_relationship.id"),
+        nullable=True,
+    )
+    action = db.Column(db.String(80), nullable=False)
+    resource_type = db.Column(db.String(40), nullable=True)
+    resource_id = db.Column(db.String(64), nullable=True)
+    details = db.Column(db.JSON, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    actor = db.relationship("User", foreign_keys=[actor_user_id])
+    subject = db.relationship("User", foreign_keys=[subject_user_id])
+    relationship = db.relationship("ProfessionalStudentRelationship")

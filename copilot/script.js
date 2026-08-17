@@ -5,6 +5,8 @@ let currentUser = null;
 let currentTab = 'diet';
 let dietEntries = [];
 let measurements = [];
+let pendingAuthIntent = null;
+let pendingPostProfileResume = null;
 
 // API Base URL
 const API_BASE = '/api';
@@ -365,6 +367,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Modal close events
     setupModalEvents();
+    getElement('loginScreen')?.addEventListener('click', function(event) {
+        if (event.target === this) closeAuthModal();
+    });
     
     // NOVO: Adiciona eventos para os novos modais de visualização de planos
     setupPlanViewModals();
@@ -655,34 +660,60 @@ async function checkAuthStatus() {
                 currentUser = data.user;
                 showMainScreen();
             } else {
-                showLoginScreen();
+                currentUser = null;
+                showMainScreen();
             }
         } else {
-            showLoginScreen();
+            showMainScreen();
         }
     } catch (error) {
         console.error('Auth check failed:', error);
-        showLoginScreen();
+        showMainScreen();
     }
 }
 
 // Screen management
-function showLoginScreen() {
+function openAuthModal(reason = 'Entre para salvar seus dados e acompanhar sua evolução.', mode = 'login', intent = null) {
     const loginScreen = getElement('loginScreen');
-    const mainScreen = getElement('mainScreen');
-    
-    if (loginScreen) loginScreen.classList.remove('hidden');
-    if (mainScreen) mainScreen.classList.add('hidden');
-    if (window.clearActiveWorkoutDock) window.clearActiveWorkoutDock();
-    
-    clearForms();
+    const context = getElement('authContext');
+    if (context) context.textContent = reason;
+    pendingAuthIntent = intent || { tab: currentTab };
+    if (mode === 'register') showRegister();
+    else showLogin();
+    openAppModal(loginScreen);
 }
 
-function showMainScreen() {
+function closeAuthModal() {
+    pendingAuthIntent = null;
+    closeAppModal(getElement('loginScreen'));
+}
+
+function requireAuth(reason, options = {}) {
+    if (currentUser) {
+        if (options.premium && !currentUser.is_premium) {
+            showToast('Este recurso utiliza IA e está disponível no plano Premium.', 'info');
+            return false;
+        }
+        return true;
+    }
+    const premiumNotice = options.premium ? ' A geração com IA é um recurso Premium.' : '';
+    openAuthModal(`${reason}${premiumNotice}`, options.mode || 'register', {
+        tab: currentTab,
+        premium: Boolean(options.premium),
+        requiresProfile: Boolean(options.requiresProfile),
+        resume: options.resume || null
+    });
+    return false;
+}
+
+Object.defineProperty(window, 'currentUser', { get: () => currentUser });
+window.requireAuth = requireAuth;
+
+function showMainScreen(options = {}) {
     const loginScreen = getElement('loginScreen');
     const mainScreen = getElement('mainScreen');
     
-    if (loginScreen) loginScreen.classList.add('hidden');
+    if (loginScreen?.classList.contains('show')) closeAppModal(loginScreen);
     if (mainScreen) mainScreen.classList.remove('hidden');
     
     if (currentUser) {
@@ -709,9 +740,34 @@ function showMainScreen() {
         }
 
         const isAdmin = Boolean(currentUser.is_admin);
+        const isProfessional = Boolean(currentUser.is_professional);
         getElement('adminPanelBtn')?.classList.toggle('hidden', !isAdmin);
         getElement('profileAdminLink')?.classList.toggle('hidden', !isAdmin);
+        getElement('professionalPanelBtn')?.classList.toggle('hidden', !isProfessional);
+        getElement('professionalNavBtn')?.classList.toggle('hidden', !isProfessional);
+    } else {
+        const welcomeUser = getElement('welcomeUser');
+        if (welcomeUser) welcomeUser.textContent = 'Explore o Diet Tracker';
+        ['headerUserInitial', 'homeUserInitial', 'profileUserInitial'].forEach(id => {
+            const element = getElement(id);
+            if (element) element.textContent = 'D';
+        });
+        const profileUserName = getElement('profileUserName');
+        if (profileUserName) profileUserName.textContent = 'Conheça seu espaço';
+        const profileMembership = getElement('profileMembership');
+        if (profileMembership) profileMembership.textContent = 'Entre para acompanhar sua evolução';
+        getElement('adminPanelBtn')?.classList.add('hidden');
+        getElement('profileAdminLink')?.classList.add('hidden');
+        getElement('professionalPanelBtn')?.classList.add('hidden');
+        getElement('professionalNavBtn')?.classList.add('hidden');
+        if (window.clearActiveWorkoutDock) window.clearActiveWorkoutDock();
     }
+
+    getElement('guestAuthActions')?.classList.toggle('hidden', Boolean(currentUser));
+    getElement('userHeaderButton')?.classList.toggle('hidden', !currentUser);
+    getElement('profileLoginAction')?.classList.toggle('hidden', Boolean(currentUser));
+    getElement('profileLogoutAction')?.classList.toggle('hidden', !currentUser);
+    getElement('editProfileBtn')?.classList.toggle('hidden', !currentUser);
 
     const chatNavBtn = document.querySelector(`[onclick="showTab('chat')"]`);
     if (chatNavBtn) {
@@ -720,9 +776,63 @@ function showMainScreen() {
         chatNavBtn.setAttribute('aria-label', currentUser?.is_premium ? 'Assistente IA' : 'Assistente IA, recurso Premium');
     }
 
-    showTab('diet'); // Sempre começa na aba de dieta
-    checkUserProfile();
-    if (window.loadActiveWorkoutDock) window.loadActiveWorkoutDock();
+    showTab(options.tab || 'diet');
+    if (currentUser) {
+        if (!options.skipProfile) checkUserProfile();
+        if (window.loadActiveWorkoutDock) window.loadActiveWorkoutDock();
+        if (window.loadOwnProfessionalRelationship) window.loadOwnProfessionalRelationship();
+    }
+    window.dispatchEvent(new CustomEvent('diettracker:auth-ready', { detail: { user: currentUser } }));
+}
+
+async function resumeAfterAuthentication(resume, requiresProfile) {
+    if (!resume) return;
+    if (!requiresProfile) {
+        requestAnimationFrame(resume);
+        return;
+    }
+    try {
+        const response = await fetch(`${API_BASE}/profile`, { credentials: 'include' });
+        const data = response.ok ? await response.json() : {};
+        if (data.profile) {
+            fillProfileForm(data.profile);
+            requestAnimationFrame(resume);
+            return;
+        }
+    } catch (error) {
+        console.error('Profile check after authentication failed:', error);
+    }
+    pendingPostProfileResume = resume;
+    fillProfileForm(null);
+    openAppModal(getElement('profileModal'));
+}
+
+function renderGuestPresentation(tabName) {
+    const presentations = {
+        diet: ['dietTableBody', 'Registre refeições e acompanhe seus macros', 'Crie uma conta para salvar seu diário alimentar e acompanhar metas personalizadas.'],
+        diet_plans: ['dietPlansTableBody', 'Cardápios alinhados ao seu objetivo', 'Explore o questionário e crie planos alimentares personalizados com IA Premium.'],
+        workout_plans: ['workoutPlansTableBody', 'Organize e execute seus treinos', 'Explore o gerador e salve planos para acompanhar cada sessão.'],
+        measurements: ['measurementTableBody', 'Acompanhe sua evolução corporal', 'Entre para registrar peso, medidas e composição ao longo do tempo.']
+    };
+    const presentation = presentations[tabName];
+    if (presentation) {
+        const container = getElement(presentation[0]);
+        if (container) container.innerHTML = `<div class="guest-presentation guest-presentation--standalone"><i class="fas fa-lock-open"></i><div><strong>${presentation[1]}</strong><p>${presentation[2]}</p></div><button type="button" class="btn-primary" onclick="openAuthModal('Crie sua conta para salvar seus dados.', 'register')">Criar conta</button></div>`;
+    }
+    if (tabName === 'diet') {
+        getElement('guestDailySummary')?.classList.remove('hidden');
+        getElement('dailyMacroGrid')?.classList.add('hidden');
+        const cardapio = getElement('todayCardapioBody');
+        if (cardapio) cardapio.innerHTML = '<div class="guest-presentation"><i class="fas fa-calendar-day"></i><div><strong>Seu cardápio diário organizado</strong><p>Crie uma conta para gerar planos e acompanhar as refeições de cada dia.</p></div></div>';
+    }
+    if (tabName === 'stats') {
+        const latest = getElement('latestMeasurement');
+        if (latest) latest.innerHTML = '<strong>Seu histórico em um só lugar</strong><span>Entre para acompanhar medidas, refeições e evolução.</span>';
+        const total = getElement('totalDietEntries');
+        const recent = getElement('recentDietEntries');
+        if (total) total.textContent = '—';
+        if (recent) recent.textContent = '—';
+    }
 }
 
 /**
@@ -740,6 +850,7 @@ let lastAIResponse = '';
  * Envia mensagem no chat
  */
 async function sendChatMessage() {
+    if (!requireAuth('Entre para conversar com o Assistente IA.', { premium: true })) return;
     const input = getElement("chatInput");
     if (!input) return;
 
@@ -1031,8 +1142,12 @@ async function handleLogin(e) {
         const data = await response.json();
         if (response.ok) {
             currentUser = data.user;
-            showMainScreen();
-            showAuthMessage(data.message, "success");
+            const intent = pendingAuthIntent;
+            const destination = intent?.tab || currentTab;
+            pendingAuthIntent = null;
+            showMainScreen({ tab: destination, skipProfile: Boolean(intent?.resume) });
+            showToast(data.message, "success");
+            if (intent?.resume) resumeAfterAuthentication(intent.resume, intent.requiresProfile);
         } else {
             showAuthMessage(data.error, "error");
         }
@@ -1058,8 +1173,8 @@ async function handleRegister(e) {
         return;
     }
 
-    if (password.length < 6) {
-        showAuthMessage("A senha deve ter pelo menos 6 caracteres", "error");
+    if (password.length < 8) {
+        showAuthMessage("A senha deve ter pelo menos 8 caracteres", "error");
         return;
     }
 
@@ -1076,8 +1191,12 @@ async function handleRegister(e) {
         const data = await response.json();
         if (response.ok) {
             currentUser = data.user;
-            showMainScreen();
-            showAuthMessage(data.message, "success");
+            const intent = pendingAuthIntent;
+            const destination = intent?.tab || currentTab;
+            pendingAuthIntent = null;
+            showMainScreen({ tab: destination, skipProfile: Boolean(intent?.resume) });
+            showToast(data.message, "success");
+            if (intent?.resume) resumeAfterAuthentication(intent.resume, intent.requiresProfile);
         } else {
             showAuthMessage(data.error, "error");
         }
@@ -1094,12 +1213,12 @@ async function logout() {
             credentials: "include"
         });
         currentUser = null;
-        showLoginScreen();
-        showAuthMessage("Logout realizado com sucesso", "success");
+        showMainScreen({ tab: 'diet' });
+        showToast("Logout realizado com sucesso", "success");
     } catch (error) {
         console.error("Logout error:", error);
         currentUser = null;
-        showLoginScreen();
+        showMainScreen({ tab: 'diet' });
     }
 }
 
@@ -1107,7 +1226,15 @@ async function logout() {
 // Interface functions
 function showTab(tabName) {
     if (tabName === 'chat' && !currentUser?.is_premium) {
+        if (!currentUser) {
+            openAuthModal('Entre para conhecer o Assistente IA. Este é um recurso Premium.', 'register', { tab: 'chat', premium: true });
+            return;
+        }
         showToast('O Assistente IA está disponível no plano Premium.', 'info');
+        return;
+    }
+    if (tabName === 'professional' && !currentUser?.is_professional) {
+        showToast('A área profissional precisa ser habilitada por um administrador.', 'info');
         return;
     }
 
@@ -1144,7 +1271,13 @@ function showTab(tabName) {
     document.body.dataset.activeTab = tabName;
     window.scrollTo({ top: 0, behavior: 'instant' });
     
-    // Carrega os dados corretos para cada aba
+    if (!currentUser) {
+        renderGuestPresentation(tabName);
+        return;
+    }
+
+    getElement('guestDailySummary')?.classList.add('hidden');
+    getElement('dailyMacroGrid')?.classList.remove('hidden');
     if (tabName === 'diet') {
         loadDietEntries();
         loadTodayCardapio();
@@ -1156,6 +1289,8 @@ function showTab(tabName) {
         loadDietPlans();
     } else if (tabName === 'workout_plans') { // Carrega planos de treino
         loadWorkoutPlans();
+    } else if (tabName === 'professional') {
+        window.loadProfessionalDashboard?.();
     }
 }
 function showLogin() {
@@ -1261,6 +1396,7 @@ function finalizeModalClose(modal) {
 
 function closeAppModal(modal) {
     if (!modal) return;
+    if (modal.id === 'loginScreen' && !currentUser) pendingAuthIntent = null;
     const fluid = typeof Fluid !== "undefined" ? Fluid : null;
     const content = modal.querySelector(".modal-content");
     const gen = modal._fluidGen || 0;
@@ -1292,6 +1428,7 @@ document.addEventListener("keydown", function(event) {
 });
 
 function showAddDietModal() {
+    if (!requireAuth('Entre para registrar suas refeições.', { resume: showAddDietModal })) return;
     const modal = getElement("dietModal");
     const title = getElement("dietModalTitle");
     const form = getElement("dietForm");
@@ -1323,6 +1460,7 @@ function closeDietModal() {
 }
 
 function showAddMeasurementModal() {
+    if (!requireAuth('Entre para registrar e acompanhar suas medidas.', { resume: showAddMeasurementModal })) return;
     const modal = getElement("measurementModal");
     const title = getElement("measurementModalTitle");
     const form = getElement("measurementForm");
@@ -1345,11 +1483,13 @@ function closeMeasurementModal() {
 }
 
 function closeProfileModal() {
+    pendingPostProfileResume = null;
     const modal = getElement("profileModal");
     closeAppModal(modal);
 }
 
 function skipProfile() {
+    pendingPostProfileResume = null;
     closeProfileModal();
 }
 
@@ -1371,6 +1511,7 @@ function fillProfileForm(profile) {
 }
 
 async function openProfileEditor() {
+    if (!requireAuth('Entre para configurar seu perfil e seus objetivos.', { resume: openProfileEditor })) return;
     try {
         const response = await fetch(`${API_BASE}/profile`, { credentials: 'include' });
         if (!response.ok) throw new Error('Não foi possível carregar o perfil.');
@@ -1442,6 +1583,10 @@ function closeViewWorkoutPlanModal() {
 
 // Data functions
 async function loadDietEntries() {
+    if (!currentUser) {
+        renderGuestPresentation('diet');
+        return;
+    }
     showGlobalLoading();
     const startDate = getElement("dietStartDate")?.value;
     const endDate = getElement("dietEndDate")?.value;
@@ -1471,6 +1616,10 @@ async function loadDietEntries() {
 }
 
 async function loadMeasurements() {
+    if (!currentUser) {
+        renderGuestPresentation('measurements');
+        return;
+    }
     showGlobalLoading();
     const startDate = getElement("measurementStartDate")?.value;
     const endDate = getElement("measurementEndDate")?.value;
@@ -1500,6 +1649,10 @@ async function loadMeasurements() {
 }
 
 async function loadStats() {
+    if (!currentUser) {
+        renderGuestPresentation('stats');
+        return;
+    }
     try {
         const response = await fetch(`${API_BASE}/stats`, {
             credentials: 'include'
@@ -1555,14 +1708,20 @@ async function deleteDietPlan(id) {
 }
 
 function exerciseImagePath(_exerciseName, catalogKey) {
-    const importedImage = window.EXERCISE_MEDIA?.[String(catalogKey || "")]?.image;
-    return importedImage || "";
+    const key = String(catalogKey || "");
+    return key ? `${API_BASE}/exercise-media/${encodeURIComponent(key)}` : "";
+}
+
+function exerciseFallbackImagePath(catalogKey) {
+    return window.EXERCISE_MEDIA?.[String(catalogKey || "")]?.image || "";
 }
 
 function exerciseImageMarkup(exercise, escapedName) {
     const imagePath = exerciseImagePath(exercise.name, exercise.catalog_key);
+    const fallbackPath = exerciseFallbackImagePath(exercise.catalog_key);
     if (imagePath) {
-        return `<img class="exercise-demonstration-image" src="${escapeHtml(imagePath)}" alt="Demonstração de ${escapedName}" loading="lazy">`;
+        const fallback = fallbackPath && fallbackPath !== imagePath ? ` data-fallback-src="${escapeHtml(fallbackPath)}"` : "";
+        return `<img class="exercise-demonstration-image" src="${escapeHtml(imagePath)}"${fallback} alt="Demonstração de ${escapedName}" loading="lazy">`;
     }
     return '<span class="exercise-image-placeholder" role="img" aria-label="Imagem não disponível"><i class="fas fa-dumbbell" aria-hidden="true"></i></span>';
 }
@@ -1570,6 +1729,12 @@ function exerciseImageMarkup(exercise, escapedName) {
 document.addEventListener('error', event => {
     const image = event.target;
     if (!(image instanceof HTMLImageElement) || !image.classList.contains('exercise-demonstration-image')) return;
+    const fallbackPath = image.dataset.fallbackSrc;
+    if (fallbackPath) {
+        delete image.dataset.fallbackSrc;
+        image.src = fallbackPath;
+        return;
+    }
     const placeholder = document.createElement('span');
     placeholder.className = 'exercise-image-placeholder';
     placeholder.setAttribute('role', 'img');
@@ -1607,20 +1772,19 @@ function mealIconClass(mealType) {
 }
 
 function updateDailySummary() {
-    const totals = dietEntries.reduce((sum, entry) => ({
+    const today = localDateInputValue();
+    const totals = dietEntries.filter(entry => entry.date === today).reduce((sum, entry) => ({
         calories: sum.calories + (Number(entry.calories) || 0),
         protein: sum.protein + (Number(entry.protein) || 0),
         carbs: sum.carbs + (Number(entry.carbs) || 0),
         fat: sum.fat + (Number(entry.fat) || 0)
     }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
-    const targets = { calories: 2200, protein: 160, carbs: 220, fat: 70 };
-
     Object.entries(totals).forEach(([key, value]) => {
         const rounded = Math.round(value);
         const valueElement = getElement(`today${key.charAt(0).toUpperCase()}${key.slice(1)}`);
         const progressElement = getElement(`today${key.charAt(0).toUpperCase()}${key.slice(1)}Progress`);
         if (valueElement) valueElement.textContent = key === 'calories' ? rounded.toLocaleString('pt-BR') : `${rounded} g`;
-        if (progressElement) progressElement.style.width = `${Math.min((value / targets[key]) * 100, 100)}%`;
+        if (progressElement) progressElement.style.width = `${Math.min((value / dailyNutritionTargets[key]) * 100, 100)}%`;
     });
 }
 
@@ -1663,6 +1827,19 @@ function measurementMetric(label, value, unit = '') {
 let cardapioActivePlan = null;
 let cardapioDay = 1;
 let cardapioTodayEntries = [];
+let pendingDietDaySuggestion = null;
+let dailyNutritionTargets = { calories: 2200, protein: 160, carbs: 220, fat: 70 };
+
+function dietPlanItemText(item) {
+    if (!item || typeof item !== "object") return String(item || "");
+    const quantity = Number(item.quantity);
+    const amount = Number.isFinite(quantity) ? quantity : "";
+    return `${amount} ${item.unit || "g"} de ${item.name || item.foodId || "alimento"}`.trim();
+}
+
+function dietPlanItemsText(meal) {
+    return Array.isArray(meal.items) ? meal.items.map(dietPlanItemText).filter(Boolean).join(", ") : (meal.description || "");
+}
 
 function getStoredCardapioDay() {
     const stored = parseInt(localStorage.getItem("dietCardapioDay") || "1", 10);
@@ -1698,6 +1875,11 @@ function cardapioTodayEntryKeys() {
 }
 
 async function loadTodayCardapio() {
+    if (!currentUser) {
+        cardapioActivePlan = null;
+        renderTodayCardapio(null, null);
+        return;
+    }
     const section = getElement("todayCardapioSection");
     if (!section) return;
     const today = localDateInputValue();
@@ -1716,6 +1898,8 @@ async function loadTodayCardapio() {
     }
     const plans = await plansRes.json();
     if (!plans.length) {
+        cardapioActivePlan = null;
+        setDailyNutritionTargets(null);
         renderTodayCardapio(null, null);
         return;
     }
@@ -1726,7 +1910,32 @@ async function loadTodayCardapio() {
         return;
     }
     cardapioActivePlan = await planRes.json();
+    setDailyNutritionTargets(cardapioActivePlan.nutrition_targets);
     renderTodayCardapio(cardapioActivePlan, null);
+}
+
+function setDailyNutritionTargets(targets) {
+    dailyNutritionTargets = targets ? {
+        calories: Number(targets.targetCalories) || 2200,
+        protein: Number(targets.targetProtein) || 160,
+        carbs: Number(targets.targetCarbs) || 220,
+        fat: Number(targets.targetFat) || 70
+    } : { calories: 2200, protein: 160, carbs: 220, fat: 70 };
+    const labels = { calories: "kcal", protein: "g", carbs: "g", fat: "g" };
+    Object.entries(dailyNutritionTargets).forEach(([key, value]) => {
+        const targetElement = getElement(`today${key.charAt(0).toUpperCase()}${key.slice(1)}Target`);
+        if (targetElement) targetElement.textContent = `de ${Math.round(value).toLocaleString("pt-BR")} ${labels[key]}`;
+    });
+    updateDailySummary();
+}
+
+function editDailyNutritionTargets() {
+    if (!requireAuth('Entre para editar metas e gerar um novo cardápio.', { premium: true, requiresProfile: true, resume: editDailyNutritionTargets })) return;
+    if (!cardapioActivePlan) {
+        if (window.openPlanWizard) window.openPlanWizard("diet");
+        return;
+    }
+    if (window.openDietPlanWizardWithPlan) window.openDietPlanWizardWithPlan(cardapioActivePlan);
 }
 
 function renderTodayCardapio(plan, errorMessage) {
@@ -1763,7 +1972,7 @@ const doneKeys = cardapioTodayEntryKeys();
     });
 
     const itemMarkup = ({ meal }) => {
-        const items = Array.isArray(meal.items) ? meal.items.join(', ') : (meal.description || '');
+        const items = dietPlanItemsText(meal);
         return `
             <article class="cardapio-item">
                 <div class="cardapio-item__head">
@@ -1823,7 +2032,7 @@ async function quickLogPlanMeal(mealId, mode) {
     if (mode === "describe") {
         showAddDietModal();
         getElement("dietMeal").value = entryType;
-        const items = Array.isArray(meal.items) ? meal.items.join(', ') : meal.description;
+        const items = dietPlanItemsText(meal);
         getElement("dietDescription").value = items;
         syncChoiceCards();
         return;
@@ -1836,7 +2045,7 @@ async function quickLogPlanMeal(mealId, mode) {
             body: JSON.stringify({
                 date: localDateInputValue(),
                 meal_type: entryType,
-                description: Array.isArray(meal.items) ? meal.items.join(', ') : meal.description,
+                description: dietPlanItemsText(meal),
                 calories: meal.calories,
                 protein: meal.protein,
                 carbs: meal.carbs,
@@ -1861,7 +2070,7 @@ async function openEditPlanMealModal(mealId) {
     const meal = findPlanMeal(mealId);
     if (!meal) return;
     getElement("editPlanMealId").value = meal.id;
-    getElement("editPlanMealDescription").value = Array.isArray(meal.items) ? meal.items.join(', ') : (meal.description || "");
+    getElement("editPlanMealDescription").value = dietPlanItemsText(meal);
     getElement("editPlanMealNotes").value = meal.notes || "";
     getElement("editPlanMealTitle").textContent = `Editar ${meal.meal_type}`;
     openAppModal(getElement("editPlanMealModal"));
@@ -1902,7 +2111,9 @@ async function handleEditPlanMealSubmit(e) {
 }
 
 function openSuggestDietModal() {
+    pendingDietDaySuggestion = null;
     getElement("suggestDietFeedback").value = "";
+    getElement("suggestDietFeedback").disabled = false;
     getElement("suggestDietPreview").classList.add("hidden");
     getElement("suggestDietApplyBtn").classList.add("hidden");
     getElement("suggestDietGenerateBtn").classList.remove("hidden");
@@ -1931,10 +2142,11 @@ async function generateDietDaySuggestion() {
         });
         if (response.ok) {
             const data = await response.json();
+            pendingDietDaySuggestion = data.meals;
             const previewEl = getElement("suggestDietPreview");
             previewEl.innerHTML = data.meals.map(meal => `
                 <article class="suggest-meal">
-                    <div><strong>${escapeHtml(meal.meal_type)}</strong><p>${escapeHtml(Array.isArray(meal.items) ? meal.items.join(', ') : meal.description)}</p></div>
+                    <div><strong>${escapeHtml(meal.meal_type)}</strong><p>${escapeHtml(dietPlanItemsText(meal))}</p></div>
                     <div class="cardapio-item__macros"><span>${Math.round(Number(meal.calories) || 0)} kcal</span><span>${Math.round(Number(meal.protein) || 0)}g prot.</span></div>
                 </article>`).join('');
             previewEl.classList.remove("hidden");
@@ -1953,14 +2165,8 @@ async function generateDietDaySuggestion() {
 }
 
 async function applyDietDaySuggestion() {
-    const previewEl = getElement("suggestDietPreview");
-    const mealCards = previewEl.querySelectorAll(".suggest-meal");
-    if (!mealCards.length) return;
-    const meals = Array.from(mealCards).map(card => {
-        const strong = card.querySelector("strong")?.textContent || "";
-        const p = card.querySelector("p")?.textContent || "";
-        return { meal_type: strong, description: p, items: p.split(", ").filter(Boolean), order: 0 };
-    });
+    const meals = pendingDietDaySuggestion;
+    if (!Array.isArray(meals) || !meals.length) return;
     const applyBtn = getElement("suggestDietApplyBtn");
     applyBtn.disabled = true;
     try {
@@ -2047,8 +2253,13 @@ async function handleProfileSubmit(e) {
         });
 
         if (response.ok) {
-            closeProfileModal();
+            closeAppModal(getElement("profileModal"));
             showToast("Perfil salvo com sucesso!", "success");
+            if (pendingPostProfileResume) {
+                const resume = pendingPostProfileResume;
+                pendingPostProfileResume = null;
+                requestAnimationFrame(resume);
+            }
         } else {
             const data = await response.json();
             showToast(data.error || "Erro ao salvar perfil", "error");

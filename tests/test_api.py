@@ -1,11 +1,19 @@
 import base64
+import json
 import uuid
 
 import pytest
 
 from src.models.user import db, DietPlan, DietPlanMeal, User, WorkoutExercise, WorkoutPlan
 from src.services import ai
-from src.services.ai import AIQuotaExceededError, AIResponseError, AIServiceError, AITruncatedResponseError, generate_response
+from src.services.ai import (
+    AIQuotaExceededError,
+    AIResponseError,
+    AIServiceError,
+    AIServiceUnavailableError,
+    AITruncatedResponseError,
+    generate_response,
+)
 
 
 def register(client, username="alice"):
@@ -124,6 +132,94 @@ def test_nutrition_parses_structured_gemini_response(app, monkeypatch):
     )
     with app.app_context():
         assert ai.calculate_nutrition("100g de arroz")["calories"] == 100
+
+
+def test_diet_ai_receives_fixed_targets_without_full_food_catalog(app, monkeypatch):
+    captured = {}
+
+    def completion(*args, **kwargs):
+        captured["system"] = args[0]
+        captured["payload"] = json.loads(args[1])
+        captured["schema"] = kwargs["json_schema"]
+        return '{"type":"diet_plan","title":"Plano","description":"Teste","days":[]}'
+
+    monkeypatch.setattr(ai, "_completion", completion)
+    targets = {
+        "bmr": 1700,
+        "maintenanceCalories": 2500,
+        "targetCalories": 2625,
+        "targetProtein": 150,
+        "targetCarbs": 335,
+        "targetFat": 76,
+    }
+
+    with app.app_context():
+        ai.generate_diet_plan({"meals_per_day": 3}, None, targets)
+
+    meal_schema = captured["schema"]["properties"]["days"]["items"]["properties"]["meals"]["items"]
+    assert captured["payload"]["nutritionTargets"] == targets
+    assert "foodCatalog" not in captured["payload"]
+    assert len(json.dumps(captured["payload"])) < 2000
+    assert "restrições do sistema" in captured["system"]
+    assert "items" in meal_schema["required"]
+    assert {"calories", "protein", "carbs", "fat"} <= set(meal_schema["properties"])
+
+
+def test_diet_generation_retries_temporary_unavailability(app, monkeypatch):
+    calls = []
+    waits = []
+
+    def completion(*args, **kwargs):
+        calls.append((args[2], kwargs["model"]))
+        if len(calls) == 1:
+            raise AIServiceUnavailableError("busy")
+        return '{"type":"diet_plan","title":"Plano","description":"Teste","days":[]}'
+
+    monkeypatch.setattr(ai, "_completion", completion)
+    monkeypatch.setattr(ai.time, "sleep", waits.append)
+    with app.app_context():
+        app.config.update(
+            GEMINI_DIET_PLAN_MODEL="diet-model",
+            GEMINI_DIET_PLAN_MAX_TOKENS=8192,
+            GEMINI_DIET_RETRY_ATTEMPTS=2,
+        )
+        result = ai.generate_diet_plan({"meals_per_day": 3}, None, {"targetCalories": 2000})
+
+    assert result["type"] == "diet_plan"
+    assert calls == [(8192, "diet-model"), (8192, "diet-model")]
+    assert waits == [1]
+
+
+def test_workout_generation_uses_fallback_model(app, monkeypatch):
+    models = []
+
+    def completion(*args, **kwargs):
+        models.append(kwargs["model"])
+        if len(models) == 1:
+            raise AIServiceUnavailableError("busy")
+        return '{"type":"workout_plan","title":"Plano","description":"Teste","days":[]}'
+
+    monkeypatch.setattr(ai, "_completion", completion)
+    questionnaire = {
+        "goal": "hypertrophy",
+        "experience_level": "beginner",
+        "days_per_week": 2,
+        "split_type": "full_body",
+        "session_duration": 45,
+        "equipment": ["full_gym"],
+        "limitations": "",
+        "priorities": "",
+        "avoid_exercises": "",
+    }
+    with app.app_context():
+        app.config.update(
+            GEMINI_WORKOUT_MODEL="primary-model",
+            GEMINI_WORKOUT_FALLBACK_MODEL="fallback-model",
+        )
+        result = ai.generate_workout_plan(questionnaire, None)
+
+    assert result["type"] == "workout_plan"
+    assert models == ["primary-model", "fallback-model"]
 
 
 def test_macro_endpoint_reports_invalid_ai_json(client, monkeypatch):

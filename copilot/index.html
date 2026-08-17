@@ -16,16 +16,16 @@
 </head>
 <body>
     <a class="skip-link" href="#appContent">Ir para o conteúdo</a>
-    <div id="loginScreen" class="screen">
-        <div class="login-background">
-            <div class="login-container">
-                <div class="login-card">
+    <div id="loginScreen" class="modal" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
+        <div class="modal-content auth-modal-content">
+            <button type="button" class="btn-close auth-modal-close" onclick="closeAuthModal()" aria-label="Continuar explorando">&times;</button>
+            <div class="login-card">
                     <div class="login-header">
                         <div class="logo-container">
                             <span class="brand-mark" aria-hidden="true"><i class="fas fa-leaf logo-icon"></i></span>
-                            <h1 class="logo-text">Diet Tracker</h1>
+                            <h1 class="logo-text" id="authModalTitle">Diet Tracker</h1>
                         </div>
-                        <p class="login-subtitle">Sua saúde, seu ritmo, sua evolução.</p>
+                        <p class="login-subtitle" id="authContext">Entre para salvar seus dados e acompanhar sua evolução.</p>
                     </div>
                     
                     <div class="login-tabs">
@@ -92,7 +92,6 @@
                     </form>
                     
                     <div id="authMessage" class="message"></div>
-                </div>
             </div>
         </div>
     </div>
@@ -198,7 +197,7 @@
         </div>
     </div>
 
-    <div id="mainScreen" class="screen hidden">
+    <div id="mainScreen" class="screen">
         <header class="app-header">
             <div class="app-header__inner">
                 <a class="app-brand" href="#" onclick="showTab('diet'); return false" aria-label="Ir para o início">
@@ -206,8 +205,13 @@
                     <span><strong>Diet Tracker</strong><small>Saúde e performance</small></span>
                 </a>
                 <div class="app-header__actions">
+                    <div id="guestAuthActions" class="guest-auth-actions">
+                        <button type="button" class="btn-secondary" onclick="openAuthModal('Entre para acessar seus dados.', 'login')">Entrar</button>
+                        <button type="button" class="btn-primary" onclick="openAuthModal('Crie sua conta para salvar sua evolução.', 'register')">Criar conta</button>
+                    </div>
                     <button id="adminPanelBtn" class="header-icon-button hidden" onclick="window.location.href='/admin'" aria-label="Abrir painel administrativo"><i class="fas fa-shield-halved"></i></button>
-                    <button class="header-icon-button" onclick="showTab('stats')" aria-label="Abrir perfil">
+                    <button id="professionalPanelBtn" class="header-icon-button hidden" onclick="showTab('professional')" aria-label="Abrir área profissional"><i class="fas fa-user-tie"></i></button>
+                    <button id="userHeaderButton" class="header-icon-button hidden" onclick="showTab('stats')" aria-label="Abrir perfil">
                         <span id="headerUserInitial" class="user-initial">U</span>
                     </button>
                 </div>
@@ -221,6 +225,7 @@
                     <button class="nav-btn" onclick="showTab('diet_plans')"><i class="fas fa-bowl-food"></i><span>Dieta</span></button>
                     <button class="nav-btn" onclick="showTab('workout_plans')"><i class="fas fa-dumbbell"></i><span>Treino</span></button>
                     <button class="nav-btn" onclick="showTab('chat')"><i class="fas fa-wand-magic-sparkles"></i><span>IA</span><small class="premium-nav-dot" aria-label="Premium"></small></button>
+                    <button id="professionalNavBtn" class="nav-btn hidden" onclick="showTab('professional')"><i class="fas fa-user-tie"></i><span>Alunos</span></button>
                     <button class="nav-btn" onclick="showTab('stats')"><i class="far fa-user"></i><span>Perfil</span></button>
                 </div>
             </nav>
@@ -240,13 +245,14 @@
                     <section class="daily-summary" aria-labelledby="dailySummaryTitle">
                         <header class="section-heading section-heading--compact">
                             <div><span class="eyebrow">Meta diária</span><h2 id="dailySummaryTitle">Resumo do dia</h2></div>
-                            <button type="button" class="text-button" onclick="showTab('stats')">Editar metas</button>
+                            <button type="button" class="text-button" onclick="editDailyNutritionTargets()">Editar metas</button>
                         </header>
-                        <div class="macro-grid">
-                            <article class="macro-card macro-card--calories"><span class="macro-card__icon"><i class="fas fa-fire"></i></span><strong id="todayCalories">0</strong><small>de 2.200 kcal</small><b>Calorias</b><span class="macro-progress"><i id="todayCaloriesProgress"></i></span></article>
-                            <article class="macro-card macro-card--protein"><span class="macro-card__icon"><i class="fas fa-drumstick-bite"></i></span><strong id="todayProtein">0 g</strong><small>de 160 g</small><b>Proteínas</b><span class="macro-progress"><i id="todayProteinProgress"></i></span></article>
-                            <article class="macro-card macro-card--carbs"><span class="macro-card__icon"><i class="fas fa-wheat-awn"></i></span><strong id="todayCarbs">0 g</strong><small>de 220 g</small><b>Carboidratos</b><span class="macro-progress"><i id="todayCarbsProgress"></i></span></article>
-                            <article class="macro-card macro-card--fat"><span class="macro-card__icon"><i class="fas fa-droplet"></i></span><strong id="todayFat">0 g</strong><small>de 70 g</small><b>Gorduras</b><span class="macro-progress"><i id="todayFatProgress"></i></span></article>
+                        <div id="guestDailySummary" class="guest-presentation hidden"><i class="fas fa-chart-pie"></i><div><strong>Acompanhe calorias e macros diariamente</strong><p>Entre para registrar refeições e comparar seu consumo com metas personalizadas.</p></div><button type="button" class="btn-primary" onclick="openAuthModal('Crie uma conta para acompanhar suas metas.', 'register')">Começar</button></div>
+                        <div id="dailyMacroGrid" class="macro-grid">
+                            <article class="macro-card macro-card--calories"><span class="macro-card__icon"><i class="fas fa-fire"></i></span><strong id="todayCalories">0</strong><small id="todayCaloriesTarget">de 2.200 kcal</small><b>Calorias</b><span class="macro-progress"><i id="todayCaloriesProgress"></i></span></article>
+                            <article class="macro-card macro-card--protein"><span class="macro-card__icon"><i class="fas fa-drumstick-bite"></i></span><strong id="todayProtein">0 g</strong><small id="todayProteinTarget">de 160 g</small><b>Proteínas</b><span class="macro-progress"><i id="todayProteinProgress"></i></span></article>
+                            <article class="macro-card macro-card--carbs"><span class="macro-card__icon"><i class="fas fa-wheat-awn"></i></span><strong id="todayCarbs">0 g</strong><small id="todayCarbsTarget">de 220 g</small><b>Carboidratos</b><span class="macro-progress"><i id="todayCarbsProgress"></i></span></article>
+                            <article class="macro-card macro-card--fat"><span class="macro-card__icon"><i class="fas fa-droplet"></i></span><strong id="todayFat">0 g</strong><small id="todayFatTarget">de 70 g</small><b>Gorduras</b><span class="macro-progress"><i id="todayFatProgress"></i></span></article>
                         </div>
                     </section>
 
@@ -285,7 +291,7 @@
                             <h2>Planos de dieta</h2>
                             <p>Cardápios personalizados para sua meta, rotina e preferências.</p>
                         </div>
-                        <button type="button" class="btn-primary plan-wizard-cta" data-plan-wizard="diet"><i class="fas fa-wand-magic-sparkles"></i> Criar plano guiado</button>
+                        <button type="button" class="btn-primary plan-wizard-cta" data-plan-wizard="diet"><i class="fas fa-wand-magic-sparkles"></i> Criar plano com IA <small>Premium</small></button>
                     </div>
                     <div id="dietPlansTable" class="plans-grid" aria-live="polite"><div id="dietPlansTableBody"></div></div>
                 </div>
@@ -297,7 +303,7 @@
                             <h2>Planos de treino</h2>
                             <p>Escolha uma divisão e acompanhe cada sessão com clareza.</p>
                         </div>
-                        <button type="button" class="btn-primary btn-primary--blue plan-wizard-cta" data-plan-wizard="workout"><i class="fas fa-plus"></i> Criar plano guiado</button>
+                        <button type="button" class="btn-primary btn-primary--blue plan-wizard-cta" data-plan-wizard="workout"><i class="fas fa-wand-magic-sparkles"></i> Gerar com IA <small>Premium</small></button>
                     </div>
                     <div class="plan-filter-bar" aria-label="Filtros de treino">
                         <label><span class="sr-only">Objetivo</span><select id="workoutGoalFilter"><option value="">Todos os objetivos</option><option value="hypertrophy">Hipertrofia</option><option value="strength">Força</option><option value="conditioning">Condicionamento</option><option value="fat_loss">Perda de gordura</option><option value="mobility">Mobilidade</option></select></label>
@@ -357,8 +363,22 @@
                         <button type="button" onclick="openProfileEditor()"><span><i class="far fa-id-card"></i></span><div><strong>Dados e objetivos</strong><small>Preferências usadas pela IA</small></div><i class="fas fa-chevron-right"></i></button>
                         <button type="button" onclick="openExerciseCredits()"><span><i class="fas fa-image"></i></span><div><strong>Créditos das imagens</strong><small>Autores, fontes e licenças dos exercícios</small></div><i class="fas fa-chevron-right"></i></button>
                         <button type="button" id="profileAdminLink" class="hidden" onclick="window.location.href='/admin'"><span><i class="fas fa-shield-halved"></i></span><div><strong>Painel administrativo</strong><small>Gestão da plataforma</small></div><i class="fas fa-chevron-right"></i></button>
-                        <button type="button" class="profile-menu__danger" onclick="logout()"><span><i class="fas fa-arrow-right-from-bracket"></i></span><div><strong>Sair da conta</strong><small>Encerrar esta sessão</small></div><i class="fas fa-chevron-right"></i></button>
+                        <button type="button" id="profileProfessionalRelationship" class="hidden" onclick="revokeOwnProfessionalRelationship()"><span><i class="fas fa-user-tie"></i></span><div><strong id="profileProfessionalName">Personal vinculado</strong><small>Encerrar autorização de acompanhamento</small></div><i class="fas fa-chevron-right"></i></button>
+                        <button type="button" id="profileLoginAction" class="hidden" onclick="openAuthModal('Entre para acessar seu perfil e histórico.', 'login')"><span><i class="fas fa-right-to-bracket"></i></span><div><strong>Entrar ou criar conta</strong><small>Salve seus dados e acompanhe sua evolução</small></div><i class="fas fa-chevron-right"></i></button>
+                        <button type="button" id="profileLogoutAction" class="profile-menu__danger" onclick="logout()"><span><i class="fas fa-arrow-right-from-bracket"></i></span><div><strong>Sair da conta</strong><small>Encerrar esta sessão</small></div><i class="fas fa-chevron-right"></i></button>
                     </section>
+                </div>
+
+                <div id="professionalTab" class="tab-content hidden">
+                    <section id="professionalDashboard">
+                        <div class="content-header professional-heading">
+                            <div class="content-heading"><span class="content-kicker">Workspace profissional</span><h2>Seus alunos</h2><p>Crie, revise e publique treinos e planos alimentares.</p></div>
+                            <button type="button" class="btn-primary" onclick="openProfessionalInvite()"><i class="fas fa-user-plus"></i> Convidar aluno</button>
+                        </div>
+                        <div id="professionalStats" class="stats-grid"></div>
+                        <div id="professionalStudents" class="professional-student-grid" aria-live="polite"></div>
+                    </section>
+                    <section id="professionalStudentDetail" class="hidden" aria-live="polite"></section>
                 </div>
             </main>
         </div>
@@ -668,6 +688,32 @@
                 </div>
             </div>
         </div>
+
+        <div id="professionalInviteModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="professionalInviteTitle">
+            <div class="modal-content professional-sheet">
+                <div class="modal-header"><div><span class="content-kicker">Novo vínculo</span><h3 id="professionalInviteTitle">Convidar aluno</h3></div><button type="button" class="btn-close" onclick="closeProfessionalInvite()">&times;</button></div>
+                <p>Gere um link seguro, válido por 7 dias, e envie ao aluno. Ele poderá entrar ou criar uma conta antes de aceitar.</p>
+                <div id="professionalInviteResult" class="invite-result hidden"><label for="professionalInviteLink">Link do convite</label><input id="professionalInviteLink" readonly><div class="modal-actions"><button class="btn-secondary" type="button" onclick="copyProfessionalInvite()"><i class="fas fa-copy"></i> Copiar</button><button class="btn-primary" type="button" onclick="shareProfessionalInvite()"><i class="fab fa-whatsapp"></i> WhatsApp</button></div></div>
+                <div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeProfessionalInvite()">Fechar</button><button id="professionalInviteGenerate" type="button" class="btn-primary" onclick="generateProfessionalInvite()">Gerar link</button></div>
+                <div id="professionalInviteMessage" class="modal-message"></div>
+            </div>
+        </div>
+
+        <div id="professionalPlanEditorModal" class="modal plan-modal" role="dialog" aria-modal="true" aria-labelledby="professionalPlanEditorTitle">
+            <div class="modal-content professional-editor-sheet">
+                <div class="modal-header"><div><span id="professionalPlanEditorKicker" class="content-kicker">Rascunho</span><h3 id="professionalPlanEditorTitle">Editor de plano</h3></div><button type="button" class="btn-close" onclick="closeProfessionalPlanEditor()">&times;</button></div>
+                <form id="professionalPlanEditorForm"><div id="professionalPlanEditorBody"></div><div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeProfessionalPlanEditor()">Cancelar</button><button type="submit" class="btn-primary"><i class="fas fa-floppy-disk"></i> Salvar rascunho</button></div></form>
+                <div id="professionalPlanEditorMessage" class="modal-message"></div>
+            </div>
+        </div>
+
+        <div id="professionalExportModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="professionalExportTitle">
+            <div class="modal-content professional-sheet">
+                <div class="modal-header"><div><span class="content-kicker">Compartilhar</span><h3 id="professionalExportTitle">Exportar para WhatsApp</h3></div><button type="button" class="btn-close" onclick="closeProfessionalExport()">&times;</button></div>
+                <textarea id="professionalExportText" rows="16" class="form-textarea"></textarea>
+                <div class="modal-actions"><button type="button" class="btn-secondary" onclick="copyProfessionalExport()"><i class="fas fa-copy"></i> Copiar texto</button><button type="button" class="btn-primary" onclick="shareProfessionalExport()"><i class="fab fa-whatsapp"></i> Abrir WhatsApp</button></div>
+            </div>
+        </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.js"></script>
@@ -676,5 +722,6 @@
     <script src="js/utils.js"></script>
     <script src="script.js"></script>
     <script src="js/plans.js"></script>
+    <script src="js/professional.js"></script>
 </body>
 </html>

@@ -34,10 +34,9 @@ As associações aprovadas e seus IDs exatos de imagem ficam em `scripts/wger-ov
 
 ## Deploy (Render)
 
-Defina as envs: `SECRET_KEY`, `DATABASE_URL`, `GEMINI_API_KEY`, `FLASK_ENV=production`, `SESSION_COOKIE_SECURE=true` e `CORS_ORIGINS` (domínio do site). No Render:
+Defina as envs: `SECRET_KEY`, `DATABASE_URL`, `GEMINI_API_KEY`, `WORKOUTX_API_KEY`, `FLASK_ENV=production`, `SESSION_COOKIE_SECURE=true` e `CORS_ORIGINS` (domínio do site). No Render:
 
-- **Start command**: `gunicorn --workers 1 --worker-class gthread --threads 4 --bind 0.0.0.0:$PORT --timeout 120 main:app` (equivalente ao `Procfile`).
-- **Release command**: `flask db upgrade` (roda antes de cada deploy).
+- **Start command**: `python -m flask --app main db upgrade && gunicorn --workers 1 --worker-class gthread --threads 4 --bind 0.0.0.0:$PORT --timeout 120 main:app` (equivalente ao `Procfile` e aplica migrations uma única vez antes do servidor).
 - **Health check path**: `/api/health`.
 
 ## Segurança

@@ -1,0 +1,202 @@
+{
+  "abdominal_na_bola": {
+    "provider_equipment": "Stability Ball",
+    "provider_id": "2297",
+    "provider_name": "Stability Ball Crunch (full Range Hands Behind Head)"
+  },
+  "abdominal_reverso": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "0872",
+    "provider_name": "Reverse Crunch"
+  },
+  "agachamento_bulgaro": {
+    "provider_equipment": "Dumbbell",
+    "provider_id": "0410",
+    "provider_name": "Dumbbell Single Leg Split Squat"
+  },
+  "agachamento_corporal": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "3533",
+    "provider_name": "Quads (bodyweight Squat)"
+  },
+  "agachamento_goblet": {
+    "provider_equipment": "Dumbbell",
+    "provider_id": "1760",
+    "provider_name": "Dumbbell Goblet Squat"
+  },
+  "agachamento_livre": {
+    "provider_equipment": "Barbell",
+    "provider_id": "0043",
+    "provider_name": "Barbell Full Squat"
+  },
+  "agachamento_sissy": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "1489",
+    "provider_name": "Sissy Squat"
+  },
+  "barra_fixa_assistida": {
+    "provider_equipment": "Leverage Machine",
+    "provider_id": "0017",
+    "provider_name": "Assisted Pull-up"
+  },
+  "barra_fixa_pronada": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "0652",
+    "provider_name": "Pull-up"
+  },
+  "crossover_cabo": {
+    "provider_equipment": "Cable",
+    "provider_id": "1269",
+    "provider_name": "Cable Standing Up Straight Crossovers"
+  },
+  "crucifixo_halteres": {
+    "provider_equipment": "Dumbbell",
+    "provider_id": "0308",
+    "provider_name": "Dumbbell Fly"
+  },
+  "desenvolvimento_arnold": {
+    "provider_equipment": "Dumbbell",
+    "provider_id": "0287",
+    "provider_name": "Dumbbell Arnold Press V. 2"
+  },
+  "desenvolvimento_halteres": {
+    "provider_equipment": "Dumbbell",
+    "provider_id": "0405",
+    "provider_name": "Dumbbell Seated Shoulder Press"
+  },
+  "desenvolvimento_maquina": {
+    "provider_equipment": "Leverage Machine",
+    "provider_id": "2318",
+    "provider_name": "Lever Shoulder Press V. 3"
+  },
+  "elevacao_lateral_halteres": {
+    "provider_equipment": "Dumbbell",
+    "provider_id": "0334",
+    "provider_name": "Dumbbell Lateral Raise"
+  },
+  "elevacao_pelvica_barra": {
+    "provider_equipment": "Barbell",
+    "provider_id": "1409",
+    "provider_name": "Barbell Glute Bridge"
+  },
+  "flexao_diamante": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "0283",
+    "provider_name": "Diamond Push-up"
+  },
+  "flexao_inclinada": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "0493",
+    "provider_name": "Incline Push-up"
+  },
+  "leg_press_45": {
+    "provider_equipment": "Sled Machine",
+    "provider_id": "0739",
+    "provider_name": "Sled 45 Degree Leg Press"
+  },
+  "levantamento_terra_convencional": {
+    "provider_equipment": "Barbell",
+    "provider_id": "0032",
+    "provider_name": "Barbell Deadlift"
+  },
+  "levantamento_terra_romeno": {
+    "provider_equipment": "Barbell",
+    "provider_id": "0085",
+    "provider_name": "Barbell Romanian Deadlift"
+  },
+  "mergulho_no_banco": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "0129",
+    "provider_name": "Bench Dip (knees Bent)"
+  },
+  "panturrilha_com_halteres": {
+    "provider_equipment": "Dumbbell",
+    "provider_id": "0417",
+    "provider_name": "Dumbbell Standing Calf Raise"
+  },
+  "panturrilha_em_pe_maquina": {
+    "provider_equipment": "Leverage Machine",
+    "provider_id": "0605",
+    "provider_name": "Lever Standing Calf Raise"
+  },
+  "ponte_de_gluteos": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "3013",
+    "provider_name": "Low Glute Bridge On Floor"
+  },
+  "puxada_alta_frente": {
+    "provider_equipment": "Cable",
+    "provider_id": "0197",
+    "provider_name": "Cable Pulldown (pro Lat Bar)"
+  },
+  "remada_baixa_cabo": {
+    "provider_equipment": "Cable",
+    "provider_id": "0180",
+    "provider_name": "Cable Low Seated Row"
+  },
+  "remada_curvada_barra": {
+    "provider_equipment": "Barbell",
+    "provider_id": "0027",
+    "provider_name": "Barbell Bent Over Row"
+  },
+  "remada_invertida": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "0499",
+    "provider_name": "Inverted Row"
+  },
+  "remada_maquina": {
+    "provider_equipment": "Leverage Machine",
+    "provider_id": "0588",
+    "provider_name": "Lever Narrow Grip Seated Row"
+  },
+  "rosca_alternada": {
+    "provider_equipment": "Dumbbell",
+    "provider_id": "0285",
+    "provider_name": "Dumbbell Alternate Biceps Curl"
+  },
+  "rosca_direta_barra": {
+    "provider_equipment": "Barbell",
+    "provider_id": "0031",
+    "provider_name": "Barbell Curl"
+  },
+  "stiff_com_halteres": {
+    "provider_equipment": "Dumbbell",
+    "provider_id": "0432",
+    "provider_name": "Dumbbell Stiff Leg Deadlift"
+  },
+  "supino_declinado_barra": {
+    "provider_equipment": "Barbell",
+    "provider_id": "0033",
+    "provider_name": "Barbell Decline Bench Press"
+  },
+  "supino_inclinado_barra": {
+    "provider_equipment": "Barbell",
+    "provider_id": "0047",
+    "provider_name": "Barbell Incline Bench Press"
+  },
+  "supino_inclinado_halteres": {
+    "provider_equipment": "Dumbbell",
+    "provider_id": "0314",
+    "provider_name": "Dumbbell Incline Bench Press"
+  },
+  "supino_maquina": {
+    "provider_equipment": "Leverage Machine",
+    "provider_id": "0576",
+    "provider_name": "Lever Chest Press"
+  },
+  "supino_reto_barra": {
+    "provider_equipment": "Barbell",
+    "provider_id": "0025",
+    "provider_name": "Barbell Bench Press"
+  },
+  "supino_reto_halteres": {
+    "provider_equipment": "Dumbbell",
+    "provider_id": "0289",
+    "provider_name": "Dumbbell Bench Press"
+  },
+  "triceps_na_polia": {
+    "provider_equipment": "Cable",
+    "provider_id": "0241",
+    "provider_name": "Cable Triceps Pushdown (v-bar)"
+  }
+}

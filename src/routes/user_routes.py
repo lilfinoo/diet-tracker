@@ -1,10 +1,12 @@
-from flask import Blueprint, jsonify, request, session, abort, g, current_app
+from flask import Blueprint, jsonify, request, session, abort, g, current_app, send_file
 from src.models.user import (
     ChatMessage,
     DietEntry,
     DietPlan,
     DietPlanMeal,
+    ExerciseMediaReview,
     Measurement,
+    ProfessionalStudentRelationship,
     User,
     UserProfile,
     WorkoutDay,
@@ -19,6 +21,7 @@ from src.services.ai import (
     AIQuotaExceededError,
     AIResponseError,
     AIServiceError,
+    AIServiceUnavailableError,
     calculate_nutrition,
     classify_exercise_catalog_key,
     generate_diet_day,
@@ -26,11 +29,29 @@ from src.services.ai import (
     generate_response,
     generate_workout_plan,
 )
-from src.services.diet_plans import normalize_diet_day, normalize_diet_output, validate_diet_questionnaire
+from src.services.diet_plans import (
+    calculate_nutrition_targets,
+    correction_feedback,
+    merge_profile_restrictions,
+    normalize_diet_day,
+    normalize_diet_output,
+    profile_snapshot,
+    validate_diet_questionnaire,
+)
 from src.services.rate_limit import rate_limit
+from src.services.workoutx import (
+    REVIEW_QUEUE,
+    REVIEW_SEARCH_QUERIES,
+    WorkoutXServiceError,
+    get_cached_gif,
+    get_exercise,
+    approved_media,
+    search_exercises,
+)
 from src.services.workout_plans import (
     PlanValidationError,
     catalog_by_key,
+    catalog_for_prompt,
     normalize_workout_output,
     replacement_options,
     resolve_catalog_exercise,
@@ -434,6 +455,20 @@ def get_ai_macros():
         current_app.logger.exception("Nutrition AI request failed")
         return jsonify({"error": "Não foi possível calcular macros no momento"}), 503
 
+
+@user_bp.route("/exercise-media/<catalog_key>", methods=["GET"])
+@login_required
+def get_exercise_media(catalog_key):
+    media = approved_media(catalog_key)
+    if media is None:
+        abort(404)
+    try:
+        gif_path = get_cached_gif(catalog_key, media["provider_id"])
+    except WorkoutXServiceError as error:
+        current_app.logger.warning("WorkoutX GIF unavailable for %s: %s", catalog_key, error)
+        abort(503, description="A animação do exercício não está disponível agora.")
+    return send_file(gif_path, mimetype="image/gif", conditional=True, max_age=31_536_000)
+
 # --- Rotas de Medidas (Corrigido) ---
 @user_bp.route("/measurements", methods=["POST"])
 @login_required
@@ -610,30 +645,60 @@ def create_guided_diet_plan():
         return jsonify({"error": "Revise as preferências da dieta.", "fields": error.errors}), 400
     profile = UserProfile.query.filter_by(user_id=user.id).first()
     try:
-        generated = generate_diet_plan(questionnaire, profile)
-        plan_data = normalize_diet_output(generated, questionnaire)
-    except AIQuotaExceededError as error:
-        return jsonify({"error": str(error)}), 429
-    except AIResponseError:
-        current_app.logger.warning("Diet plan AI returned invalid JSON")
-        return jsonify({"error": "A dieta gerada ficou incompleta. Tente novamente."}), 502
-    except AIServiceError:
-        current_app.logger.exception("Diet plan generation failed")
-        return jsonify({"error": "A IA não conseguiu gerar a dieta agora."}), 503
+        questionnaire = merge_profile_restrictions(questionnaire, profile)
+        nutrition_targets = calculate_nutrition_targets(profile, questionnaire)
     except PlanValidationError as error:
-        current_app.logger.warning("Invalid generated diet plan: %s", error.errors)
-        return jsonify({"error": "A dieta gerada ficou incompleta. Tente novamente."}), 502
+        return jsonify({"error": "Revise seu perfil e as metas nutricionais.", "fields": error.errors}), 400
+
+    correction = None
+    max_attempts = current_app.config["GEMINI_DIET_VALIDATION_ATTEMPTS"]
+    for attempt in range(1, max_attempts + 1):
+        try:
+            generated = generate_diet_plan(questionnaire, profile, nutrition_targets, correction)
+            plan_data = normalize_diet_output(generated, questionnaire, nutrition_targets)
+            break
+        except PlanValidationError as error:
+            current_app.logger.warning(
+                "Invalid generated diet plan (attempt %s/%s): %s",
+                attempt,
+                max_attempts,
+                list(error.errors)[:8],
+            )
+            if attempt == max_attempts:
+                return jsonify({"error": "A dieta não atingiu as metas nutricionais. Tente novamente."}), 502
+            correction = correction_feedback(error, generated, nutrition_targets)
+        except AIResponseError:
+            current_app.logger.warning("Diet plan AI returned invalid output (attempt %s/%s)", attempt, max_attempts)
+            if attempt == max_attempts:
+                return jsonify({"error": "A dieta gerada ficou incompleta. Tente novamente."}), 502
+        except AIQuotaExceededError as error:
+            return jsonify({"error": str(error)}), 429
+        except AIServiceUnavailableError:
+            current_app.logger.warning("Diet plan generation unavailable after retries")
+            return jsonify({"error": "A IA está com alta demanda. Tente gerar sua dieta novamente em alguns instantes."}), 503
+        except AIServiceError:
+            current_app.logger.exception("Diet plan generation failed")
+            return jsonify({"error": "A IA não conseguiu gerar a dieta agora."}), 503
 
     try:
         plan = DietPlan(
             user_id=user.id,
+            author_user_id=user.id,
+            published_by_user_id=user.id,
+            status="published",
+            source="ai",
+            published_at=datetime.utcnow(),
             title=plan_data["title"],
             description=plan_data["description"],
-            schema_version=2,
+            schema_version=3,
             plan_mode="rotation_3_day",
             goal_code=questionnaire["goal"],
             meals_per_day=questionnaire["meals_per_day"],
-            generation_context=questionnaire,
+            generation_context={
+                "questionnaire": questionnaire,
+                "profile_snapshot": profile_snapshot(profile),
+                "nutrition_targets": nutrition_targets,
+            },
         )
         db.session.add(plan)
         db.session.flush()
@@ -667,7 +732,7 @@ def create_guided_workout_plan():
     except PlanValidationError as error:
         return jsonify({"error": "Revise as preferências do treino.", "fields": error.errors}), 400
     profile = UserProfile.query.filter_by(user_id=user.id).first()
-    max_attempts = 3
+    max_attempts = current_app.config["GEMINI_WORKOUT_VALIDATION_ATTEMPTS"]
     for attempt in range(1, max_attempts + 1):
         try:
             generated = generate_workout_plan(questionnaire, profile)
@@ -701,6 +766,11 @@ def create_guided_workout_plan():
     try:
         plan = WorkoutPlan(
             user_id=user.id,
+            author_user_id=user.id,
+            published_by_user_id=user.id,
+            status="published",
+            source="ai",
+            published_at=datetime.utcnow(),
             title=plan_data["title"],
             description=plan_data["description"],
             split_type=questionnaire["split_type"],
@@ -748,7 +818,7 @@ def create_guided_workout_plan():
 def get_diet_plans():
     user = g.user
     plans, _, _ = page_query(
-        DietPlan.query.filter_by(user_id=user.id)
+        DietPlan.query.filter_by(user_id=user.id, status="published")
         .options(selectinload(DietPlan.meals))
         .order_by(DietPlan.created_at.desc()),
         DietPlan,
@@ -760,14 +830,14 @@ def get_diet_plans():
 @login_required
 def get_diet_plan_details(plan_id):
     user = g.user
-    plan = DietPlan.query.filter_by(id=plan_id, user_id=user.id).options(selectinload(DietPlan.meals)).first_or_404()
+    plan = DietPlan.query.filter_by(id=plan_id, user_id=user.id, status="published").options(selectinload(DietPlan.meals)).first_or_404()
     return jsonify(plan.to_dict_full()), 200
 
 @user_bp.route("/diet_plans/<int:plan_id>", methods=["DELETE"])
 @login_required
 def delete_diet_plan(plan_id):
     user = g.user
-    plan = DietPlan.query.filter_by(id=plan_id, user_id=user.id).first_or_404()
+    plan = DietPlan.query.filter_by(id=plan_id, user_id=user.id, status="published").first_or_404()
     db.session.delete(plan)
     db.session.commit()
     return jsonify({"message": "Plano de dieta excluído com sucesso"}), 200
@@ -777,7 +847,7 @@ def delete_diet_plan(plan_id):
 @login_required
 def update_diet_plan_meal(plan_id, meal_id):
     user = g.user
-    plan = DietPlan.query.filter_by(id=plan_id, user_id=user.id).first_or_404()
+    plan = DietPlan.query.filter_by(id=plan_id, user_id=user.id, status="published").first_or_404()
     meal = DietPlanMeal.query.filter_by(id=meal_id, diet_plan_id=plan.id).first_or_404()
     data = coerce_numbers(json_body(), ("calories", "protein", "carbs", "fat"))
     _require_lengths(data, {
@@ -814,7 +884,7 @@ def update_diet_plan_meal(plan_id, meal_id):
 @premium_required
 def suggest_diet_day(plan_id):
     user = g.user
-    plan = DietPlan.query.filter_by(id=plan_id, user_id=user.id).first_or_404()
+    plan = DietPlan.query.filter_by(id=plan_id, user_id=user.id, status="published").first_or_404()
     data = json_body()
     day_index = data.get("day")
     try:
@@ -825,8 +895,10 @@ def suggest_diet_day(plan_id):
         return jsonify({"error": "Escolha um dia entre 1 e 3."}), 400
     feedback = str(data.get("feedback", "")).strip()[:500]
 
-    questionnaire = plan.generation_context or {}
-    if not questionnaire:
+    generation_context = plan.generation_context or {}
+    questionnaire = generation_context.get("questionnaire", generation_context)
+    nutrition_targets = generation_context.get("nutrition_targets")
+    if not questionnaire or not nutrition_targets:
         return jsonify({"error": "Este plano não possui contexto para sugestões."}), 422
     existing_meals = [
         {"meal_type": meal.meal_type, "items": meal.items or [], "description": meal.description}
@@ -839,20 +911,33 @@ def suggest_diet_day(plan_id):
         return jsonify({"error": "Descreva a mudança desejada."}), 400
 
     profile = UserProfile.query.filter_by(user_id=user.id).first()
-    try:
-        generated = generate_diet_day(questionnaire, profile, existing_meals, feedback)
-        day_data = normalize_diet_day(generated, questionnaire)
-    except AIQuotaExceededError as error:
-        return jsonify({"error": str(error)}), 429
-    except AIResponseError:
-        current_app.logger.warning("Diet day AI returned invalid JSON")
-        return jsonify({"error": "A sugestão ficou incompleta. Tente novamente."}), 502
-    except AIServiceError:
-        current_app.logger.exception("Diet day generation failed")
-        return jsonify({"error": "A IA não conseguiu sugerir mudanças agora."}), 503
-    except PlanValidationError as error:
-        current_app.logger.warning("Invalid generated diet day: %s", error.errors)
-        return jsonify({"error": "A sugestão ficou incompleta. Tente novamente."}), 502
+    correction = None
+    max_attempts = current_app.config["GEMINI_DIET_VALIDATION_ATTEMPTS"]
+    for attempt in range(1, max_attempts + 1):
+        try:
+            generated = generate_diet_day(
+                questionnaire,
+                profile,
+                existing_meals,
+                feedback,
+                nutrition_targets,
+                correction,
+            )
+            day_data = normalize_diet_day(generated, questionnaire, nutrition_targets)
+            break
+        except PlanValidationError as error:
+            current_app.logger.warning("Invalid generated diet day (attempt %s/%s): %s", attempt, max_attempts, list(error.errors)[:8])
+            if attempt == max_attempts:
+                return jsonify({"error": "A sugestão não atingiu as metas nutricionais."}), 502
+            correction = correction_feedback(error, generated, nutrition_targets)
+        except AIResponseError:
+            if attempt == max_attempts:
+                return jsonify({"error": "A sugestão ficou incompleta. Tente novamente."}), 502
+        except AIQuotaExceededError as error:
+            return jsonify({"error": str(error)}), 429
+        except AIServiceError:
+            current_app.logger.exception("Diet day generation failed")
+            return jsonify({"error": "A IA não conseguiu sugerir mudanças agora."}), 503
     return jsonify({"day": day_index, "meals": day_data["meals"]}), 200
 
 
@@ -860,13 +945,39 @@ def suggest_diet_day(plan_id):
 @login_required
 def replace_diet_day(plan_id, day_index):
     user = g.user
-    plan = DietPlan.query.filter_by(id=plan_id, user_id=user.id).first_or_404()
+    plan = DietPlan.query.filter_by(id=plan_id, user_id=user.id, status="published").first_or_404()
     if day_index not in {1, 2, 3}:
         return jsonify({"error": "Escolha um dia entre 1 e 3."}), 400
     data = json_body()
     meals = data.get("meals")
-    if not isinstance(meals, list) or not meals or len(meals) > 8:
-        return jsonify({"error": "Lista de refeições inválida."}), 400
+    generation_context = plan.generation_context or {}
+    questionnaire = generation_context.get("questionnaire")
+    nutrition_targets = generation_context.get("nutrition_targets")
+    if not questionnaire or not nutrition_targets:
+        return jsonify({"error": "Este plano antigo não pode ser recalculado com segurança."}), 422
+    raw_day = {
+        "type": "diet_plan_day",
+        "meals": [
+            {
+                "meal_type": meal.get("meal_type"),
+                "items": meal.get("items"),
+                "prep": meal.get("prep_instructions"),
+                "prep_minutes": meal.get("prep_minutes"),
+                "calories": meal.get("calories"),
+                "protein": meal.get("protein"),
+                "carbs": meal.get("carbs"),
+                "fat": meal.get("fat"),
+                "notes": meal.get("notes"),
+                "substitutions": meal.get("substitutions"),
+            }
+            for meal in meals
+            if isinstance(meal, dict)
+        ] if isinstance(meals, list) else None,
+    }
+    try:
+        meals = normalize_diet_day(raw_day, questionnaire, nutrition_targets)["meals"]
+    except PlanValidationError as error:
+        return jsonify({"error": "O cardápio informado não é nutricionalmente válido.", "fields": error.errors}), 400
     allowed = {
         "meal_type", "description", "calories", "protein", "carbs", "fat",
         "notes", "items", "prep_instructions", "prep_minutes", "substitutions", "order",
@@ -892,7 +1003,7 @@ def replace_diet_day(plan_id, day_index):
 def get_workout_plans():
     user = g.user
     plans, _, _ = page_query(
-        WorkoutPlan.query.filter_by(user_id=user.id)
+        WorkoutPlan.query.filter_by(user_id=user.id, status="published")
         .options(selectinload(WorkoutPlan.days), selectinload(WorkoutPlan.exercises))
         .order_by(WorkoutPlan.created_at.desc()),
         WorkoutPlan,
@@ -904,17 +1015,221 @@ def get_workout_plans():
 @login_required
 def get_workout_plan_details(plan_id):
     user = g.user
-    plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=user.id).options(
+    plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=user.id, status="published").options(
         selectinload(WorkoutPlan.days).selectinload(WorkoutDay.exercises),
         selectinload(WorkoutPlan.exercises),
     ).first_or_404()
     return jsonify(plan.to_dict_full()), 200
 
+
+def _editable_workout_plan(plan_id):
+    plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=g.user.id, status="published").options(
+        selectinload(WorkoutPlan.days).selectinload(WorkoutDay.exercises),
+    ).first_or_404()
+    active_session = WorkoutSession.query.filter_by(
+        user_id=g.user.id,
+        workout_plan_id=plan.id,
+        completed_at=None,
+    ).first()
+    if active_session:
+        abort(409, description="Finalize o treino em andamento antes de editar o plano.")
+    return plan
+
+
+def _version_workout_plan_for_edit(plan):
+    if not WorkoutSession.query.filter_by(workout_plan_id=plan.id).first():
+        return plan, {}, {}
+    replacement = WorkoutPlan(
+        user_id=plan.user_id,
+        author_user_id=g.user.id,
+        published_by_user_id=g.user.id,
+        supersedes_plan_id=plan.id,
+        status="published",
+        source="manual",
+        title=plan.title,
+        description=plan.description,
+        split_type=plan.split_type,
+        days_per_week=plan.days_per_week,
+        goal=plan.goal,
+        experience_level=plan.experience_level,
+        session_duration=plan.session_duration,
+        questionnaire_data=dict(plan.questionnaire_data or {}),
+    )
+    db.session.add(replacement)
+    db.session.flush()
+    day_map = {}
+    exercise_map = {}
+    exercise_fields = (
+        "catalog_key", "name", "movement_pattern", "primary_muscle", "equipment",
+        "difficulty", "sets", "reps", "weight", "rest_seconds", "effort_guidance",
+        "notes", "order",
+    )
+    for old_day in plan.days:
+        new_day = WorkoutDay(
+            workout_plan_id=replacement.id,
+            code=old_day.code,
+            title=old_day.title,
+            focus=old_day.focus,
+            order=old_day.order,
+        )
+        db.session.add(new_day)
+        db.session.flush()
+        day_map[old_day.id] = new_day
+        for old_exercise in old_day.exercises:
+            new_exercise = WorkoutExercise(
+                workout_plan_id=replacement.id,
+                workout_day_id=new_day.id,
+                **{field: getattr(old_exercise, field) for field in exercise_fields},
+            )
+            db.session.add(new_exercise)
+            db.session.flush()
+            exercise_map[old_exercise.id] = new_exercise
+    plan.status = "archived"
+    return replacement, day_map, exercise_map
+
+
+def _plan_catalog(plan):
+    questionnaire = dict(plan.questionnaire_data or {})
+    questionnaire.setdefault("experience_level", plan.experience_level or "beginner")
+    questionnaire.setdefault("equipment", ["full_gym"])
+    return catalog_for_prompt(questionnaire)
+
+
+def _prescription(data, existing=None):
+    try:
+        sets = int(data.get("sets", existing.sets if existing else 3))
+        rest_seconds = int(data.get("rest_seconds", existing.rest_seconds if existing else 60))
+    except (TypeError, ValueError):
+        abort(400, description="Séries ou descanso inválidos.")
+    reps = str(data.get("reps", existing.reps if existing else "8-12")).strip()
+    if not 1 <= sets <= 10 or not reps or len(reps) > 30 or not 0 <= rest_seconds <= 600:
+        abort(400, description="Revise séries, repetições e descanso.")
+    return {
+        "sets": sets,
+        "reps": reps,
+        "rest_seconds": rest_seconds,
+        "weight": str(data.get("weight", existing.weight if existing else "")).strip()[:50] or None,
+        "effort_guidance": str(data.get("effort_guidance", existing.effort_guidance if existing else "")).strip()[:100] or None,
+        "notes": str(data.get("notes", existing.notes if existing else "")).strip()[:500] or None,
+    }
+
+
+def _set_catalog_exercise(exercise, catalog_item):
+    exercise.catalog_key = catalog_item["key"]
+    exercise.name = catalog_item["name"]
+    exercise.movement_pattern = catalog_item["movement_pattern"]
+    exercise.primary_muscle = catalog_item["primary_muscle"]
+    exercise.equipment = catalog_item["equipment"]
+    exercise.difficulty = catalog_item["difficulty"]
+
+
+@user_bp.route("/workout_plans/<int:plan_id>/exercises/catalog", methods=["GET"])
+@login_required
+def workout_plan_exercise_catalog(plan_id):
+    plan = _editable_workout_plan(plan_id)
+    return jsonify({"items": _plan_catalog(plan)}), 200
+
+
+@user_bp.route("/workout_plans/<int:plan_id>/exercises/<int:exercise_id>/replacement_options", methods=["GET"])
+@login_required
+def permanent_replacement_options(plan_id, exercise_id):
+    plan = _editable_workout_plan(plan_id)
+    exercise = WorkoutExercise.query.filter_by(id=exercise_id, workout_plan_id=plan.id).first_or_404()
+    questionnaire = plan.questionnaire_data or {}
+    options = replacement_options(
+        exercise,
+        unavailable_equipment=[],
+        available_equipment=questionnaire.get("equipment") or ["full_gym"],
+        limit=8,
+    )
+    return jsonify({"options": options}), 200
+
+
+@user_bp.route("/workout_plans/<int:plan_id>/exercises/<int:exercise_id>", methods=["PATCH"])
+@login_required
+def replace_plan_exercise(plan_id, exercise_id):
+    plan = _editable_workout_plan(plan_id)
+    exercise = WorkoutExercise.query.filter_by(id=exercise_id, workout_plan_id=plan.id).first_or_404()
+    data = json_body()
+    catalog_item = catalog_by_key().get(str(data.get("catalog_key", "")))
+    source = catalog_by_key().get(exercise.catalog_key)
+    allowed_keys = {item["key"] for item in _plan_catalog(plan)}
+    if not catalog_item or catalog_item["key"] not in allowed_keys:
+        abort(400, description="Escolha um exercício compatível com o plano.")
+    if source and catalog_item["substitution_group"] != source["substitution_group"]:
+        abort(400, description="A substituição deve manter o mesmo padrão de movimento.")
+    plan, _, exercise_map = _version_workout_plan_for_edit(plan)
+    exercise = exercise_map.get(exercise.id, exercise)
+    _set_catalog_exercise(exercise, catalog_item)
+    for field, value in _prescription(data, exercise).items():
+        setattr(exercise, field, value)
+    db.session.commit()
+    return jsonify({"message": "Exercício substituído no plano.", "plan": plan.to_dict_full()}), 200
+
+
+@user_bp.route("/workout_plans/<int:plan_id>/days/<int:day_id>/exercises", methods=["POST"])
+@login_required
+def add_plan_exercise(plan_id, day_id):
+    plan = _editable_workout_plan(plan_id)
+    day = WorkoutDay.query.filter_by(id=day_id, workout_plan_id=plan.id).first_or_404()
+    if len(day.exercises) >= 12:
+        abort(400, description="Este treino já atingiu o limite de 12 exercícios.")
+    data = json_body()
+    catalog_item = catalog_by_key().get(str(data.get("catalog_key", "")))
+    allowed_keys = {item["key"] for item in _plan_catalog(plan)}
+    custom_name = str(data.get("name", "")).strip()
+    if catalog_item and catalog_item["key"] not in allowed_keys:
+        abort(400, description="Escolha um exercício compatível com o plano.")
+    if not catalog_item and not 2 <= len(custom_name) <= 100:
+        abort(400, description="Digite um nome de exercício entre 2 e 100 caracteres.")
+    if catalog_item and any(item.catalog_key == catalog_item["key"] for item in day.exercises):
+        abort(409, description="Este exercício já faz parte do treino.")
+    if not catalog_item and any(item.name.casefold() == custom_name.casefold() for item in day.exercises):
+        abort(409, description="Este exercício já faz parte do treino.")
+    plan, day_map, _ = _version_workout_plan_for_edit(plan)
+    day = day_map.get(day.id, day)
+    exercise = WorkoutExercise(
+        workout_plan_id=plan.id,
+        workout_day_id=day.id,
+        name=catalog_item["name"] if catalog_item else custom_name,
+        catalog_key=catalog_item["key"] if catalog_item else None,
+        movement_pattern=catalog_item["movement_pattern"] if catalog_item else "custom",
+        primary_muscle=catalog_item["primary_muscle"] if catalog_item else None,
+        equipment=catalog_item["equipment"] if catalog_item else None,
+        difficulty=catalog_item["difficulty"] if catalog_item else None,
+        order=max((item.order or 0 for item in day.exercises), default=0) + 1,
+        **_prescription(data),
+    )
+    db.session.add(exercise)
+    db.session.commit()
+    return jsonify({"message": "Exercício adicionado ao plano.", "plan": plan.to_dict_full()}), 201
+
+
+@user_bp.route("/workout_plans/<int:plan_id>/exercises/<int:exercise_id>", methods=["DELETE"])
+@login_required
+def delete_plan_exercise(plan_id, exercise_id):
+    plan = _editable_workout_plan(plan_id)
+    exercise = WorkoutExercise.query.filter_by(id=exercise_id, workout_plan_id=plan.id).first_or_404()
+    day = exercise.day
+    if day and len(day.exercises) <= 1:
+        abort(400, description="O treino precisa manter ao menos um exercício.")
+    plan, _, exercise_map = _version_workout_plan_for_edit(plan)
+    exercise = exercise_map.get(exercise.id, exercise)
+    day = exercise.day
+    db.session.delete(exercise)
+    db.session.flush()
+    if day:
+        remaining = [item for item in day.exercises if item is not exercise]
+        for order, item in enumerate(remaining, start=1):
+            item.order = order
+    db.session.commit()
+    return jsonify({"message": "Exercício removido do plano.", "plan": plan.to_dict_full()}), 200
+
 @user_bp.route("/workout_plans/<int:plan_id>", methods=["DELETE"])
 @login_required
 def delete_workout_plan(plan_id):
     user = g.user
-    plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=user.id).with_for_update().first_or_404()
+    plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=user.id, status="published").with_for_update().first_or_404()
     if WorkoutSession.query.filter_by(workout_plan_id=plan.id, user_id=user.id, completed_at=None).first():
         return jsonify({"error": "Finalize o treino em andamento antes de excluir este plano."}), 409
     db.session.delete(plan)
@@ -954,7 +1269,7 @@ def get_user_active_workout_session():
 @user_bp.route("/workout_plans/<int:plan_id>/days/<int:day_id>/sessions/active", methods=["GET"])
 @login_required
 def get_active_workout_session(plan_id, day_id):
-    plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=g.user.id).first()
+    plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=g.user.id, status="published").first()
     if not plan or not WorkoutDay.query.filter_by(id=day_id, workout_plan_id=plan.id).first():
         return jsonify({"error": "Treino não encontrado."}), 404
     session_record = WorkoutSession.query.filter_by(
@@ -969,7 +1284,7 @@ def get_active_workout_session(plan_id, day_id):
 @user_bp.route("/workout_plans/<int:plan_id>/days/<int:day_id>/sessions", methods=["POST"])
 @login_required
 def start_workout_session(plan_id, day_id):
-    plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=g.user.id).with_for_update().first()
+    plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=g.user.id, status="published").with_for_update().first()
     day = WorkoutDay.query.filter_by(id=day_id, workout_plan_id=plan.id if plan else None).first()
     if not plan or not day:
         return jsonify({"error": "Treino não encontrado."}), 404
@@ -1184,6 +1499,89 @@ def list_users():
         "diet_plans": counts["diet_plans"].get(user.id, 0), "has_profile": user.id in counts["profiles"],
     }) for user in users]), 200
 
+
+@user_bp.route("/admin/exercise-media/review", methods=["GET"])
+@admin_required
+def exercise_media_review_queue():
+    catalog = catalog_by_key()
+    reviews = {item.catalog_key: item for item in ExerciseMediaReview.query.all()}
+    items = []
+    for key in REVIEW_QUEUE:
+        if approved_media(key):
+            continue
+        exercise = catalog.get(key)
+        if not exercise:
+            continue
+        review = reviews.get(key)
+        items.append({
+            "catalog_key": key,
+            "name": exercise["name"],
+            "equipment": exercise["equipment"],
+            "movement_pattern": exercise["movement_pattern"],
+            "primary_muscle": exercise["primary_muscle"],
+            "search_query": REVIEW_SEARCH_QUERIES[key],
+            "review": {
+                "provider_id": review.provider_id,
+                "provider_name": review.provider_name,
+                "provider_equipment": review.provider_equipment,
+                "status": review.status,
+            } if review else None,
+        })
+    return jsonify({"items": items}), 200
+
+
+@user_bp.route("/admin/exercise-media/search", methods=["GET"])
+@admin_required
+def search_exercise_media():
+    query = str(request.args.get("query", "")).strip()
+    if not 2 <= len(query) <= 80:
+        return jsonify({"error": "Informe uma busca entre 2 e 80 caracteres."}), 400
+    try:
+        return jsonify({"items": search_exercises(query)}), 200
+    except WorkoutXServiceError as error:
+        current_app.logger.warning("WorkoutX review search failed: %s", error)
+        return jsonify({"error": "Não foi possível buscar candidatos agora."}), 503
+
+
+@user_bp.route("/admin/exercise-media/candidates/<provider_id>", methods=["GET"])
+@admin_required
+def exercise_media_candidate(provider_id):
+    try:
+        gif_path = get_cached_gif(f"review-{provider_id}", provider_id)
+    except WorkoutXServiceError:
+        abort(404)
+    return send_file(gif_path, mimetype="image/gif", conditional=True, max_age=86_400)
+
+
+@user_bp.route("/admin/exercise-media/<catalog_key>", methods=["PUT"])
+@admin_required
+def approve_exercise_media(catalog_key):
+    if catalog_key not in catalog_by_key():
+        abort(404)
+    provider_id = str(json_body().get("provider_id", "")).strip()
+    try:
+        provider = get_exercise(provider_id)
+        get_cached_gif(catalog_key, provider_id)
+    except WorkoutXServiceError as error:
+        current_app.logger.warning("WorkoutX media approval failed for %s: %s", catalog_key, error)
+        return jsonify({"error": "Não foi possível validar esse GIF."}), 422
+    review = db.session.get(ExerciseMediaReview, catalog_key)
+    if review is None:
+        review = ExerciseMediaReview(catalog_key=catalog_key)
+        db.session.add(review)
+    review.provider_id = provider_id
+    review.provider_name = str(provider.get("name", ""))[:200]
+    review.provider_equipment = str(provider.get("equipment", ""))[:100] or None
+    review.status = "approved"
+    review.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({"message": "GIF aprovado.", "review": {
+        "provider_id": review.provider_id,
+        "provider_name": review.provider_name,
+        "provider_equipment": review.provider_equipment,
+        "status": review.status,
+    }}), 200
+
 @user_bp.route("/admin/users/<uuid:user_id>/ban", methods=["POST"])
 @admin_required
 def ban_user(user_id):
@@ -1216,6 +1614,34 @@ def update_premium_status(user_id):
     action = "concedido" if is_premium else "revogado"
     return jsonify({
         "message": f"Acesso Premium {action} para {user_to_update.username}.",
+        "user": user_to_update.to_dict(),
+    }), 200
+
+
+@user_bp.route("/admin/users/<uuid:user_id>/professional", methods=["PATCH"])
+@admin_required
+def update_professional_status(user_id):
+    data = json_body()
+    is_professional = data.get("is_professional")
+    if not isinstance(is_professional, bool):
+        return jsonify({"error": "is_professional deve ser verdadeiro ou falso"}), 400
+
+    user_to_update = db.get_or_404(User, user_id)
+    user_to_update.is_professional = is_professional
+    if not is_professional:
+        now = datetime.utcnow()
+        relationships = ProfessionalStudentRelationship.query.filter(
+            ProfessionalStudentRelationship.professional_user_id == user_to_update.id,
+            ProfessionalStudentRelationship.status.in_(("active", "pending")),
+        ).all()
+        for relationship in relationships:
+            relationship.status = "revoked"
+            relationship.revoked_at = now
+            relationship.revoked_by_user_id = g.user.id
+    db.session.commit()
+    action = "concedido" if is_professional else "revogado"
+    return jsonify({
+        "message": f"Perfil profissional {action} para {user_to_update.username}.",
         "user": user_to_update.to_dict(),
     }), 200
 

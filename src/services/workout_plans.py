@@ -9,11 +9,11 @@ CATALOG_PATH = Path(__file__).resolve().parent.parent / "data" / "exercises.json
 GOALS = {"hypertrophy", "strength", "conditioning", "fat_loss", "mobility"}
 EXPERIENCE_LEVELS = {"beginner", "intermediate", "advanced"}
 SPLITS_BY_DAYS = {
-    2: {"full_body"},
-    3: {"full_body", "abc"},
-    4: {"upper_lower", "abcd"},
-    5: {"abcde"},
-    6: {"abc"},
+    2: {"full_body", "upper_lower"},
+    3: {"full_body", "upper_lower", "abc"},
+    4: {"full_body", "upper_lower", "abc", "abcd"},
+    5: {"full_body", "upper_lower", "abc", "abcd", "abcde"},
+    6: {"full_body", "upper_lower", "abc", "abcd", "abcde"},
 }
 EQUIPMENT_GROUPS = {
     "pull_up_bar": {"pullup_bar"},
@@ -137,12 +137,28 @@ def recommend_split(days_per_week, experience_level):
 
 def workout_day_specs(split_type, days_per_week):
     if split_type == "upper_lower":
-        return [
-            {"code": "UPPER_1", "title": "Upper 1", "order": 1, "focus_guidance": "membros superiores com empurrar e puxar", "required_groups": [["horizontal_push", "vertical_push"], ["horizontal_pull", "vertical_pull"]]},
-            {"code": "LOWER_1", "title": "Lower 1", "order": 2, "focus_guidance": "pernas com dominante de joelho, cadeia posterior e flexão de joelho", "required_groups": [["squat", "knee_extension"], ["hinge"], ["knee_flexion"]]},
-            {"code": "UPPER_2", "title": "Upper 2", "order": 3, "focus_guidance": "membros superiores variando os estímulos do Upper 1", "required_groups": [["horizontal_push", "vertical_push"], ["horizontal_pull", "vertical_pull"]]},
-            {"code": "LOWER_2", "title": "Lower 2", "order": 4, "focus_guidance": "pernas variando os estímulos do Lower 1", "required_groups": [["squat", "knee_extension"], ["hinge"], ["knee_flexion"]]},
-        ]
+        occurrences = {"UPPER": 0, "LOWER": 0}
+        specs = []
+        for index in range(1, days_per_week + 1):
+            code = "UPPER" if index % 2 else "LOWER"
+            occurrences[code] += 1
+            upper = code == "UPPER"
+            specs.append({
+                "code": f"{code}_{occurrences[code]}",
+                "title": f"{'Upper' if upper else 'Lower'} {occurrences[code]}",
+                "order": index,
+                "focus_guidance": (
+                    "membros superiores com empurrar e puxar"
+                    if upper
+                    else "pernas com dominante de joelho, cadeia posterior e flexão de joelho"
+                ),
+                "required_groups": (
+                    [["horizontal_push", "vertical_push"], ["horizontal_pull", "vertical_pull"]]
+                    if upper
+                    else [["squat", "knee_extension"], ["hinge"], ["knee_flexion"]]
+                ),
+            })
+        return specs
     if split_type == "full_body":
         return [
             {
@@ -175,19 +191,19 @@ def workout_day_specs(split_type, days_per_week):
         ],
     }
     base = templates[split_type]
-    repetitions = 2 if split_type == "abc" and days_per_week == 6 else 1
+    repeated = days_per_week > len(base)
     return [
         {
-            "code": f"{code}_{cycle}" if repetitions > 1 else code,
-            "title": f"{title} {cycle}" if repetitions > 1 else title,
+            "code": f"{code}_{cycle}" if repeated else code,
+            "title": f"{title} {cycle}" if repeated else title,
             "order": index,
             "focus_guidance": guidance if cycle == 1 else f"{guidance}; use exercícios ou ênfases diferentes da primeira sessão",
             "required_groups": required_groups,
         }
-        for index, (cycle, (code, title, guidance, required_groups)) in enumerate(
-            ((cycle, item) for cycle in range(1, repetitions + 1) for item in base),
-            start=1,
-        )
+        for index in range(1, days_per_week + 1)
+        for cycle, (code, title, guidance, required_groups) in [
+            ((index - 1) // len(base) + 1, base[(index - 1) % len(base)])
+        ]
     ]
 
 
@@ -379,8 +395,10 @@ def normalize_workout_output(data, questionnaire):
                 errors[f"days.{day_index}.exercises.{exercise_index}"] = "Exercício inválido."
                 continue
             catalog_item = resolve_catalog_exercise(exercise.get("catalog_key"), exercise.get("name"))
-            if not catalog_item or catalog_item["key"] in used_keys:
-                errors[f"days.{day_index}.exercises.{exercise_index}"] = "Exercício desconhecido ou repetido."
+            if not catalog_item:
+                errors[f"days.{day_index}.exercises.{exercise_index}"] = "Exercício desconhecido."
+                continue
+            if catalog_item["key"] in used_keys:
                 continue
             if catalog_item["key"] not in allowed_keys:
                 errors[f"days.{day_index}.exercises.{exercise_index}"] = "O exercício exige equipamento indisponível ou não combina com o nível informado."
@@ -391,7 +409,6 @@ def normalize_workout_output(data, questionnaire):
             role = training_role(catalog_item)
             group = catalog_item["substitution_group"]
             if role and training_role_counts.get(role, 0) >= 2:
-                errors[f"days.{day_index}.exercises.{exercise_index}"] = "O treino repetiu a mesma variação biomecânica."
                 continue
             dedicated_chest_day = (
                 questionnaire["split_type"] in {"abcd", "abcde"}
@@ -399,7 +416,6 @@ def normalize_workout_output(data, questionnaire):
             )
             group_limit = 4 if dedicated_chest_day and group == "horizontal_push" and role else 2
             if group_counts.get(group, 0) >= group_limit:
-                errors[f"days.{day_index}.exercises.{exercise_index}"] = "O treino repetiu excessivamente o mesmo padrão de exercício."
                 continue
             try:
                 sets = int(exercise.get("sets"))
@@ -430,6 +446,10 @@ def normalize_workout_output(data, questionnaire):
                 "notes": str(exercise.get("notes", "")).strip()[:500] or None,
                 "order": exercise_index,
             })
+        if len(normalized_exercises) < minimum:
+            errors[f"days.{day_index}.volume"] = (
+                f"Após remover redundâncias, o treino precisa manter ao menos {minimum} exercícios."
+            )
         selected_groups = {item["substitution_group"] for item in (catalog_by_key()[exercise["catalog_key"]] for exercise in normalized_exercises)}
         allowed_groups = allowed_groups_for_day(questionnaire["split_type"], spec["code"])
         if selected_groups - allowed_groups:
@@ -462,11 +482,73 @@ def normalize_workout_output(data, questionnaire):
     }
 
 
+def normalize_manual_workout(data, questionnaire):
+    errors = {}
+    if not isinstance(data, dict) or data.get("type") != "workout_plan":
+        raise PlanValidationError({"plan": "Informe uma estrutura de treino válida."})
+    days = data.get("days")
+    if not isinstance(days, list) or len(days) != questionnaire["days_per_week"]:
+        raise PlanValidationError({"days": "A quantidade de dias deve corresponder à frequência semanal."})
+    normalized_days = []
+    for day_index, day in enumerate(days, start=1):
+        exercises = day.get("exercises") if isinstance(day, dict) else None
+        if not isinstance(exercises, list) or not 1 <= len(exercises) <= 12:
+            errors[f"days.{day_index}"] = "Adicione entre 1 e 12 exercícios neste dia."
+            continue
+        normalized_exercises = []
+        used_keys = set()
+        for exercise_index, exercise in enumerate(exercises, start=1):
+            item = exercise if isinstance(exercise, dict) else {}
+            catalog_item = resolve_catalog_exercise(item.get("catalog_key"), item.get("name"))
+            if not catalog_item or catalog_item["key"] in used_keys:
+                errors[f"days.{day_index}.exercises.{exercise_index}"] = "Exercício inválido ou repetido."
+                continue
+            try:
+                sets = int(item.get("sets"))
+                rest_seconds = int(item.get("rest_seconds", 60))
+            except (TypeError, ValueError):
+                sets = rest_seconds = 0
+            reps = str(item.get("reps", "")).strip()
+            if not 1 <= sets <= 10 or not reps or len(reps) > 30 or not 0 <= rest_seconds <= 600:
+                errors[f"days.{day_index}.exercises.{exercise_index}"] = "Séries, repetições ou descanso inválidos."
+                continue
+            used_keys.add(catalog_item["key"])
+            normalized_exercises.append({
+                "catalog_key": catalog_item["key"],
+                "name": catalog_item["name"],
+                "movement_pattern": catalog_item["movement_pattern"],
+                "primary_muscle": catalog_item["primary_muscle"],
+                "equipment": catalog_item["equipment"],
+                "difficulty": catalog_item["difficulty"],
+                "sets": sets,
+                "reps": reps,
+                "weight": str(item.get("weight", "")).strip()[:50] or None,
+                "rest_seconds": rest_seconds,
+                "effort_guidance": str(item.get("effort_guidance", "")).strip()[:100] or None,
+                "notes": str(item.get("notes", "")).strip()[:500] or None,
+                "order": exercise_index,
+            })
+        normalized_days.append({
+            "code": str(day.get("code") or chr(64 + day_index))[:20],
+            "title": str(day.get("title") or f"Treino {day_index}").strip()[:100],
+            "focus": str(day.get("focus") or "").strip()[:200] or None,
+            "order": day_index,
+            "exercises": normalized_exercises,
+        })
+    if errors:
+        raise PlanValidationError(errors)
+    return {
+        "title": str(data.get("title") or "Plano de treino").strip()[:100],
+        "description": str(data.get("description") or "").strip()[:1000] or None,
+        "days": normalized_days,
+    }
+
+
 def replacement_options(exercise, unavailable_equipment=None, available_equipment=None, limit=3):
     source = resolve_catalog_exercise(exercise.catalog_key, exercise.name)
     if not source or not source.get("auto_replaceable", False):
         return []
-    blocked = set(unavailable_equipment or [source["equipment"]])
+    blocked = set([source["equipment"]] if unavailable_equipment is None else unavailable_equipment)
     available = expand_equipment(available_equipment)
     full_gym = not available or "full_gym" in available
     difficulty_order = {"beginner": 0, "intermediate": 1, "advanced": 2}

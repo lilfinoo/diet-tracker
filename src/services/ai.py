@@ -1,10 +1,12 @@
 import json
 import re
+import time
 
 from flask import current_app
 from google import genai
 from google.genai import types
 
+from src.services.diet_plans import diet_restriction_policy
 from src.services.workout_plans import (
     allowed_groups_for_day,
     catalog_by_key,
@@ -28,6 +30,10 @@ class AITruncatedResponseError(AIResponseError):
 
 class AIQuotaExceededError(AIServiceError):
     """Raised when the configured Gemini model has no remaining request quota."""
+
+
+class AIServiceUnavailableError(AIServiceError):
+    """Raised when Gemini temporarily cannot accept a request."""
 
 
 def _json_object(content: str) -> dict:
@@ -113,10 +119,13 @@ def _completion(
         raise
     except Exception as error:
         error_text = str(error)
-        if getattr(error, "status_code", None) == 429 or getattr(error, "code", None) == 429 or "RESOURCE_EXHAUSTED" in error_text:
+        status_code = getattr(error, "status_code", None) or getattr(error, "code", None)
+        if status_code == 429 or "RESOURCE_EXHAUSTED" in error_text:
             delay_match = re.search(r"retry in\s+(\d+)", error_text, re.IGNORECASE)
             delay = f" em cerca de {delay_match.group(1)} segundos" if delay_match else " mais tarde"
             raise AIQuotaExceededError(f"A cota da IA foi atingida. Tente novamente{delay}.") from error
+        if status_code == 503 or "UNAVAILABLE" in error_text:
+            raise AIServiceUnavailableError("A IA está temporariamente com alta demanda.") from error
         raise AIServiceError("Gemini provider request failed") from error
 
 
@@ -275,39 +284,146 @@ def generate_workout_plan(questionnaire: dict, profile) -> dict:
             },
         },
     }
-    system_instruction = """Você é um treinador experiente e monta programas gerais, coerentes e seguros em português.
-Use somente catalog_key fornecida no catálogo e siga exatamente required_days, focus_guidance e a ordem dos dias.
-Respeite experiência, objetivo, equipamentos, limitações, duração e prioridades do usuário.
+    system_instruction = """Você monta programas individualizados de musculação em português com base em treinamento resistido e anatomia funcional.
+Use SOMENTE catalog_key presente em exercise_catalog. Siga exatamente required_days, focus_guidance, required_groups, allowed_groups e a ordem dos dias. Nunca invente exercício, ID ou equipamento.
 
-REGRAS DE SELEÇÃO:
-- Cada exercício precisa cumprir uma função distinta. Trocar barra por halter ou máquina sem mudar ângulo, padrão ou estímulo não conta como variedade.
-- Quando training_role não for nulo, nunca o repita no mesmo dia. Use no máximo dois exercícios do mesmo group, exceto em um dia específico de peito, que pode ter até quatro exercícios de horizontal_push se todos tiverem training_role diferentes.
-- Em treino de peito, use no máximo uma pressão reta. Depois priorize pressão inclinada e, conforme duração e objetivo, pressão declinada ou adução/isolamento (crucifixo/crossover). Não gere três supinos retos.
-- Em costas, combine puxada vertical e remada antes de adicionar outra variação.
-- Em dias específicos de pernas, combine dominante de joelho, cadeia posterior e ao menos uma flexão de joelho; use extensão de joelho quando contribuir para o objetivo. Não preencha o treino com variações de agachamento.
-- Em ombros, combine desenvolvimento, elevação lateral e trabalho complementar; não repita desenvolvimentos equivalentes.
-- Ordene exercícios compostos e tecnicamente exigentes primeiro, acessórios depois e core/cardio por último.
-- Nos dias repetidos da semana, mantenha a função muscular, mas varie exercício, faixa de repetições ou ênfase quando isso for seguro.
+RACIOCÍNIO SILENCIOSO OBRIGATÓRIO:
+Antes de responder, determine objetivo, experiência, frequência, duração, prioridades, manutenção, volume semanal por músculo, distribuição do volume, padrões necessários, sobreposição entre compostos e isoladores e capacidade de recuperação. Depois selecione o menor conjunto de exercícios capaz de entregar estímulo suficiente. Não exponha esse raciocínio na resposta.
 
-PRESCRIÇÃO:
-- Exatamente por duração: 20–30 min use de 3 a 5 exercícios; 45–60 min use de 4 a 7; 75–90 min use de 6 a 8 exercícios por dia. Nunca fuja desses intervalos.
-- Em cada exercício: sets entre 1 e 6; rest_seconds entre 20 e 300; reps sempre preenchido, curto (no máximo 30 caracteres, ex.: "10–12" ou "8–10 por perna").
-- Use séries, repetições, descanso e esforço coerentes com objetivo e experiência; iniciantes não devem receber volume ou técnicas avançadas excessivas.
-- Escreva em notes uma orientação técnica curta e específica, não frases genéricas.
-Não faça diagnóstico, tratamento, promessa de resultado ou prescrição para dor/lesão."""
-    return _json_object(_completion(
-        system_instruction,
-        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-        current_app.config["GEMINI_PLAN_MAX_TOKENS"],
-        0.25,
-        json_response=True,
-        model=current_app.config["GEMINI_PLAN_MODEL"],
-        json_schema=schema,
-    ))
+VOLUME, FREQUÊNCIA E RECUPERAÇÃO:
+- Para hipertrofia, use aproximadamente 10 séries efetivas semanais por grande grupo como referência inicial, não como obrigação. Iniciantes normalmente precisam de menos; aumente apenas músculos prioritários quando experiência e recuperação permitirem.
+- Conte aproximadamente 1 série para o motor principal e 0,5 para sinergistas relevantes: supinos também treinam tríceps e deltoide anterior; remadas e puxadas também treinam flexores do cotovelo; desenvolvimentos também treinam tríceps.
+- Quando a rotina permitir, distribua grandes grupos em cerca de duas exposições semanais. Frequência serve para distribuir volume e fadiga, não para criar dias desnecessários.
+- Evite alto volume consecutivo para o mesmo músculo e volume direto redundante de braços/deltoide anterior quando compostos já fornecem estímulo suficiente.
+
+SELEÇÃO E COBERTURA:
+- Cada exercício deve acrescentar função, região, comprimento muscular ou estímulo relevante. Trocar barra por halter ou máquina sem mudar o estímulo não conta como variedade.
+- Quando training_role não for nulo, não repita a mesma função no dia. Use no máximo dois exercícios do mesmo group, exceto em dia específico de peito com funções biomecânicas diferentes.
+- Peito: combine pressão horizontal e inclinada; adicione declinado, fly ou crossover apenas quando o volume justificar. Supino declinado é uma opção útil para ênfase esternocostal/inferior, não uma obrigação. Não empilhe variações equivalentes de supino.
+- Costas: cubra puxada vertical e remada horizontal; considere extensão do ombro/dorsal e deltoide posterior quando o catálogo e o volume permitirem. Não use várias remadas equivalentes.
+- Ombros: considere anterior, lateral e posterior. Supinos já contam para anterior; normalmente priorize trabalho específico lateral/posterior em vez de elevação frontal redundante.
+- Tríceps: pressões já contam indiretamente; quando houver volume direto suficiente, combine extensão junto ao corpo e acima da cabeça para a cabeça longa.
+- Bíceps: puxadas contam indiretamente; poucas variações complementares são suficientes, podendo combinar flexão tradicional e pegada neutra.
+- Quadríceps: combine dominante de joelho e, quando útil, extensão isolada. Posteriores: inclua flexão de joelho e hinge; agachamento não substitui esses dois padrões.
+- Glúteos: distribua agachar/afundar, extensão de quadril e hinge conforme prioridade. Panturrilhas prioritárias podem alternar joelho estendido e flexionado.
+- Core: use volume moderado entre flexão, anti-extensão/estabilidade e controle lateral/rotacional; não prescreva dezenas de repetições diárias.
+
+ESFORÇO, REPETIÇÕES E DESCANSO:
+- Hipertrofia: em geral 1–3 RIR; 0–1 RIR apenas ocasionalmente em isoladores seguros para experientes. Iniciantes ficam mais longe da falha enquanto aprendem técnica.
+- Compostos: normalmente 5–12 repetições e 120–240 s de descanso. Máquinas/intermediários: 6–15 e 90–180 s. Isoladores: 8–20, ocasionalmente 15–30, e 60–120 s.
+- Força: movimento prioritário cedo, geralmente 1–6 repetições e 120–300 s; acessórios preservam hipertrofia e equilíbrio. Não transforme todo o treino em séries pesadas.
+- Perda de gordura mantém estrutura de hipertrofia, carga e progressão; não transforme musculação em cardio. Condicionamento/resistência pode usar repetições maiores sem sacrificar técnica.
+- Priorize amplitude completa e confortável. Não reduza amplitude para aumentar carga.
+
+ORDEM, TEMPO E PROGRESSÃO:
+- Coloque primeiro o músculo ou movimento prioritário, depois compostos importantes, complementares e isoladores. Um exercício prioritário pode vir antes do maior composto.
+- Respeite rigorosamente programming_constraints: 20–30 min = 3–5 exercícios; 45–60 = 4–7; 75–90 = 6–8. Não gere sessões inviáveis.
+- Prescreva progressão dupla nas orientações: manter carga até alcançar o topo da faixa em todas as séries no RIR indicado, então aumentar moderadamente e retornar à parte baixa da faixa.
+- Em cada exercício: sets de 1 a 6; rest_seconds de 20 a 300; reps curto, específico e com no máximo 30 caracteres; effort_guidance deve informar RIR; notes deve trazer orientação técnica útil e curta.
+
+NÍVEL E SEGURANÇA:
+- Iniciante: poucos movimentos estáveis, volume moderado, técnica e progressão simples; sem técnicas avançadas, falha constante ou complexidade de fisiculturista.
+- Intermediário: aumente gradualmente especificidade, volume e variedade útil. Avançado: refine prioridade, fadiga, comprimentos musculares e especialização sem confundir complexidade com qualidade.
+- Respeite equipamentos, exercícios evitados e limitações. Não diagnostique nem trate lesão. Evite movimentos declaradamente problemáticos e oriente avaliação profissional para dor relevante ou persistente.
+
+AUDITORIA SILENCIOSA FINAL:
+Confirme objetivo, volume direto e indireto, frequência, cobertura regional, redundância, recuperação, prioridades, nível, duração, equipamentos e limitações. Corrija qualquer falha antes de retornar somente o JSON do schema."""
+    contents = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    primary_model = current_app.config["GEMINI_WORKOUT_MODEL"]
+    fallback_model = current_app.config["GEMINI_WORKOUT_FALLBACK_MODEL"]
+    try:
+        response = _completion(
+            system_instruction,
+            contents,
+            current_app.config["GEMINI_PLAN_MAX_TOKENS"],
+            0.25,
+            json_response=True,
+            model=primary_model,
+            json_schema=schema,
+        )
+    except AIServiceUnavailableError:
+        if not fallback_model or fallback_model == primary_model:
+            raise
+        current_app.logger.warning(
+            "Workout model %s unavailable; trying fallback %s",
+            primary_model,
+            fallback_model,
+        )
+        response = _completion(
+            system_instruction,
+            contents,
+            current_app.config["GEMINI_PLAN_MAX_TOKENS"],
+            0.2,
+            json_response=True,
+            model=fallback_model,
+            json_schema=schema,
+        )
+    return _json_object(response)
 
 
-def generate_diet_plan(questionnaire: dict, profile) -> dict:
-    payload = {"questionnaire": questionnaire, "profile": _profile_context(profile)}
+def _diet_meal_schema(include_optional=True):
+    properties = {
+        "meal_type": {"type": "string"},
+        "items": {"type": "array", "items": {"type": "string"}},
+        "calories": {"type": "number"},
+        "protein": {"type": "number"},
+        "carbs": {"type": "number"},
+        "fat": {"type": "number"},
+    }
+    if include_optional:
+        properties.update({
+            "prep": {"type": "string"},
+            "prep_minutes": {"type": "integer"},
+            "notes": {"type": "string"},
+            "substitutions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["replace", "alternatives"],
+                    "properties": {
+                        "replace": {"type": "string"},
+                        "alternatives": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            },
+        })
+    return {
+        "type": "object",
+        "required": ["meal_type", "items", "calories", "protein", "carbs", "fat"],
+        "properties": properties,
+    }
+
+
+def _generate_diet_json(system_instruction, payload, schema):
+    attempts = max(1, current_app.config["GEMINI_DIET_RETRY_ATTEMPTS"])
+    for attempt in range(1, attempts + 1):
+        try:
+            return _json_object(_completion(
+                system_instruction,
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                current_app.config["GEMINI_DIET_PLAN_MAX_TOKENS"],
+                0.2,
+                json_response=True,
+                model=current_app.config["GEMINI_DIET_PLAN_MODEL"],
+                json_schema=schema,
+            ))
+        except AIServiceUnavailableError:
+            if attempt == attempts:
+                raise
+            delay = 2 ** (attempt - 1)
+            current_app.logger.warning("Diet generation unavailable; retrying in %ss (%s/%s)", delay, attempt, attempts)
+            time.sleep(delay)
+
+
+def generate_diet_plan(questionnaire: dict, profile, nutrition_targets: dict, correction=None) -> dict:
+    payload = {
+        "questionnaire": questionnaire,
+        "profile": _profile_context(profile),
+        "nutritionTargets": nutrition_targets,
+        "restrictionPolicy": diet_restriction_policy(questionnaire),
+    }
+    if correction:
+        payload["correction"] = correction
     schema = {
         "type": "object",
         "required": ["type", "title", "description", "days"],
@@ -320,115 +436,47 @@ def generate_diet_plan(questionnaire: dict, profile) -> dict:
                 "items": {
                     "type": "object",
                     "required": ["meals"],
-                    "properties": {
-                        "meals": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "required": ["meal_type", "items", "prep", "prep_minutes", "calories", "protein", "carbs", "fat"],
-                                "properties": {
-                                    "meal_type": {"type": "string"},
-                                    "items": {"type": "array", "items": {"type": "string"}},
-                                    "prep": {"type": "string"},
-                                    "prep_minutes": {"type": "integer"},
-                                    "calories": {"type": "number"},
-                                    "protein": {"type": "number"},
-                                    "carbs": {"type": "number"},
-                                    "fat": {"type": "number"},
-                                    "notes": {"type": "string"},
-                                    "substitutions": {
-                                        "type": "array",
-                                        "items": {
-                                            "type": "object",
-                                            "required": ["replace", "alternatives"],
-                                            "properties": {
-                                                "replace": {"type": "string"},
-                                                "alternatives": {"type": "array", "items": {"type": "string"}},
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
+                    "properties": {"meals": {"type": "array", "items": _diet_meal_schema(False)}},
                 },
             },
         },
     }
-    system_instruction = """Você cria planos alimentares gerais e educativos em português.
+    system_instruction = """Você monta planos alimentares gerais e educativos em português a partir de metas calculadas pelo sistema.
 Gere exatamente 3 dias rotativos e exatamente a quantidade de refeições solicitada em cada dia.
 Respeite alergias, intolerâncias, padrão alimentar, orçamento, preferências e tempo de preparo.
-Quando o usuário informar ingredientes disponíveis (available_ingredients), monte o plano usando principalmente esses ingredientes.
-Use porções claras, macros como estimativas e no máximo duas substituições curtas por refeição.
-Não prescreva tratamento, suplementos, dietas extremas ou resultados garantidos."""
-    return _json_object(_completion(
-        system_instruction,
-        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-        current_app.config["GEMINI_PLAN_MAX_TOKENS"],
-        0.2,
-        json_response=True,
-        model=current_app.config["GEMINI_PLAN_MODEL"],
-        json_schema=schema,
-    ))
+Use porções claras, alimentos realistas e os macros solicitados. Some calorias, proteína, carboidratos e gordura de cada dia antes de responder. Os valores de nutritionTargets são restrições do sistema.
+Nunca use itens de restrictionPolicy.prohibited. Produtos explicitamente sem lactose e alternativas vegetais são permitidos.
+Evite restrictionPolicy.avoid_when_possible, mas eles são preferências, não alergias. Retorne somente campos do schema.
+Se correction existir, use correction.previous_plan como rascunho, corrija todos os validation_errors e mantenha cada total dentro de correction.allowed_daily_ranges."""
+    return _generate_diet_json(system_instruction, payload, schema)
 
 
-def generate_diet_day(questionnaire: dict, profile, existing_meals: list, feedback: str) -> dict:
+def generate_diet_day(questionnaire: dict, profile, existing_meals: list, feedback: str, nutrition_targets: dict, correction=None) -> dict:
     payload = {
         "questionnaire": questionnaire,
         "profile": _profile_context(profile),
         "existing_meals": existing_meals,
         "requested_change": feedback,
+        "nutritionTargets": nutrition_targets,
+        "restrictionPolicy": diet_restriction_policy(questionnaire),
     }
+    if correction:
+        payload["correction"] = correction
     schema = {
         "type": "object",
         "required": ["type", "meals"],
         "properties": {
             "type": {"type": "string", "enum": ["diet_plan_day"]},
-            "meals": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "required": ["meal_type", "items", "prep", "prep_minutes", "calories", "protein", "carbs", "fat"],
-                    "properties": {
-                        "meal_type": {"type": "string"},
-                        "items": {"type": "array", "items": {"type": "string"}},
-                        "prep": {"type": "string"},
-                        "prep_minutes": {"type": "integer"},
-                        "calories": {"type": "number"},
-                        "protein": {"type": "number"},
-                        "carbs": {"type": "number"},
-                        "fat": {"type": "number"},
-                        "notes": {"type": "string"},
-                        "substitutions": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "required": ["replace", "alternatives"],
-                                "properties": {
-                                    "replace": {"type": "string"},
-                                    "alternatives": {"type": "array", "items": {"type": "string"}},
-                                },
-                            },
-                        },
-                    },
-                },
-            },
+            "meals": {"type": "array", "items": _diet_meal_schema()},
         },
     }
     system_instruction = """Você ajusta o cardápio de UM dia de um plano alimentar em português.
-    Reescreva exatamente a quantidade de refeições informada no questionnaire, incorporando somente o pedido do usuário (requested_change) e mantendo os demais dias intactos.
-    Respeite alergias, intolerâncias, padrão alimentar, orçamento, equipamentos e tempo de preparo existentes.
-    Use porções claras, macros como estimativas e no máximo duas substituições curtas por refeição.
-    Não prescreva tratamento, suplementos, dietas extremas ou resultados garantidos."""
-    return _json_object(_completion(
-        system_instruction,
-        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-        current_app.config["GEMINI_PLAN_MAX_TOKENS"],
-        0.35,
-        json_response=True,
-        model=current_app.config["GEMINI_STRUCTURED_MODEL"],
-        json_schema=schema,
-    ))
+Reescreva exatamente a quantidade de refeições informada no questionnaire, incorporando o pedido e mantendo os demais dias intactos.
+Os valores de nutritionTargets são restrições do sistema, não sugestões. NÃO recalcule calorias ou macronutrientes.
+Use porções claras e estime calorias e macros de cada refeição. Respeite restrições, preferências e tempo de preparo.
+As estimativas não precisam ser milimétricas, mas o total diário deve ficar próximo das metas.
+Se correction existir, corrija exatamente as diferenças informadas. Não prescreva tratamento, suplementos ou dietas extremas."""
+    return _generate_diet_json(system_instruction, payload, schema)
 
 
 def classify_exercise_catalog_key(exercise_name: str) -> str | None:

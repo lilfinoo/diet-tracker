@@ -2,7 +2,7 @@ import os
 
 import click
 from dotenv import load_dotenv
-from flask import Flask, abort, send_from_directory
+from flask import Flask, abort, request, send_from_directory, session
 from flask_cors import CORS
 from flask_migrate import Migrate
 from sqlalchemy import text
@@ -13,6 +13,7 @@ from src.config import Config, ProductionConfig
 from src.models.user import db
 from src.models.user import User
 from src.routes.user_routes import user_bp
+from src.routes.professional_routes import professional_bp
 
 
 def create_app(config_class=Config):
@@ -32,7 +33,26 @@ def create_app(config_class=Config):
 
     db.init_app(app)
     Migrate(app, db)
+
     app.register_blueprint(user_bp, url_prefix="/api")
+    app.register_blueprint(professional_bp, url_prefix="/api")
+
+    admin_page_paths = {
+        "/admin",
+        "/admin/",
+        "/admin.html",
+        f"{app.static_url_path}/admin.html",
+    }
+
+    @app.before_request
+    def protect_admin_page():
+        if request.path not in admin_page_paths:
+            return None
+        user_id = session.get("user_id")
+        user = db.session.get(User, user_id, populate_existing=True) if user_id else None
+        if not user or not user.is_admin:
+            abort(404)
+        return None
 
     @app.cli.command("create-admin")
     @click.argument("username")
@@ -47,6 +67,29 @@ def create_app(config_class=Config):
         user.is_admin = True
         db.session.commit()
         click.echo(f"Administrator ready: {username}")
+
+    @app.cli.command("create-owner")
+    @click.argument("username")
+    @click.password_option()
+    def create_owner(username, password):
+        """Create or update the primary owner without storing credentials in code."""
+        username = username.strip()
+        if not username or len(username) > 80:
+            raise click.ClickException("Username must contain between 1 and 80 characters")
+        if not 8 <= len(password) <= 128:
+            raise click.ClickException("Password must contain between 8 and 128 characters")
+        user = User.query.filter_by(username=username).first()
+        if user is None:
+            user = User(username=username)
+            db.session.add(user)
+        user.set_password(password)
+        user.is_admin = True
+        user.is_premium = True
+        user.is_professional = True
+        user.is_banned = False
+        user.banned_at = None
+        db.session.commit()
+        click.echo(f"Owner ready: {username}")
 
     @app.route("/admin")
     def serve_admin():

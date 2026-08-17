@@ -32,6 +32,38 @@ def test_admin_forbidden_returns_json(client):
     assert "error" in response.get_json()
 
 
+def test_admin_page_requires_an_administrator(app, client):
+    assert _register(client, "regular").status_code == 201
+
+    for path in ("/admin", "/admin/", "/admin.html", f"{app.static_url_path}/admin.html"):
+        assert client.get(path).status_code == 404
+
+    with app.app_context():
+        from src.models.user import User, db
+
+        User.query.filter_by(username="regular").one().is_admin = True
+        db.session.commit()
+
+    assert client.get("/admin").status_code == 200
+
+
+def test_create_owner_grants_all_roles(app):
+    runner = app.test_cli_runner()
+
+    result = runner.invoke(args=["create-owner", "owner", "--password", "owner-password"])
+
+    assert result.exit_code == 0
+    with app.app_context():
+        from src.models.user import User
+
+        owner = User.query.filter_by(username="owner").one()
+        assert owner.check_password("owner-password")
+        assert owner.is_admin is True
+        assert owner.is_premium is True
+        assert owner.is_professional is True
+        assert owner.is_banned is False
+
+
 def test_rate_limit_exceeded_returns_429(client, app):
     app.config["RATE_LIMITS"] = {"register": (3, 60), "login": (100, 60), "ai": (100, 60)}
     responses = [_register(client, f"user{i}", "strong-password") for i in range(4)]
