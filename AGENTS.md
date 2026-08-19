@@ -6,7 +6,7 @@
 - The browser client is plain HTML/CSS/JS in `copilot/`; its API base is `/api` and session-authenticated requests must retain `credentials: 'include'`.
 
 ## Run And Verify
-- Install dependencies with `python -m pip install -r requirements.txt`; do not rely on any committed `venv/` (it was created on Windows).
+- Install dependencies with `python -m pip install -r requirements.txt`; create a fresh virtual environment instead of reusing local artifacts.
 - `DATABASE_URL` falls back to a local SQLite file (`diet_tracker.db`); set it explicitly for real environments. Schema comes from Alembic migrations (`flask db upgrade`), not `db.create_all()`.
 - Run locally with `python main.py` (debug server on port 8081); production runs `gunicorn main:app` per `Procfile` (binds `$PORT`, 1 gthread worker keeping the in-memory rate limiter coherent).
 - Verification: `python3 -m py_compile main.py src/models/user.py src/routes/user_routes.py`, `ruff check .`, and `pytest` (see `tests/` and `.github/workflows/ci.yml`).
@@ -18,4 +18,4 @@
 
 ## Repository Hygiene
 - `venv/` and `__pycache__/` are local environment/cache artifacts. Do not commit or modify them.
-- Deploy (Render): `web` process runs gunicorn bound to `$PORT`; run `flask db upgrade` as the release command before start. Healthcheck: `GET /api/health`.
+- Deploy (Render): the `web` process applies `flask db upgrade` before starting gunicorn bound to `$PORT`. Healthcheck: `GET /api/health`.

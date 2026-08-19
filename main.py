@@ -1,11 +1,13 @@
 import os
+import sqlite3
 
 import click
 from dotenv import load_dotenv
 from flask import Flask, abort, request, send_from_directory, session
 from flask_cors import CORS
 from flask_migrate import Migrate
-from sqlalchemy import text
+from sqlalchemy import event, text
+from sqlalchemy.engine import Engine
 
 load_dotenv()
 
@@ -14,6 +16,14 @@ from src.models.user import db
 from src.models.user import User
 from src.routes.user_routes import user_bp
 from src.routes.professional_routes import professional_bp
+
+
+@event.listens_for(Engine, "connect")
+def enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 
 def create_app(config_class=Config):

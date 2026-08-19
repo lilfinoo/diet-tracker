@@ -24,7 +24,7 @@ class User(db.Model):
     profile = db.relationship("UserProfile", backref="user", uselist=False, cascade="all, delete-orphan")
     chat_messages = db.relationship("ChatMessage", backref="user", lazy=True, cascade="all, delete-orphan")
     
-    # NOVOS RELACIONAMENTOS PARA PLANOS
+    # Relacionamentos de planos
     workout_plans = db.relationship(
         "WorkoutPlan",
         backref="user",
@@ -88,9 +88,9 @@ class UserProfile(db.Model):
     goal = db.Column(db.String(100), nullable=True)  # perder peso, ganhar massa, manter
     activity_level = db.Column(db.String(50), nullable=True)  # sedentario, leve, moderado, intenso
     dietary_restrictions = db.Column(db.Text, nullable=True)
-    # Adicionado peso e altura ao perfil para a IA
     weight = db.Column(db.Float, nullable=True)
     height = db.Column(db.Float, nullable=True)
+    timezone = db.Column(db.String(64), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -105,6 +105,7 @@ class UserProfile(db.Model):
             "dietary_restrictions": self.dietary_restrictions,
             "weight": self.weight,
             "height": self.height,
+            "timezone": self.timezone,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }
@@ -161,7 +162,7 @@ class DietEntry(db.Model):
 class Measurement(db.Model):
     __table_args__ = (db.Index("ix_measurement_user_date", "user_id", "date"),)
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(UUIDType(binary=False), db.ForeignKey('user.id'), nullable=False) # <--- Mude para UUIDType
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey('user.id'), nullable=False)
     date = db.Column(db.Date, nullable=False)
     weight = db.Column(db.Float, nullable=True)
     height = db.Column(db.Float, nullable=True)
@@ -194,7 +195,7 @@ class Measurement(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None
         }
 
-# --- NOVOS MODELOS PARA PLANOS DE TREINO E DIETA ---
+# --- Modelos de planos de treino e dieta ---
 
 class WorkoutPlan(db.Model):
     __table_args__ = (
@@ -203,7 +204,7 @@ class WorkoutPlan(db.Model):
         db.Index("ix_workout_plan_user_created_at", "user_id", "created_at"),
     )
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(UUIDType(binary=False), db.ForeignKey('user.id'), nullable=False) # <--- Mude para UUIDType
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey('user.id'), nullable=False)
     author_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=False)
     published_by_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=True)
     supersedes_plan_id = db.Column(db.Integer, db.ForeignKey("workout_plan.id"), nullable=True)
@@ -359,6 +360,7 @@ class WorkoutSession(db.Model):
             postgresql_where=db.text("completed_at IS NULL"),
             sqlite_where=db.text("completed_at IS NULL"),
         ),
+        db.Index("ix_workout_session_user_completed", "user_id", "completed_at", "id"),
     )
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=False)
@@ -366,6 +368,10 @@ class WorkoutSession(db.Model):
     workout_day_id = db.Column(db.Integer, db.ForeignKey("workout_day.id", ondelete="CASCADE"), nullable=False)
     started_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     completed_at = db.Column(db.DateTime, nullable=True)
+    completed_timezone = db.Column(db.String(64), nullable=True)
+    completed_local_date = db.Column(db.Date, nullable=True)
+    completed_week_start = db.Column(db.Date, nullable=True)
+    pr_processed_version = db.Column(db.Integer, nullable=True)
 
     plan = db.relationship("WorkoutPlan", back_populates="sessions")
     day = db.relationship("WorkoutDay")
@@ -384,6 +390,9 @@ class WorkoutSession(db.Model):
             "workout_day_id": self.workout_day_id,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "completed_timezone": self.completed_timezone,
+            "completed_local_date": self.completed_local_date.isoformat() if self.completed_local_date else None,
+            "completed_week_start": self.completed_week_start.isoformat() if self.completed_week_start else None,
             "overrides": [override.to_dict() for override in self.overrides],
             "completed_exercise_ids": [completion.workout_exercise_id for completion in self.completions],
         }
@@ -447,9 +456,157 @@ class WorkoutSessionExerciseCompletion(db.Model):
         db.ForeignKey("workout_exercise.id", ondelete="CASCADE"),
         nullable=False,
     )
+    exercise_name = db.Column(db.String(100), nullable=True)
+    exercise_catalog_key = db.Column(db.String(80), nullable=True)
     completed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     session = db.relationship("WorkoutSession", back_populates="completions")
     exercise = db.relationship("WorkoutExercise")
+    performed_sets = db.relationship(
+        "WorkoutSetPerformance",
+        back_populates="completion",
+        cascade="all, delete-orphan",
+        order_by="WorkoutSetPerformance.set_order",
+    )
+
+
+class WorkoutSetPerformance(db.Model):
+    __table_args__ = (
+        db.UniqueConstraint("completion_id", "set_order", name="uq_workout_set_completion_order"),
+        db.CheckConstraint("set_order > 0", name="ck_workout_set_order_positive"),
+        db.CheckConstraint("repetitions > 0", name="ck_workout_set_repetitions_positive"),
+        db.CheckConstraint("load_kg IS NULL OR load_kg >= 0", name="ck_workout_set_load_nonnegative"),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    completion_id = db.Column(
+        db.Integer,
+        db.ForeignKey("workout_session_exercise_completion.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    set_order = db.Column(db.Integer, nullable=False)
+    repetitions = db.Column(db.Integer, nullable=False)
+    load_kg = db.Column(db.Numeric(10, 2), nullable=True)
+    is_warmup = db.Column(db.Boolean, default=False, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    completion = db.relationship("WorkoutSessionExerciseCompletion", back_populates="performed_sets")
+
+
+class PersonalRecordEvent(db.Model):
+    __table_args__ = (
+        db.UniqueConstraint(
+            "workout_session_id",
+            "exercise_key",
+            "metric_key",
+            name="uq_pr_event_session_exercise_metric",
+        ),
+        db.Index("ix_pr_event_user_exercise_date", "user_id", "exercise_key", "achieved_at"),
+        db.Index("ix_pr_event_session", "workout_session_id"),
+        db.CheckConstraint(
+            "metric_type IN ('max_load', 'estimated_1rm', 'reps_at_load')",
+            name="ck_pr_event_metric_type",
+        ),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    exercise_key = db.Column(db.String(80), nullable=False)
+    exercise_name = db.Column(db.String(100), nullable=False)
+    workout_session_id = db.Column(
+        db.Integer,
+        db.ForeignKey("workout_session.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    completion_id = db.Column(
+        db.Integer,
+        db.ForeignKey("workout_session_exercise_completion.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    set_id = db.Column(
+        db.Integer,
+        db.ForeignKey("workout_set_performance.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    metric_type = db.Column(db.String(24), nullable=False)
+    metric_key = db.Column(db.String(80), nullable=False)
+    previous_value = db.Column(db.Numeric(14, 4), nullable=True)
+    new_value = db.Column(db.Numeric(14, 4), nullable=False)
+    previous_load_kg = db.Column(db.Numeric(10, 2), nullable=True)
+    previous_repetitions = db.Column(db.Integer, nullable=True)
+    load_kg = db.Column(db.Numeric(10, 2), nullable=False)
+    repetitions = db.Column(db.Integer, nullable=False)
+    formula = db.Column(db.String(20), nullable=True)
+    formula_version = db.Column(db.Integer, nullable=True)
+    is_initial = db.Column(db.Boolean, default=False, nullable=False)
+    is_highlighted = db.Column(db.Boolean, default=False, nullable=False)
+    is_backfilled = db.Column(db.Boolean, default=False, nullable=False)
+    achieved_at = db.Column(db.DateTime, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    session = db.relationship("WorkoutSession")
+    completion = db.relationship("WorkoutSessionExerciseCompletion")
+    performed_set = db.relationship("WorkoutSetPerformance")
+
+
+class WorkoutWeeklyGoal(db.Model):
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "effective_week_start", name="uq_weekly_goal_user_week"),
+        db.CheckConstraint("target_sessions BETWEEN 1 AND 14", name="ck_weekly_goal_target"),
+        db.Index("ix_weekly_goal_user_effective", "user_id", "effective_week_start"),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    target_sessions = db.Column(db.Integer, nullable=False)
+    effective_week_start = db.Column(db.Date, nullable=False)
+    timezone = db.Column(db.String(64), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ExerciseGoal(db.Model):
+    __table_args__ = (
+        db.CheckConstraint("status IN ('active', 'achieved', 'cancelled')", name="ck_exercise_goal_status"),
+        db.CheckConstraint("target_load_kg > 0", name="ck_exercise_goal_target_positive"),
+        db.Index(
+            "uq_exercise_goal_user_active",
+            "user_id",
+            unique=True,
+            postgresql_where=db.text("status = 'active'"),
+            sqlite_where=db.text("status = 'active'"),
+        ),
+    )
+    id = db.Column(UUIDType(binary=False), primary_key=True, default=uuid.uuid4)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    exercise_key = db.Column(db.String(80), nullable=False)
+    exercise_name = db.Column(db.String(100), nullable=False)
+    target_load_kg = db.Column(db.Numeric(10, 2), nullable=False)
+    status = db.Column(db.String(20), default="active", nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    achieved_at = db.Column(db.DateTime, nullable=True)
+    achieved_session_id = db.Column(
+        db.Integer,
+        db.ForeignKey("workout_session.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+
+class AchievementUnlock(db.Model):
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "achievement_code", name="uq_achievement_unlock_user_code"),
+        db.Index("ix_achievement_unlock_user_date", "user_id", "unlocked_at"),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    achievement_code = db.Column(db.String(40), nullable=False)
+    unlocked_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    workout_session_id = db.Column(
+        db.Integer,
+        db.ForeignKey("workout_session.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    exercise_goal_id = db.Column(
+        UUIDType(binary=False),
+        db.ForeignKey("exercise_goal.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    is_backfilled = db.Column(db.Boolean, default=False, nullable=False)
 
 
 class ExerciseMediaReview(db.Model):
@@ -514,7 +671,7 @@ class DietPlan(db.Model):
             "nutrition_targets": (self.generation_context or {}).get("nutrition_targets"),
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "meals_count": len(self.meals) # Exemplo
+            "meals_count": len(self.meals)
         }
 
     def to_dict_full(self):

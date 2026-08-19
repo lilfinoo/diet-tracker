@@ -295,16 +295,13 @@ document.addEventListener('DOMContentLoaded', function() {
             );
         });
 
-        dietDescription.addEventListener("awesomplete-selectcomplete", function(evt) {
+        dietDescription.addEventListener("awesomplete-selectcomplete", function() {
             const selected = alimentosData.find(item => item.descricao === dietDescription.value);
             if (selected) {
                 getElement("dietCalories").value = selected.calorias ?? "";
                 getElement("dietProtein").value = selected.proteina ?? "";
                 getElement("dietCarbs").value = selected.carboidrato ?? "";
                 getElement("dietFat").value = selected.gordura ?? "";
-                // A função updatePrecisionBadge não está definida no seu código,
-                // mas se você a tiver em outro lugar, ela pode ser chamada aqui.
-                // updatePrecisionBadge("manual"); 
             }
         });
     }
@@ -341,11 +338,6 @@ document.addEventListener('DOMContentLoaded', function() {
     addEventListenerSafe("registerForm", "submit", handleRegister);
     addEventListenerSafe("profileForm", "submit", handleProfileSubmit);
 
-    // Chat functionality
-    // O botão de enviar do chat não tem ID no HTML, vamos usar o onclick no HTML
-    // ou dar um ID a ele (ex: sendChatBtn) e usar addEventListenerSafe("sendChatBtn", "click", sendChatMessage);
-    // Por enquanto, o onclick no HTML é suficiente.
-
     // Chat input - Enter key
     const chatInput = getElement("chatInput");
     if (chatInput) {
@@ -371,7 +363,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (event.target === this) closeAuthModal();
     });
     
-    // NOVO: Adiciona eventos para os novos modais de visualização de planos
     setupPlanViewModals();
 
     addEventListenerSafe("dietPhotoBtn", "click", function() {
@@ -431,7 +422,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 getElement("dietProtein").value = data.protein || 0;
                 getElement("dietCarbs").value = data.carbs || 0;
                 getElement("dietFat").value = data.fat || 0;
-                // Badge de precisão (se a função updatePrecisionBadge existir)
                 const badge = getElement('precisionBadge');
                 if (badge) {
                     badge.textContent = data.precision === "alta" ? "Alta precisão"
@@ -604,7 +594,6 @@ function setupModalEvents() {
     });
 }
 
-// NOVO: Configura eventos para os modais de visualização de planos
 function setupPlanViewModals() {
     const viewDietPlanModal = getElement("viewDietPlanModal");
     if (viewDietPlanModal) {
@@ -841,7 +830,6 @@ function renderGuestPresentation(tabName) {
  * @param {string} type - Tipo da mensagem (success, error, info)
  */
 // Chat functions
-let chatHistory = [];
 let isRecording = false;
 let recognition = null;
 let lastAIResponse = '';
@@ -1213,11 +1201,13 @@ async function logout() {
             credentials: "include"
         });
         currentUser = null;
+        window.clearWorkoutProgress?.();
         showMainScreen({ tab: 'diet' });
         showToast("Logout realizado com sucesso", "success");
     } catch (error) {
         console.error("Logout error:", error);
         currentUser = null;
+        window.clearWorkoutProgress?.();
         showMainScreen({ tab: 'diet' });
     }
 }
@@ -1225,6 +1215,10 @@ async function logout() {
 // Interface functions
 // Interface functions
 function showTab(tabName) {
+    if (tabName === 'activities' && !currentUser) {
+        openAuthModal('Entre para acessar seu histórico de atividades.', 'login', { tab: 'activities' });
+        return;
+    }
     if (tabName === 'chat' && !currentUser?.is_premium) {
         if (!currentUser) {
             openAuthModal('Entre para conhecer o Assistente IA. Este é um recurso Premium.', 'register', { tab: 'chat', premium: true });
@@ -1261,8 +1255,8 @@ function showTab(tabName) {
     }
     
     // Add active class to clicked button
-    const navTabName = tabName === 'measurements' ? 'stats' : tabName;
-    const activeBtn = document.querySelector(`[onclick="showTab('${navTabName}')"]`);
+    const navTabName = ['measurements', 'activities'].includes(tabName) ? 'stats' : tabName;
+    const activeBtn = document.querySelector(`.nav-btn[onclick="showTab('${navTabName}')"]`);
     if (activeBtn) {
         activeBtn.classList.add('active');
     }
@@ -1285,6 +1279,9 @@ function showTab(tabName) {
         loadMeasurements();
     } else if (tabName === 'stats') {
         loadStats();
+        window.loadProgressOverview?.();
+    } else if (tabName === 'activities') {
+        window.loadWorkoutActivities?.();
     } else if (tabName === 'diet_plans') { // Carrega planos de dieta
         loadDietPlans();
     } else if (tabName === 'workout_plans') { // Carrega planos de treino
@@ -1569,7 +1566,6 @@ function closeExerciseCredits() {
     closeAppModal(getElement('exerciseCreditsModal'));
 }
 
-// NOVO: Funções para modais de visualização de planos
 function closeViewDietPlanModal() {
     const modal = getElement("viewDietPlanModal");
     closeAppModal(modal);

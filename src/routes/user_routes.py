@@ -1,11 +1,14 @@
 from flask import Blueprint, jsonify, request, session, abort, g, current_app, send_file
 from src.models.user import (
+    AchievementUnlock,
     ChatMessage,
     DietEntry,
     DietPlan,
     DietPlanMeal,
+    ExerciseGoal,
     ExerciseMediaReview,
     Measurement,
+    PersonalRecordEvent,
     ProfessionalStudentRelationship,
     User,
     UserProfile,
@@ -15,6 +18,8 @@ from src.models.user import (
     WorkoutSession,
     WorkoutSessionExerciseCompletion,
     WorkoutSessionExerciseOverride,
+    WorkoutSetPerformance,
+    WorkoutWeeklyGoal,
     db,
 )
 from src.services.ai import (
@@ -39,6 +44,28 @@ from src.services.diet_plans import (
     validate_diet_questionnaire,
 )
 from src.services.rate_limit import rate_limit
+from src.services.achievements import ACHIEVEMENTS, evaluate_achievements, serialize_unlock
+from src.services.personal_records import (
+    current_max_load,
+    ensure_personal_record_history,
+    exercise_progress,
+    process_session_personal_records,
+    serialize_personal_record,
+)
+from src.services.workout_progress import (
+    backfill_session_weeks,
+    complete_exercise_goal,
+    confirmed_user_timezone,
+    create_weekly_goal,
+    current_exercise_goal,
+    serialize_exercise_goal,
+    serialize_weekly_goal,
+    snapshot_session_week,
+    suggested_days_per_week,
+    validate_timezone,
+    week_start_for,
+    weekly_progress,
+)
 from src.services.workoutx import (
     REVIEW_QUEUE,
     REVIEW_SEARCH_QUERIES,
@@ -58,8 +85,11 @@ from src.services.workout_plans import (
     validate_workout_questionnaire,
 )
 import base64
+import math
+import uuid
 
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
@@ -134,7 +164,7 @@ def chat_plan_intent(data, message):
     return None
 
 
-def page_query(query, model, default_limit=100):
+def page_query(query, default_limit=100):
     try:
         limit = min(max(int(request.args.get("limit", default_limit)), 1), 100)
         offset = max(int(request.args.get("offset", 0)), 0)
@@ -246,8 +276,7 @@ def login():
         session["user_id"] = user.id
         session["username"] = user.username
         return jsonify({"message": "Login bem-sucedido", "user": user.to_dict()}), 200
-    else:
-        return jsonify({"error": "Nome de usuário ou senha inválidos"}), 401
+    return jsonify({"error": "Nome de usuário ou senha inválidos"}), 401
 
 @user_bp.route("/logout", methods=["POST"])
 @login_required
@@ -265,7 +294,7 @@ def check_session():
             return jsonify({"logged_in": True, "user": user.to_dict()}), 200
     return jsonify({"logged_in": False}), 200
 
-# --- Rotas de Perfil (Corrigido) ---
+# --- Rotas de Perfil ---
 @user_bp.route("/profile", methods=["GET"])
 @login_required
 def get_profile():
@@ -285,6 +314,7 @@ def update_profile():
         "goal": (100, "Objetivo"),
         "activity_level": (50, "Nível de atividade"),
         "dietary_restrictions": (2000, "Restrições alimentares"),
+        "timezone": (64, "Timezone"),
     })
     age = data.get("age")
     if age is not None and not (0 <= age <= 120):
@@ -295,6 +325,11 @@ def update_profile():
     height = data.get("height")
     if height is not None and not (0 < height <= 300):
         return jsonify({"error": "Altura inválida"}), 400
+    if "timezone" in data and data["timezone"] not in (None, ""):
+        try:
+            data["timezone"] = validate_timezone(data["timezone"])
+        except ValueError:
+            return jsonify({"error": "Timezone inválido"}), 400
 
     profile = UserProfile.query.filter_by(user_id=user.id).first()
     if not profile:
@@ -308,11 +343,14 @@ def update_profile():
     profile.dietary_restrictions = data.get("dietary_restrictions", profile.dietary_restrictions)
     profile.weight = data.get("weight", profile.weight)
     profile.height = data.get("height", profile.height)
+    profile.timezone = data.get("timezone", profile.timezone)
+    if "timezone" in data and profile.timezone:
+        backfill_session_weeks(user.id, profile.timezone)
     
     db.session.commit()
     return jsonify({"message": "Perfil atualizado com sucesso", "profile": profile.to_dict()}), 200
 
-# --- Rotas de Dieta (Corrigido) ---
+# --- Rotas de Dieta ---
 @user_bp.route("/diet", methods=["POST"])
 @login_required
 def add_diet_entry():
@@ -373,7 +411,7 @@ def get_diet_entries():
         except ValueError:
             return jsonify({"error": "Formato de data final inválido"}), 400
             
-    entries, _, _ = page_query(query.order_by(DietEntry.date.desc(), DietEntry.created_at.desc()), DietEntry)
+    entries, _, _ = page_query(query.order_by(DietEntry.date.desc(), DietEntry.created_at.desc()))
     entries = entries.all()
     return jsonify([entry.to_dict() for entry in entries]), 200
 
@@ -469,7 +507,7 @@ def get_exercise_media(catalog_key):
         abort(503, description="A animação do exercício não está disponível agora.")
     return send_file(gif_path, mimetype="image/gif", conditional=True, max_age=31_536_000)
 
-# --- Rotas de Medidas (Corrigido) ---
+# --- Rotas de Medidas ---
 @user_bp.route("/measurements", methods=["POST"])
 @login_required
 def add_measurement():
@@ -523,7 +561,7 @@ def get_measurements():
         except ValueError:
             return jsonify({"error": "Formato de data final inválido"}), 400
             
-    measurements, _, _ = page_query(query.order_by(Measurement.date.desc(), Measurement.created_at.desc()), Measurement)
+    measurements, _, _ = page_query(query.order_by(Measurement.date.desc(), Measurement.created_at.desc()))
     measurements = measurements.all()
     return jsonify([m.to_dict() for m in measurements]), 200
 
@@ -564,7 +602,7 @@ def delete_measurement(measurement_id):
     db.session.commit()
     return jsonify({"message": "Medida excluída"}), 200
 
-# --- Rotas de Estatísticas (Corrigido) ---
+# --- Rotas de Estatísticas ---
 @user_bp.route("/stats", methods=["GET"])
 @login_required
 def get_stats():
@@ -581,7 +619,7 @@ def get_stats():
         "recent_diet_entries": recent_diet_entries
     }), 200
 
-# --- Rotas de Chat (Corrigido) ---
+# --- Rotas de Chat ---
 @user_bp.route("/chat", methods=["POST"])
 @rate_limit("ai", 8, 60)
 @premium_required
@@ -629,11 +667,11 @@ def chat():
 @premium_required
 def chat_history():
     user = g.user
-    messages, _, _ = page_query(ChatMessage.query.filter_by(user_id=user.id).order_by(ChatMessage.created_at.asc()), ChatMessage)
+    messages, _, _ = page_query(ChatMessage.query.filter_by(user_id=user.id).order_by(ChatMessage.created_at.asc()))
     messages = messages.all()
     return jsonify([msg.to_dict() for msg in messages]), 200
 
-# --- Rotas de Planos (Corrigido) ---
+# --- Rotas de Planos ---
 @user_bp.route("/diet_plans/generate", methods=["POST"])
 @rate_limit("ai", 8, 60)
 @premium_required
@@ -821,7 +859,6 @@ def get_diet_plans():
         DietPlan.query.filter_by(user_id=user.id, status="published")
         .options(selectinload(DietPlan.meals))
         .order_by(DietPlan.created_at.desc()),
-        DietPlan,
     )
     plans = plans.all()
     return jsonify([plan.to_dict() for plan in plans]), 200
@@ -1006,7 +1043,6 @@ def get_workout_plans():
         WorkoutPlan.query.filter_by(user_id=user.id, status="published")
         .options(selectinload(WorkoutPlan.days), selectinload(WorkoutPlan.exercises))
         .order_by(WorkoutPlan.created_at.desc()),
-        WorkoutPlan,
     )
     plans = plans.all()
     return jsonify([plan.to_dict() for plan in plans]), 200
@@ -1025,7 +1061,7 @@ def get_workout_plan_details(plan_id):
 def _editable_workout_plan(plan_id):
     plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=g.user.id, status="published").options(
         selectinload(WorkoutPlan.days).selectinload(WorkoutDay.exercises),
-    ).first_or_404()
+    ).with_for_update().first_or_404()
     active_session = WorkoutSession.query.filter_by(
         user_id=g.user.id,
         workout_plan_id=plan.id,
@@ -1192,7 +1228,7 @@ def add_plan_exercise(plan_id, day_id):
         workout_plan_id=plan.id,
         workout_day_id=day.id,
         name=catalog_item["name"] if catalog_item else custom_name,
-        catalog_key=catalog_item["key"] if catalog_item else None,
+        catalog_key=catalog_item["key"] if catalog_item else f"custom:{uuid.uuid4()}",
         movement_pattern=catalog_item["movement_pattern"] if catalog_item else "custom",
         primary_muscle=catalog_item["primary_muscle"] if catalog_item else None,
         equipment=catalog_item["equipment"] if catalog_item else None,
@@ -1232,6 +1268,10 @@ def delete_workout_plan(plan_id):
     plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=user.id, status="published").with_for_update().first_or_404()
     if WorkoutSession.query.filter_by(workout_plan_id=plan.id, user_id=user.id, completed_at=None).first():
         return jsonify({"error": "Finalize o treino em andamento antes de excluir este plano."}), 409
+    if WorkoutSession.query.filter_by(workout_plan_id=plan.id, user_id=user.id).first():
+        plan.status = "archived"
+        db.session.commit()
+        return jsonify({"message": "Plano removido. O histórico de atividades foi preservado."}), 200
     db.session.delete(plan)
     db.session.commit()
     return jsonify({"message": "Plano de treino excluído com sucesso"}), 200
@@ -1251,6 +1291,149 @@ def _session_exercise(session, exercise_id):
         workout_plan_id=session.workout_plan_id,
         workout_day_id=session.workout_day_id,
     ).first()
+
+
+def _performed_sets_payload(data):
+    if data is None:
+        return []
+    if not isinstance(data, dict):
+        abort(400, description="Corpo JSON inválido")
+    raw_sets = data.get("sets", [])
+    if not isinstance(raw_sets, list) or len(raw_sets) > 20:
+        abort(400, description="Séries executadas inválidas")
+
+    performed_sets = []
+    for index, raw_set in enumerate(raw_sets, start=1):
+        if not isinstance(raw_set, dict):
+            abort(400, description="Série executada inválida")
+        try:
+            raw_repetitions = raw_set.get("repetitions")
+            numeric_repetitions = float(raw_repetitions)
+            if isinstance(raw_repetitions, bool) or not numeric_repetitions.is_integer():
+                raise ValueError
+            repetitions = int(numeric_repetitions)
+            raw_load = raw_set.get("load_kg")
+            if isinstance(raw_load, bool):
+                raise ValueError
+            load_kg = None if raw_load in (None, "") else float(raw_load)
+        except (TypeError, ValueError):
+            abort(400, description="Carga ou repetições inválidas")
+        if repetitions < 1 or repetitions > 1000:
+            abort(400, description="Repetições devem estar entre 1 e 1000")
+        if load_kg is not None and (not math.isfinite(load_kg) or load_kg < 0 or load_kg > 100000):
+            abort(400, description="Carga deve estar entre 0 e 100000 kg")
+        is_warmup = raw_set.get("is_warmup", False)
+        if not isinstance(is_warmup, bool):
+            abort(400, description="Tipo de série inválido")
+        performed_sets.append({
+            "set_order": index,
+            "repetitions": repetitions,
+            "load_kg": load_kg,
+            "is_warmup": is_warmup,
+        })
+    return performed_sets
+
+
+def _workout_session_summary(session_record):
+    overrides = {override.workout_exercise_id: override for override in session_record.overrides}
+    exercises = []
+    total_sets = 0
+    volume_total = 0.0
+    has_performed_sets = False
+    all_sets_have_load = True
+    record_events = PersonalRecordEvent.query.filter_by(
+        workout_session_id=session_record.id,
+    ).order_by(PersonalRecordEvent.id).all()
+    records_by_set = {}
+    records_by_completion = {}
+    for event in record_events:
+        records_by_set.setdefault(event.set_id, []).append(event)
+        records_by_completion.setdefault(event.completion_id, []).append(event)
+
+    for completion in session_record.completions:
+        override = overrides.get(completion.workout_exercise_id)
+        exercise = completion.exercise
+        performed_sets = [
+            {
+                "set_order": item.set_order,
+                "repetitions": item.repetitions,
+                "load_kg": float(item.load_kg) if item.load_kg is not None else None,
+                "is_warmup": item.is_warmup,
+                "personal_records": [
+                    serialize_personal_record(event)
+                    for event in records_by_set.get(item.id, [])
+                    if event.is_highlighted and not event.is_initial
+                ],
+            }
+            for item in completion.performed_sets
+        ]
+        total_sets += len(performed_sets)
+        if performed_sets:
+            has_performed_sets = True
+        if performed_sets and all(item["load_kg"] is not None for item in performed_sets):
+            volume_total += sum(item["load_kg"] * item["repetitions"] for item in performed_sets)
+        elif performed_sets:
+            all_sets_have_load = False
+
+        effective_sets = [item for item in performed_sets if not item["is_warmup"]]
+        best_set_item = max(
+            effective_sets,
+            key=lambda item: (
+                item["load_kg"] if item["load_kg"] is not None else -1,
+                item["repetitions"],
+            ),
+            default=None,
+        )
+        best_set = ({
+            "set_order": best_set_item["set_order"],
+            "repetitions": best_set_item["repetitions"],
+            "load_kg": best_set_item["load_kg"],
+        } if best_set_item else None)
+        exercises.append({
+            "exercise_id": completion.workout_exercise_id,
+            "name": completion.exercise_name or (override.name if override else exercise.name),
+            "catalog_key": completion.exercise_catalog_key or (
+                override.catalog_key if override else exercise.catalog_key
+            ),
+            "sets_performed": len(performed_sets),
+            "sets": performed_sets,
+            "best_set": best_set,
+            "personal_records": [
+                serialize_personal_record(event)
+                for event in records_by_completion.get(completion.id, [])
+                if event.is_highlighted and not event.is_initial
+            ],
+        })
+
+    completed_at = session_record.completed_at or datetime.utcnow()
+    duration_seconds = max(0, int((completed_at - session_record.started_at).total_seconds()))
+    total_exercises = WorkoutExercise.query.filter_by(
+        workout_plan_id=session_record.workout_plan_id,
+        workout_day_id=session_record.workout_day_id,
+    ).count()
+    return {
+        "id": session_record.id,
+        "session_id": session_record.id,
+        "user_id": str(session_record.user_id),
+        "workout_name": session_record.day.title or session_record.plan.title,
+        "plan_name": session_record.plan.title,
+        "started_at": session_record.started_at.isoformat(),
+        "completed_at": session_record.completed_at.isoformat() if session_record.completed_at else None,
+        "duration_seconds": duration_seconds,
+        "exercises_performed": len(exercises),
+        "total_exercises": total_exercises,
+        "sets_performed": total_sets,
+        "volume_total_kg": round(volume_total, 2) if has_performed_sets and all_sets_have_load else None,
+        "workout_plan_id": session_record.workout_plan_id,
+        "workout_day_id": session_record.workout_day_id,
+        "privacy": "private",
+        "personal_records": [
+            serialize_personal_record(event)
+            for event in record_events
+            if event.is_highlighted and not event.is_initial
+        ],
+        "exercises": exercises,
+    }
 
 
 @user_bp.route("/workout_sessions/active", methods=["GET"])
@@ -1428,16 +1611,25 @@ def complete_session_exercise(session_id, exercise_id):
     exercise = _session_exercise(session_record, exercise_id) if session_record else None
     if not session_record or not exercise:
         return jsonify({"error": "Sessão ou exercício não encontrado."}), 404
+    performed_sets = _performed_sets_payload(request.get_json(silent=True))
     completion = WorkoutSessionExerciseCompletion.query.filter_by(
         workout_session_id=session_record.id,
         workout_exercise_id=exercise.id,
     ).first()
     if not completion:
+        override = WorkoutSessionExerciseOverride.query.filter_by(
+            workout_session_id=session_record.id,
+            workout_exercise_id=exercise.id,
+        ).first()
         completion = WorkoutSessionExerciseCompletion(
             workout_session_id=session_record.id,
             workout_exercise_id=exercise.id,
+            exercise_name=override.name if override else exercise.name,
+            exercise_catalog_key=override.catalog_key if override else exercise.catalog_key,
         )
         db.session.add(completion)
+        for performed_set in performed_sets:
+            completion.performed_sets.append(WorkoutSetPerformance(**performed_set))
         try:
             db.session.commit()
         except IntegrityError:
@@ -1452,14 +1644,316 @@ def complete_session_exercise(session_id, exercise_id):
 @user_bp.route("/workout_sessions/<int:session_id>/finish", methods=["POST"])
 @login_required
 def finish_workout_session(session_id):
-    session_record = _owned_active_session(session_id)
+    session_record = WorkoutSession.query.filter_by(
+        id=session_id,
+        user_id=g.user.id,
+    ).with_for_update().first()
     if not session_record:
         return jsonify({"error": "Sessão de treino não encontrada."}), 404
-    session_record.completed_at = datetime.utcnow()
+    User.query.filter_by(id=g.user.id).with_for_update().first()
+    new_unlocks = []
+    reached_goal = None
+    if session_record.completed_at is None:
+        ensure_personal_record_history(g.user.id, exclude_session_id=session_record.id)
+        evaluate_achievements(g.user.id, backfilled=True)
+        session_record.completed_at = datetime.utcnow()
+        timezone_name = confirmed_user_timezone(g.user.id)
+        if timezone_name:
+            snapshot_session_week(session_record, timezone=timezone_name)
+        process_session_personal_records(session_record)
+        reached_goal = complete_exercise_goal(session_record)
+        db.session.flush()
+        new_unlocks = evaluate_achievements(g.user.id, related_session=session_record)
+    else:
+        ensure_personal_record_history(g.user.id)
+        timezone_name = confirmed_user_timezone(g.user.id)
+        if timezone_name:
+            snapshot_session_week(session_record, timezone=timezone_name)
+        evaluate_achievements(g.user.id, backfilled=True)
+    progress = weekly_progress(g.user.id)
     db.session.commit()
-    return jsonify({"message": "Treino finalizado.", "session": session_record.to_dict()}), 200
+    return jsonify({
+        "message": "Treino finalizado.",
+        "session": session_record.to_dict(),
+        "summary": _workout_session_summary(session_record),
+        "weekly_progress": progress,
+        "exercise_goals_reached": [serialize_exercise_goal(reached_goal)] if reached_goal else [],
+        "achievements_unlocked": [serialize_unlock(item) for item in new_unlocks],
+    }), 200
 
-# --- Rotas de Admin (Corrigido) ---
+
+def _ensure_user_workout_history(user_id):
+    User.query.filter_by(id=user_id).with_for_update().first()
+    ensure_personal_record_history(user_id)
+    timezone_name = confirmed_user_timezone(user_id)
+    if timezone_name:
+        backfill_session_weeks(user_id, timezone_name)
+    evaluate_achievements(user_id, backfilled=True)
+    db.session.commit()
+
+
+def _activity_list_item(session_record):
+    summary = _workout_session_summary(session_record)
+    return {
+        "id": session_record.id,
+        "workout_name": summary["workout_name"],
+        "plan_name": summary["plan_name"],
+        "started_at": summary["started_at"],
+        "completed_at": summary["completed_at"],
+        "duration_seconds": summary["duration_seconds"],
+        "exercises_performed": summary["exercises_performed"],
+        "total_exercises": summary["total_exercises"],
+        "sets_performed": summary["sets_performed"],
+        "volume_total_kg": summary["volume_total_kg"],
+        "personal_record_count": len(summary["personal_records"]),
+        "privacy": "private",
+    }
+
+
+@user_bp.route("/activities", methods=["GET"])
+@login_required
+def list_activities():
+    _ensure_user_workout_history(g.user.id)
+    try:
+        limit = min(max(int(request.args.get("limit", 20)), 1), 50)
+        offset = max(int(request.args.get("offset", 0)), 0)
+    except ValueError:
+        abort(400, description="Paginação inválida")
+    sessions = (
+        WorkoutSession.query.filter(
+            WorkoutSession.user_id == g.user.id,
+            WorkoutSession.completed_at.isnot(None),
+        )
+        .options(
+            joinedload(WorkoutSession.plan),
+            joinedload(WorkoutSession.day),
+            selectinload(WorkoutSession.overrides),
+            selectinload(WorkoutSession.completions)
+            .joinedload(WorkoutSessionExerciseCompletion.exercise),
+            selectinload(WorkoutSession.completions)
+            .selectinload(WorkoutSessionExerciseCompletion.performed_sets),
+        )
+        .order_by(WorkoutSession.completed_at.desc(), WorkoutSession.id.desc())
+        .offset(offset)
+        .limit(limit + 1)
+        .all()
+    )
+    return jsonify({
+        "items": [_activity_list_item(item) for item in sessions[:limit]],
+        "limit": limit,
+        "offset": offset,
+        "has_more": len(sessions) > limit,
+    }), 200
+
+
+@user_bp.route("/activities/<int:activity_id>", methods=["GET"])
+@login_required
+def get_activity(activity_id):
+    _ensure_user_workout_history(g.user.id)
+    session_record = (
+        WorkoutSession.query.filter(
+            WorkoutSession.id == activity_id,
+            WorkoutSession.user_id == g.user.id,
+            WorkoutSession.completed_at.isnot(None),
+        )
+        .options(
+            joinedload(WorkoutSession.plan),
+            joinedload(WorkoutSession.day),
+            selectinload(WorkoutSession.overrides),
+            selectinload(WorkoutSession.completions)
+            .joinedload(WorkoutSessionExerciseCompletion.exercise),
+            selectinload(WorkoutSession.completions)
+            .selectinload(WorkoutSessionExerciseCompletion.performed_sets),
+        )
+        .first_or_404()
+    )
+    activity_unlocks = AchievementUnlock.query.filter_by(
+        user_id=g.user.id,
+        workout_session_id=session_record.id,
+    ).order_by(AchievementUnlock.id).all()
+    return jsonify({
+        "activity": _workout_session_summary(session_record),
+        "achievements": [serialize_unlock(item) for item in activity_unlocks],
+    }), 200
+
+
+@user_bp.route("/progress/weekly", methods=["GET", "PUT"])
+@login_required
+def weekly_goal_progress():
+    if request.method == "GET":
+        _ensure_user_workout_history(g.user.id)
+        return jsonify(weekly_progress(g.user.id)), 200
+
+    data = json_body()
+    try:
+        timezone_name = validate_timezone(data.get("timezone"))
+    except ValueError:
+        return jsonify({"error": "Confirme um timezone válido."}), 400
+    profile = UserProfile.query.filter_by(user_id=g.user.id).first()
+    if not profile:
+        profile = UserProfile(user_id=g.user.id)
+        db.session.add(profile)
+    profile.timezone = timezone_name
+    current_week = week_start_for(None, timezone_name)
+    has_goal = WorkoutWeeklyGoal.query.filter_by(user_id=g.user.id).first() is not None
+    effective_week = current_week + timedelta(days=7) if has_goal else current_week
+    try:
+        goal = create_weekly_goal(
+            g.user.id,
+            data.get("target_sessions"),
+            timezone_name,
+            effective_week_start=effective_week,
+        )
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    backfill_session_weeks(g.user.id, timezone_name)
+    db.session.commit()
+    return jsonify({
+        "message": "Meta semanal salva.",
+        "goal": serialize_weekly_goal(goal),
+        "progress": weekly_progress(g.user.id),
+    }), 200
+
+
+@user_bp.route("/progress/exercise-goals", methods=["GET", "POST"])
+@login_required
+def exercise_goals():
+    _ensure_user_workout_history(g.user.id)
+    if request.method == "GET":
+        goals = ExerciseGoal.query.filter_by(user_id=g.user.id).order_by(
+            ExerciseGoal.created_at.desc()
+        ).all()
+        return jsonify({
+            "active": serialize_exercise_goal(current_exercise_goal(g.user.id)),
+            "items": [serialize_exercise_goal(item) for item in goals],
+        }), 200
+
+    if current_exercise_goal(g.user.id):
+        return jsonify({"error": "Conclua ou cancele a meta de exercício atual."}), 409
+    data = json_body()
+    exercise_key = str(data.get("exercise_key", "")).strip()
+    try:
+        target_load = Decimal(str(data.get("target_load_kg"))).quantize(Decimal("0.01"))
+    except (InvalidOperation, TypeError, ValueError):
+        return jsonify({"error": "Carga alvo inválida."}), 400
+    if not target_load.is_finite() or target_load <= 0 or target_load > Decimal("100000"):
+        return jsonify({"error": "Carga alvo inválida."}), 400
+    completion = (
+        WorkoutSessionExerciseCompletion.query.join(WorkoutSession)
+        .filter(
+            WorkoutSession.user_id == g.user.id,
+            WorkoutSession.completed_at.isnot(None),
+            WorkoutSessionExerciseCompletion.exercise_catalog_key == exercise_key,
+        )
+        .order_by(WorkoutSession.completed_at.desc())
+        .first()
+    )
+    catalog_item = catalog_by_key().get(exercise_key)
+    if not completion and not catalog_item:
+        return jsonify({"error": "Exercício sem histórico ou identidade estável."}), 404
+    current_load = current_max_load(g.user.id, exercise_key)
+    if current_load is not None and target_load <= current_load:
+        return jsonify({"error": "A meta deve superar sua maior carga atual."}), 400
+    goal = ExerciseGoal(
+        user_id=g.user.id,
+        exercise_key=exercise_key,
+        exercise_name=(completion.exercise_name if completion else catalog_item["name"]),
+        target_load_kg=target_load,
+    )
+    db.session.add(goal)
+    db.session.commit()
+    return jsonify({"message": "Meta de exercício criada.", "goal": serialize_exercise_goal(goal)}), 201
+
+
+@user_bp.route("/progress/exercise-goals/<uuid:goal_id>", methods=["DELETE"])
+@login_required
+def cancel_exercise_goal(goal_id):
+    goal = ExerciseGoal.query.filter_by(
+        id=goal_id,
+        user_id=g.user.id,
+        status="active",
+    ).with_for_update().first_or_404()
+    if goal.status != "active":
+        return jsonify({"error": "Esta meta não está mais ativa."}), 409
+    goal.status = "cancelled"
+    db.session.commit()
+    return jsonify({"message": "Meta cancelada.", "goal": serialize_exercise_goal(goal)}), 200
+
+
+@user_bp.route("/progress/exercises/<path:exercise_key>", methods=["GET"])
+@login_required
+def get_exercise_progress(exercise_key):
+    _ensure_user_workout_history(g.user.id)
+    records = exercise_progress(g.user.id, exercise_key)
+    if not records:
+        return jsonify({"error": "Histórico do exercício não encontrado."}), 404
+    activities = (
+        WorkoutSession.query.join(WorkoutSessionExerciseCompletion)
+        .filter(
+            WorkoutSession.user_id == g.user.id,
+            WorkoutSession.completed_at.isnot(None),
+            WorkoutSessionExerciseCompletion.exercise_catalog_key == exercise_key,
+        )
+        .order_by(WorkoutSession.completed_at.desc(), WorkoutSession.id.desc())
+        .limit(20)
+        .all()
+    )
+    return jsonify({
+        "exercise_key": exercise_key,
+        "exercise_name": records[-1]["exercise_name"],
+        "max_load_kg": float(current_max_load(g.user.id, exercise_key) or 0),
+        "records": records,
+        "recent_activities": [_activity_list_item(item) for item in activities],
+    }), 200
+
+
+@user_bp.route("/progress/achievements", methods=["GET"])
+@login_required
+def get_achievements():
+    _ensure_user_workout_history(g.user.id)
+    unlocked = {
+        item.achievement_code: serialize_unlock(item)
+        for item in AchievementUnlock.query.filter_by(user_id=g.user.id).all()
+    }
+    return jsonify({
+        "items": [
+            {"code": code, **definition, "unlocked": unlocked.get(code)}
+            for code, definition in ACHIEVEMENTS.items()
+        ]
+    }), 200
+
+
+@user_bp.route("/progress/overview", methods=["GET"])
+@login_required
+def progress_overview():
+    _ensure_user_workout_history(g.user.id)
+    recent_sessions = (
+        WorkoutSession.query.filter(
+            WorkoutSession.user_id == g.user.id,
+            WorkoutSession.completed_at.isnot(None),
+        )
+        .order_by(WorkoutSession.completed_at.desc(), WorkoutSession.id.desc())
+        .limit(5)
+        .all()
+    )
+    recent_records = PersonalRecordEvent.query.filter(
+        PersonalRecordEvent.user_id == g.user.id,
+        PersonalRecordEvent.is_highlighted.is_(True),
+        PersonalRecordEvent.is_initial.is_(False),
+    ).order_by(PersonalRecordEvent.achieved_at.desc(), PersonalRecordEvent.id.desc()).limit(5).all()
+    recent_unlocks = AchievementUnlock.query.filter_by(user_id=g.user.id).order_by(
+        AchievementUnlock.unlocked_at.desc(), AchievementUnlock.id.desc()
+    ).limit(5).all()
+    return jsonify({
+        "weekly": weekly_progress(g.user.id),
+        "exercise_goal": serialize_exercise_goal(current_exercise_goal(g.user.id)),
+        "recent_personal_records": [serialize_personal_record(item) for item in recent_records],
+        "recent_achievements": [serialize_unlock(item) for item in recent_unlocks],
+        "recent_activities": [_activity_list_item(item) for item in recent_sessions],
+        "suggested_weekly_target": suggested_days_per_week(g.user.id),
+    }), 200
+
+# --- Rotas de Admin ---
 @user_bp.route("/admin/dashboard", methods=["GET"])
 @admin_required
 def admin_dashboard():
@@ -1476,7 +1970,7 @@ def admin_dashboard():
 @user_bp.route("/admin/users", methods=["GET"])
 @admin_required
 def list_users():
-    users, _, _ = page_query(User.query.order_by(User.created_at.desc()), User)
+    users, _, _ = page_query(User.query.order_by(User.created_at.desc()))
     users = users.all()
     user_ids = [user.id for user in users]
     if not user_ids:

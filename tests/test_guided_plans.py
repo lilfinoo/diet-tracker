@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from src.models.user import (
@@ -9,6 +10,7 @@ from src.models.user import (
     WorkoutPlan,
     WorkoutSession,
     WorkoutSessionExerciseCompletion,
+    WorkoutSetPerformance,
     db,
 )
 from src.services.diet_plans import (
@@ -478,6 +480,104 @@ def test_guided_workout_creation_and_temporary_replacement(app, client, monkeypa
         assert WorkoutExercise.query.filter_by(id=exercise["id"]).one().name == "Leg press 45°"
 
 
+def test_finished_workout_summary_uses_performed_sets_and_is_idempotent(app, client, monkeypatch):
+    register_premium(app, client)
+    monkeypatch.setattr("src.routes.user_routes.generate_workout_plan", lambda *args: generated_workout())
+    plan = client.post("/api/workout_plans/generate", json=workout_questionnaire()).get_json()["plan"]
+    day = plan["days"][0]
+    exercises = day["exercises"][:2]
+    session = client.post(
+        f"/api/workout_plans/{plan['id']}/days/{day['id']}/sessions"
+    ).get_json()["session"]
+
+    completed = client.post(
+        f"/api/workout_sessions/{session['id']}/exercises/{exercises[0]['id']}/complete",
+        json={"sets": [
+            {"load_kg": 80, "repetitions": 8},
+            {"load_kg": 80, "repetitions": 10},
+            {"load_kg": 75, "repetitions": 12},
+        ]},
+    )
+    assert completed.status_code == 200
+    assert client.post(
+        f"/api/workout_sessions/{session['id']}/exercises/{exercises[1]['id']}/complete",
+        json={"sets": [
+            {"load_kg": 20, "repetitions": 10},
+            {"load_kg": 20, "repetitions": 12},
+        ]},
+    ).status_code == 200
+
+    finished_at = datetime(2026, 8, 18, 12, 0, 0)
+    with app.app_context():
+        session_record = db.session.get(WorkoutSession, session["id"])
+        session_record.started_at = finished_at - timedelta(minutes=58)
+        db.session.commit()
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def utcnow(cls):
+            return finished_at
+
+    monkeypatch.setattr("src.routes.user_routes.datetime", FixedDateTime)
+    finish_response = client.post(f"/api/workout_sessions/{session['id']}/finish")
+    assert finish_response.status_code == 200
+    summary = finish_response.get_json()["summary"]
+    assert summary["workout_name"] == day["title"]
+    assert summary["duration_seconds"] == 58 * 60
+    assert summary["exercises_performed"] == 2
+    assert summary["total_exercises"] == len(day["exercises"])
+    assert [item["exercise_id"] for item in summary["exercises"]] == [
+        exercises[0]["id"],
+        exercises[1]["id"],
+    ]
+    assert all(
+        item["exercise_id"] not in {exercise["id"] for exercise in day["exercises"][2:]}
+        for item in summary["exercises"]
+    )
+    assert summary["sets_performed"] == 5
+    assert summary["volume_total_kg"] == 2780
+    assert summary["personal_records"] == []
+    assert summary["exercises"][0]["best_set"] == {
+        "set_order": 2,
+        "load_kg": 80.0,
+        "repetitions": 10,
+    }
+
+    repeated = client.post(f"/api/workout_sessions/{session['id']}/finish")
+    assert repeated.status_code == 200
+    assert repeated.get_json()["summary"] == summary
+    assert client.get("/api/workout_sessions/active").get_json()["session"] is None
+    with app.app_context():
+        assert WorkoutSession.query.one().completed_at == finished_at
+        assert WorkoutSessionExerciseCompletion.query.count() == 2
+        assert WorkoutSetPerformance.query.count() == 5
+
+    other_client = app.test_client()
+    other_client.post("/api/register", json={"username": "summary-other", "password": "strong-password"})
+    assert other_client.post(f"/api/workout_sessions/{session['id']}/finish").status_code == 404
+
+
+def test_workout_summary_omits_volume_when_a_performed_set_has_no_load(app, client, monkeypatch):
+    register_premium(app, client)
+    monkeypatch.setattr("src.routes.user_routes.generate_workout_plan", lambda *args: generated_workout())
+    plan = client.post("/api/workout_plans/generate", json=workout_questionnaire()).get_json()["plan"]
+    day = plan["days"][0]
+    exercise = day["exercises"][0]
+    session = client.post(
+        f"/api/workout_plans/{plan['id']}/days/{day['id']}/sessions"
+    ).get_json()["session"]
+
+    response = client.post(
+        f"/api/workout_sessions/{session['id']}/exercises/{exercise['id']}/complete",
+        json={"sets": [{"load_kg": None, "repetitions": 12}]},
+    )
+    assert response.status_code == 200
+    summary = client.post(f"/api/workout_sessions/{session['id']}/finish").get_json()["summary"]
+    assert summary["sets_performed"] == 1
+    assert summary["volume_total_kg"] is None
+    assert summary["exercises"][0]["best_set"]["repetitions"] == 12
+
+
 def test_owner_can_add_replace_and_remove_plan_exercises(app, client, monkeypatch):
     register_premium(app, client)
     monkeypatch.setattr("src.routes.user_routes.generate_workout_plan", lambda *args: generated_workout())
@@ -523,7 +623,8 @@ def test_owner_can_add_replace_and_remove_plan_exercises(app, client, monkeypatc
     )
     assert custom.status_code == 201
     assert any(
-        item["name"] == "Movimento personalizado" and item["catalog_key"] is None
+        item["name"] == "Movimento personalizado"
+        and item["catalog_key"].startswith("custom:")
         for item in custom.get_json()["plan"]["days"][0]["exercises"]
     )
 

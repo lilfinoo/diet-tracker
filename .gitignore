@@ -10,3 +10,4 @@ coverage.xml
 htmlcov/
 diet_tracker.db
 instance/
+server.log

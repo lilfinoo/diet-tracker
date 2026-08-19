@@ -1,7 +1,11 @@
 function escapeHtml(value) {
-    const element = document.createElement("span");
-    element.textContent = value ?? "";
-    return element.innerHTML;
+    return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+    })[character]);
 }
 
 function localDateInputValue(date = new Date()) {

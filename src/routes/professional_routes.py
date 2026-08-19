@@ -271,7 +271,7 @@ def list_students():
         professional_user_id=g.user.id,
         status="active",
     ).order_by(ProfessionalStudentRelationship.accepted_at.desc())
-    query, limit, offset = page_query(query, ProfessionalStudentRelationship, default_limit=30)
+    query, limit, offset = page_query(query, default_limit=30)
     relationships = query.all()
     return jsonify({
         "items": [_student_summary(item.student, item) for item in relationships],

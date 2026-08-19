@@ -6,7 +6,7 @@ Planos Premium são criados por questionários guiados. Treinos possuem divisõe
 
 ## Ambiente local
 
-1. Crie um ambiente virtual fora do diretório `venv/` versionado e instale `python -m pip install -r requirements-dev.txt`.
+1. Crie um ambiente virtual e instale `python -m pip install -r requirements-dev.txt`.
 2. Copie `.env.example` para `.env` e defina `SECRET_KEY`. Configure `DATABASE_URL` para PostgreSQL quando necessário.
 3. Aplique o schema com `DATABASE_URL=... python -m flask --app main db upgrade`.
 4. Execute `python main.py`.

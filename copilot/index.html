@@ -347,6 +347,14 @@
                     <div id="measurementTableBody" class="measurement-list" aria-live="polite"></div>
                 </div>
 
+                <div id="activitiesTab" class="tab-content hidden">
+                    <div class="content-header">
+                        <div class="content-heading"><button class="back-button" type="button" onclick="showTab('stats')" aria-label="Voltar ao perfil"><i class="fas fa-arrow-left"></i></button><span class="content-kicker">Seu histórico</span><h2>Atividades</h2><p>Treinos concluídos, séries executadas e progressos reais.</p></div>
+                    </div>
+                    <section id="exerciseProgressPanel" class="exercise-progress-panel hidden" aria-live="polite"></section>
+                    <div id="activitiesList" class="activities-list" aria-live="polite"></div>
+                </div>
+
                 <div id="statsTab" class="tab-content hidden">
                     <section class="profile-hero">
                         <div class="profile-avatar"><span id="profileUserInitial">U</span></div>
@@ -358,7 +366,9 @@
                         <article class="stat-card"><span class="stat-card__icon"><i class="fas fa-bowl-food"></i></span><div><small>Registros totais</small><strong id="totalDietEntries">0</strong></div></article>
                         <article class="stat-card"><span class="stat-card__icon stat-card__icon--blue"><i class="fas fa-chart-line"></i></span><div><small>Últimos 7 dias</small><strong id="recentDietEntries">0</strong></div></article>
                     </div>
+                    <section id="workoutProgressOverview" class="workout-progress-overview" aria-live="polite"></section>
                     <section class="profile-menu" aria-label="Opções do perfil">
+                        <button type="button" onclick="showTab('activities')"><span><i class="fas fa-person-running"></i></span><div><strong>Atividades</strong><small>Treinos, séries e recordes pessoais</small></div><i class="fas fa-chevron-right"></i></button>
                         <button type="button" onclick="showTab('measurements')"><span><i class="fas fa-ruler-combined"></i></span><div><strong>Medidas corporais</strong><small>Histórico de peso e composição</small></div><i class="fas fa-chevron-right"></i></button>
                         <button type="button" onclick="openProfileEditor()"><span><i class="far fa-id-card"></i></span><div><strong>Dados e objetivos</strong><small>Preferências usadas pela IA</small></div><i class="fas fa-chevron-right"></i></button>
                         <button type="button" onclick="openExerciseCredits()"><span><i class="fas fa-image"></i></span><div><strong>Créditos das imagens</strong><small>Autores, fontes e licenças dos exercícios</small></div><i class="fas fa-chevron-right"></i></button>
@@ -722,6 +732,7 @@
     <script src="js/utils.js"></script>
     <script src="script.js"></script>
     <script src="js/plans.js"></script>
+    <script src="js/progress.js"></script>
     <script src="js/professional.js"></script>
 </body>
 </html>

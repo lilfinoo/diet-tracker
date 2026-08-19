@@ -154,6 +154,7 @@
         workout: { step: 0, answers: defaultWorkoutAnswers(), error: "", fieldErrors: {}, generating: false }
     };
     const dietView = { plan: null, selectedDay: 0 };
+    const workoutSharePhotoCache = new Map();
     const workoutView = {
         plan: null,
         days: [],
@@ -162,6 +163,12 @@
         sessionLoading: false,
         sessionError: "",
         pendingAction: "",
+        completedSummary: null,
+        summaryOrigin: "workout",
+        shareOpen: false,
+        shareDraft: null,
+        sharePhotoToken: 0,
+        setDrafts: new Map(),
         replacementPanels: new Map(),
         exerciseCatalog: [],
         addExerciseOpen: false,
@@ -1232,6 +1239,44 @@
         await viewWorkoutPlan(summary.plan.id, summary.day?.id);
     }
 
+    async function openWorkoutActivity(activityId) {
+        showGlobalLoading("Carregando atividade...");
+        try {
+            const result = await apiRequest(`/activities/${apiSegment(activityId)}`);
+            workoutView.session = null;
+            workoutView.completedSummary = {
+                ...result.activity,
+                achievements_unlocked: asArray(result.achievements),
+            };
+            workoutView.summaryOrigin = "activities";
+            workoutView.shareOpen = false;
+            workoutView.shareDraft = null;
+            const title = byId("viewWorkoutPlanTitle");
+            if (title) title.textContent = "Atividade";
+            renderWorkoutDetail();
+            openAppModal(byId("viewWorkoutPlanModal"));
+        } catch (error) {
+            showToast(error.message, "error");
+        } finally {
+            hideGlobalLoading();
+        }
+    }
+
+    async function createExerciseGoalFromSummary(exerciseKey, exerciseName) {
+        const target = window.prompt(`Qual carga total deseja atingir em ${exerciseName}?`, "");
+        if (target == null || String(target).trim() === "") return;
+        try {
+            await apiRequest("/progress/exercise-goals", {
+                method: "POST",
+                body: { exercise_key: exerciseKey, target_load_kg: Number(target) },
+            });
+            showToast("Meta de exercício criada.", "success");
+            window.loadProgressOverview?.();
+        } catch (error) {
+            showToast(error.message, "error");
+        }
+    }
+
     function isCurrentWorkoutSession(sessionId) {
         return String(workoutView.session?.id || "") === String(sessionId || "");
     }
@@ -1336,6 +1381,38 @@
         </section>`;
     }
 
+    function workoutSetRowMarkup(order, values = {}) {
+        return `<div class="workout-set-row"><strong>${esc(order)}</strong><label><span>Carga total em kg</span><input type="number" min="0" max="100000" step="0.01" inputmode="decimal" value="${esc(values.load_kg || "")}" data-workout-set-load aria-label="Carga total da série ${esc(order)} em kg"></label><label><span>Repetições</span><input type="number" min="1" max="1000" step="1" inputmode="numeric" value="${esc(values.repetitions || "")}" data-workout-set-repetitions aria-label="Repetições da série ${esc(order)}"></label><label class="workout-set-warmup"><input type="checkbox" data-workout-set-warmup${values.is_warmup ? " checked" : ""}><span>Aquecimento</span></label></div>`;
+    }
+
+    function captureWorkoutSetDraft(exerciseId) {
+        const rows = Array.from(document.querySelectorAll(".workout-set-row"));
+        if (!exerciseId || !rows.length) return;
+        workoutView.setDrafts.set(String(exerciseId), rows.map((row) => ({
+            load_kg: row.querySelector("[data-workout-set-load]")?.value.trim() || "",
+            repetitions: row.querySelector("[data-workout-set-repetitions]")?.value.trim() || "",
+            is_warmup: Boolean(row.querySelector("[data-workout-set-warmup]")?.checked),
+        })));
+    }
+
+    function performedSetsFromView(exerciseId) {
+        captureWorkoutSetDraft(exerciseId);
+        return asArray(workoutView.setDrafts.get(String(exerciseId))).flatMap((item) => {
+            const loadValue = item.load_kg;
+            const repetitionsValue = item.repetitions;
+            if (!loadValue && !repetitionsValue) return [];
+            const repetitions = Number(repetitionsValue);
+            const load = loadValue === "" ? null : Number(loadValue);
+            if (!Number.isInteger(repetitions) || repetitions < 1 || repetitions > 1000) {
+                throw new Error("Informe repetições válidas para cada série preenchida.");
+            }
+            if (load !== null && (!Number.isFinite(load) || load < 0 || load > 100000)) {
+                throw new Error("Informe uma carga válida para cada série preenchida.");
+            }
+            return [{ repetitions, load_kg: load, is_warmup: Boolean(item.is_warmup) }];
+        });
+    }
+
     function renderActiveWorkout(day) {
         const exercises = asArray(day.exercises);
         const completedIds = completedWorkoutExerciseIds();
@@ -1369,6 +1446,12 @@
             exercise.equipment && `<span><i class="fas fa-dumbbell" aria-hidden="true"></i>${esc(equipmentLabel(exercise.equipment))}</span>`,
             exercise.rest_seconds && `<span><i class="fas fa-hourglass-half" aria-hidden="true"></i>${esc(exercise.rest_seconds)}s de descanso</span>`
         ].filter(Boolean).join("");
+        const plannedSets = Math.min(10, Math.max(1, Number(exercise.sets) || 1));
+        const setDraft = asArray(workoutView.setDrafts.get(String(currentOriginal.id)));
+        const setRows = Array.from(
+            { length: Math.max(plannedSets, setDraft.length) },
+            (_, index) => workoutSetRowMarkup(index + 1, setDraft[index])
+        ).join("");
         const queue = exercises.map((item, index) => {
             const done = completedIds.has(String(item.id));
             const active = String(item.id) === String(currentOriginal.id);
@@ -1392,6 +1475,12 @@
                         ${exercise.weight ? `<p class="current-exercise-note"><i class="fas fa-weight-hanging" aria-hidden="true"></i><span><strong>Carga</strong>${esc(exercise.weight)}</span></p>` : ""}
                         ${exercise.effort_guidance ? `<p class="current-exercise-note"><i class="fas fa-gauge-high" aria-hidden="true"></i><span><strong>Esforço</strong>${esc(exercise.effort_guidance)}</span></p>` : ""}
                         ${exercise.notes ? `<p class="current-exercise-instruction"><i class="fas fa-circle-info" aria-hidden="true"></i>${esc(exercise.notes)}</p>` : ""}
+                        <section class="workout-set-entry" aria-labelledby="workoutSetEntryTitle">
+                            <div class="workout-set-entry__heading"><div><small>Registro real</small><h4 id="workoutSetEntryTitle">Séries executadas</h4></div><button type="button" data-workout-action="add-set"><i class="fas fa-plus" aria-hidden="true"></i> Série</button></div>
+                            <div class="workout-set-entry__labels" aria-hidden="true"><span>Série</span><span>Carga total (kg)</span><span>Repetições</span></div>
+                            <div class="workout-set-entry__rows">${setRows}</div>
+                            <p>Preencha somente as séries realizadas. Deixe a carga vazia para exercícios sem carga externa.</p>
+                        </section>
                         <div class="current-exercise-actions">
                             <button type="button" class="complete-exercise-button" data-workout-action="complete-exercise" data-exercise-id="${esc(currentOriginal.id)}"${workoutView.pendingAction === `complete-${currentOriginal.id}` ? " disabled" : ""}>${workoutView.pendingAction === `complete-${currentOriginal.id}` ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Salvando...' : '<i class="fas fa-check" aria-hidden="true"></i> Exercício concluído'}</button>
                             <button type="button" class="replace-current-exercise-button" data-workout-action="replacement-options" data-exercise-id="${esc(currentOriginal.id)}" aria-expanded="${Boolean(panel)}" aria-controls="replacement-panel-${esc(currentOriginal.id)}"><i class="fas fa-shuffle" aria-hidden="true"></i> Substituir</button>
@@ -1406,11 +1495,303 @@
             </section>`;
     }
 
+    function renderCompletedWorkoutSummary() {
+        const summary = workoutView.completedSummary;
+        if (!summary) return "";
+        const volume = summary.volume_total_kg == null
+            ? ""
+            : `<article><i class="fas fa-weight-hanging" aria-hidden="true"></i><strong>${esc(Number(summary.volume_total_kg).toLocaleString("pt-BR", { maximumFractionDigits: 2 }))} kg</strong><span>volume total</span></article>`;
+        const exerciseList = asArray(summary.exercises).map((exercise) => {
+            const bestSetText = formatWorkoutBestSet(exercise.best_set);
+            const hasRecord = asArray(exercise.personal_records).length > 0;
+            return `<li class="${hasRecord ? "has-personal-record" : ""}"><div><strong>${esc(exercise.name)}${hasRecord ? ' <em><i class="fas fa-trophy" aria-hidden="true"></i> Novo PR</em>' : ""}</strong><span>${esc(exercise.sets_performed)} ${exercise.sets_performed === 1 ? "série realizada" : "séries realizadas"}</span><span class="completed-workout-exercise-links">${exercise.catalog_key ? `<button type="button" data-workout-action="view-exercise-progress" data-exercise-key="${esc(exercise.catalog_key)}">Ver progresso</button><button type="button" data-workout-action="set-exercise-goal" data-exercise-key="${esc(exercise.catalog_key)}" data-exercise-name="${esc(exercise.name)}">Definir meta</button>` : ""}</span></div><b>${esc(bestSetText)}</b></li>`;
+        }).join("");
+        const personalRecords = asArray(summary.personal_records);
+        const recordsBlock = personalRecords.length ? `<section class="workout-result-highlight"><div><i class="fas fa-trophy" aria-hidden="true"></i><span><small>Novo progresso</small><strong>${esc(personalRecords.length)} ${personalRecords.length === 1 ? "novo recorde" : "novos recordes"}</strong></span></div>${personalRecords.map((record) => `<p><b>${esc(record.exercise_name)}</b><span>${esc(formatWorkoutBestSet(record))}</span></p>`).join("")}</section>` : "";
+        const weekly = summary.weekly_progress?.current;
+        const weeklyBlock = weekly?.target ? `<section class="workout-weekly-result"><div><span>Meta semanal</span><strong>${esc(weekly.completed)} / ${esc(weekly.target)} treinos</strong></div><div class="workout-weekly-result__bar" aria-label="${esc(weekly.completed)} de ${esc(weekly.target)} treinos"><i style="width:${Math.min(100, (weekly.completed / weekly.target) * 100)}%"></i></div><p><i class="fas fa-fire" aria-hidden="true"></i> ${esc(weekly.streak)} ${weekly.streak === 1 ? "semana consecutiva" : "semanas consecutivas"}</p></section>` : "";
+        const achievements = asArray(summary.achievements_unlocked);
+        const achievementsBlock = achievements.length ? `<section class="workout-achievements-result"><span>Achievement desbloqueado</span>${achievements.slice(0, 2).map((item) => `<div><i class="fas fa-award" aria-hidden="true"></i><p><strong>${esc(item.title)}</strong><small>${esc(item.description)}</small></p></div>`).join("")}</section>` : "";
+
+        if (workoutView.shareOpen) {
+            return renderWorkoutShareEditor(summary);
+        }
+
+        return `<section class="completed-workout-summary">
+            <header><span><i class="fas fa-check" aria-hidden="true"></i></span><div><small>Treino concluído</small><h3>${esc(summary.workout_name)}</h3><p>${summary.exercises_performed === summary.total_exercises ? "Sessão completa" : `${esc(summary.exercises_performed)} de ${esc(summary.total_exercises)} exercícios concluídos`}</p></div></header>
+            <div class="completed-workout-metrics">
+                <article><i class="fas fa-stopwatch" aria-hidden="true"></i><strong>${esc(formatWorkoutElapsed(summary.duration_seconds))}</strong><span>duração</span></article>
+                <article><i class="fas fa-dumbbell" aria-hidden="true"></i><strong>${esc(summary.exercises_performed)}</strong><span>exercícios</span></article>
+                <article><i class="fas fa-layer-group" aria-hidden="true"></i><strong>${esc(summary.sets_performed)}</strong><span>séries</span></article>
+                ${volume}
+            </div>
+            ${recordsBlock}${weeklyBlock}${achievementsBlock}
+            <button type="button" class="workout-share-button" data-workout-action="open-workout-share"><i class="fas fa-share-nodes" aria-hidden="true"></i><span><strong>${workoutView.summaryOrigin === "activities" ? "Compartilhar atividade" : "Compartilhar treino"}</strong><small>Criar card com foto e exercícios</small></span><i class="fas fa-arrow-right" aria-hidden="true"></i></button>
+            ${workoutView.summaryOrigin === "workout" ? '<button type="button" class="workout-save-button" data-workout-action="save-workout-profile"><i class="fas fa-bookmark" aria-hidden="true"></i><span><strong>Salvar no perfil</strong><small>Registrar e ver suas atividades</small></span><i class="fas fa-arrow-right" aria-hidden="true"></i></button>' : ""}
+            ${exerciseList ? `<section class="completed-workout-exercises"><h4>Exercícios realizados</h4><ul>${exerciseList}</ul></section>` : '<p class="completed-workout-empty">Nenhum exercício foi marcado como concluído.</p>'}
+            <button type="button" class="completed-workout-close" data-workout-action="close-summary">${workoutView.summaryOrigin === "activities" ? "Voltar às atividades" : "Voltar ao plano"}</button>
+        </section>`;
+    }
+
+    function formatWorkoutBestSet(bestSet) {
+        if (!bestSet) return "Sem série registrada";
+        const load = bestSet.load_kg == null
+            ? "Peso corporal"
+            : `${Number(bestSet.load_kg).toLocaleString("pt-BR", { maximumFractionDigits: 2 })} kg`;
+        return `${load} × ${bestSet.repetitions}`;
+    }
+
+    function formatWorkoutShareDuration(seconds) {
+        const totalMinutes = Math.max(1, Math.round(Number(seconds || 0) / 60));
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        if (!hours) return `${totalMinutes} min`;
+        return minutes ? `${hours}h ${minutes}min` : `${hours}h`;
+    }
+
+    function createWorkoutShareDraft(summary) {
+        return {
+            sessionId: summary.session_id,
+            photoDataUrl: null,
+            selectedExerciseIds: new Set(asArray(summary.exercises).map((exercise) => String(exercise.exercise_id))),
+        };
+    }
+
+    function workoutShareDraft(summary) {
+        if (!workoutView.shareDraft || String(workoutView.shareDraft.sessionId) !== String(summary.session_id)) {
+            workoutView.shareDraft = createWorkoutShareDraft(summary);
+        }
+        return workoutView.shareDraft;
+    }
+
+    function renderWorkoutShareEditor(summary) {
+        const draft = workoutShareDraft(summary);
+        const exercises = asArray(summary.exercises);
+        const selectedExercises = exercises.filter((exercise) => draft.selectedExerciseIds.has(String(exercise.exercise_id)));
+        const exerciseControls = exercises.map((exercise) => {
+            const selected = draft.selectedExerciseIds.has(String(exercise.exercise_id));
+            return `<li class="${selected ? "is-selected" : ""}"><div><strong>${esc(exercise.name)}</strong><span>${esc(formatWorkoutBestSet(exercise.best_set))}</span></div><button type="button" data-workout-action="toggle-share-exercise" data-exercise-id="${esc(exercise.exercise_id)}" aria-pressed="${selected}"><i class="fas ${selected ? "fa-eye-slash" : "fa-eye"}" aria-hidden="true"></i>${selected ? "Não mostrar" : "Mostrar"}</button></li>`;
+        }).join("");
+        const previewExercises = selectedExercises.map((exercise) => `<li><strong>${esc(exercise.name)}${asArray(exercise.personal_records).length ? '<em><i class="fas fa-trophy" aria-hidden="true"></i> PR</em>' : ""}</strong><span>${esc(formatWorkoutBestSet(exercise.best_set))}</span></li>`).join("");
+        const photo = draft.photoDataUrl
+            ? `<img class="workout-share-card__photo" src="${esc(draft.photoDataUrl)}" alt="" aria-hidden="true">`
+            : "";
+        const denseClass = selectedExercises.length > 4 ? " is-dense" : "";
+
+        return `<section class="workout-share-shell">
+            <header class="workout-share-header"><button type="button" data-workout-action="back-to-summary"><i class="fas fa-arrow-left" aria-hidden="true"></i> Voltar</button><span>Workout Share</span><h3 tabindex="-1">Monte seu compartilhamento</h3><p>Escolha uma foto e controle exatamente quais exercícios aparecem no card.</p></header>
+            <div class="workout-share-editor">
+                <div class="workout-share-options">
+                    <section class="workout-share-option" aria-labelledby="workoutSharePhotoTitle">
+                        <div class="workout-share-option__heading"><span><i class="fas fa-image" aria-hidden="true"></i></span><div><h4 id="workoutSharePhotoTitle">Foto</h4><p>Use uma imagem como fundo ou continue sem foto.</p></div></div>
+                        <div class="workout-share-photo-actions">
+                            <button type="button" class="workout-share-photo-select" data-workout-action="choose-share-photo"><i class="fas fa-camera" aria-hidden="true"></i>${draft.photoDataUrl ? "Trocar foto" : "Selecionar foto"}</button>
+                            <input id="workoutSharePhotoInput" type="file" accept="image/*" class="hidden">
+                            ${draft.photoDataUrl ? '<button type="button" data-workout-action="remove-share-photo"><i class="fas fa-trash" aria-hidden="true"></i> Remover</button>' : ""}
+                        </div>
+                    </section>
+                    <section class="workout-share-option" aria-labelledby="workoutShareExercisesTitle">
+                        <div class="workout-share-option__heading"><span><i class="fas fa-list-check" aria-hidden="true"></i></span><div><h4 id="workoutShareExercisesTitle">Exercícios</h4><p>Somente os ${esc(exercises.length)} exercícios realizados nesta sessão.</p></div></div>
+                        ${exerciseControls ? `<ul class="workout-share-exercise-controls">${exerciseControls}</ul>` : '<p class="workout-share-empty">Nenhum exercício realizado para exibir.</p>'}
+                    </section>
+                </div>
+                <section class="workout-share-preview" aria-labelledby="workoutSharePreviewTitle">
+                    <div class="workout-share-preview__heading"><div><span>Prévia</span><h4 id="workoutSharePreviewTitle">Seu card</h4></div><small>${esc(selectedExercises.length)} de ${esc(exercises.length)} exercícios</small></div>
+                    <article class="workout-share-card${denseClass}${draft.photoDataUrl ? " has-photo" : ""}">
+                        ${photo}<div class="workout-share-card__shade" aria-hidden="true"></div>
+                        <div class="workout-share-card__content">
+                            <span class="workout-share-card__kicker"><i class="fas fa-circle-check" aria-hidden="true"></i> Treino concluído</span>
+                            <div class="workout-share-card__title"><h5>${esc(summary.workout_name)}</h5><p><i class="fas fa-stopwatch" aria-hidden="true"></i> ${esc(formatWorkoutShareDuration(summary.duration_seconds))}</p></div>
+                            ${previewExercises ? `<ul>${previewExercises}</ul>` : '<p class="workout-share-card__empty">Selecione ao menos um exercício para exibir.</p>'}
+                            <footer><i class="fas fa-bolt" aria-hidden="true"></i><strong>Diet Tracker</strong></footer>
+                        </div>
+                    </article>
+                </section>
+            </div>
+            <footer class="workout-share-shell__actions">
+                <button type="button" class="completed-workout-close" data-workout-action="back-to-summary"><i class="fas fa-arrow-left" aria-hidden="true"></i> Voltar</button>
+                <button type="button" class="btn-secondary" data-workout-action="share-workout-card" ${selectedExercises.length ? "" : "disabled"}><i class="fas fa-share-nodes" aria-hidden="true"></i> Compartilhar card</button>
+            </footer>
+        </section>`;
+    }
+
+    function listWorkoutShareSelection(summary) {
+        const draft = workoutView.shareDraft;
+        return asArray(summary.exercises).filter((exercise) => (
+            draft.selectedExerciseIds.has(String(exercise.exercise_id))
+        ));
+    }
+
+    function wrapCanvasText(ctx, text, maxWidth) {
+        const words = String(text).split(/\s+/);
+        const lines = [];
+        let current = "";
+        words.forEach((word) => {
+            const candidate = current ? `${current} ${word}` : word;
+            if (ctx.measureText(candidate).width <= maxWidth || !current) {
+                current = candidate;
+            } else {
+                lines.push(current);
+                current = word;
+            }
+        });
+        if (current) lines.push(current);
+        return lines;
+    }
+
+    function drawWorkoutShareCard(summary) {
+        const width = 1080;
+        const padX = 64;
+        const selected = listWorkoutShareSelection(summary);
+        const isDense = selected.length > 4;
+        const rowHeight = isDense ? 84 : 106;
+        const nameFont = `600 ${isDense ? 26 : 30}px Avenir, Helvetica, Arial, sans-serif`;
+        const setFont = `${isDense ? 18 : 20}px Avenir, Helvetica, Arial, sans-serif`;
+        const prober = document.createElement("canvas").getContext("2d");
+        const maxNameWidth = width - padX * 2 - 320;
+
+        let cursorY = 84;
+        const rows = selected.map((exercise) => {
+            const texts = { name: String(exercise.name || "Exercício"), set: formatWorkoutBestSet(exercise.best_set), isPr: asArray(exercise.personal_records).length > 0 };
+            prober.font = nameFont;
+            const nameLines = wrapCanvasText(prober, texts.name, maxNameWidth).slice(0, 2);
+            const row = { texts, nameLines, top: cursorY, height: rowHeight };
+            cursorY += rowHeight;
+            return row;
+        });
+
+        const footerTop = cursorY + 4;
+        const height = footerTop + 58 + 40;
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+
+        const gradient = ctx.createLinearGradient(0, 0, 0, height);
+        gradient.addColorStop(0, "#0f172a");
+        gradient.addColorStop(1, "#0b1120");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, height);
+
+        const photo = (() => {
+            const dataUrl = workoutView.shareDraft.photoDataUrl;
+            if (!dataUrl) return null;
+            let image = workoutSharePhotoCache.get(dataUrl);
+            if (image) return image;
+            image = document.querySelector('.workout-share-card__photo[src="' + dataUrl + '"]');
+            if (image && image.complete && image.naturalWidth) return image;
+            return null;
+        })();
+
+        if (photo) {
+            const cover = Math.max(width / photo.naturalWidth, height / photo.naturalHeight);
+            const drawWidth = photo.naturalWidth * cover;
+            const drawHeight = photo.naturalHeight * cover;
+            ctx.drawImage(photo, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
+            const shade = ctx.createLinearGradient(0, height * 0.35, 0, height);
+            shade.addColorStop(0, "rgba(8, 12, 20, 0.45)");
+            shade.addColorStop(1, "rgba(8, 12, 20, 0.92)");
+            ctx.fillStyle = shade;
+            ctx.fillRect(0, 0, width, height);
+        }
+
+        ctx.font = `700 ${isDense ? 22 : 24}px Avenir, Helvetica, Arial, sans-serif`;
+        ctx.fillStyle = "#34d399";
+        ctx.fillText("TREINO CONCLUÍDO", padX, 62);
+
+        ctx.font = `700 ${isDense ? 40 : 48}px Avenir, Helvetica, Arial, sans-serif`;
+        ctx.fillStyle = "#f8fafc";
+        const titleLines = wrapCanvasText(ctx, summary.workout_name || "Treino", width - padX * 2).slice(0, 2);
+        const titleTop = 84 + (titleLines.length - 1) * 52;
+        titleLines.forEach((line, index) => ctx.fillText(line, padX, titleTop + index * 52));
+
+        ctx.font = setFont;
+        ctx.fillStyle = "#a9b7b0";
+        ctx.fillText(`DURACAO: ${formatWorkoutShareDuration(summary.duration_seconds)}`.toUpperCase(), padX, titleTop + 34);
+        const listTop = titleTop + 66;
+
+        rows.forEach((row, index) => {
+            const y = row.top + (row.height - (row.nameLines.length * 30 + 26)) / 2;
+            ctx.font = nameFont;
+            ctx.fillStyle = "#f8fafc";
+            row.nameLines.forEach((line, lineIndex) => ctx.fillText(line, padX, y + 28 + lineIndex * 30));
+            if (row.texts.isPr) {
+                const prWidth = ctx.measureText("PR").width + 18;
+                const prX = padX + ctx.measureText(row.nameLines[0] || "").width + 16;
+                ctx.fillStyle = "#fbbf24";
+                ctx.beginPath();
+                ctx.roundRect(prX, y + 8, prWidth, 24, 12);
+                ctx.fill();
+                ctx.fillStyle = "#0b1120";
+                ctx.font = `700 ${isDense ? 15 : 16}px Avenir, Helvetica, Arial, sans-serif`;
+                ctx.fillText("PR", prX + 9, y + 26);
+                ctx.font = nameFont;
+            }
+            ctx.font = setFont;
+            ctx.fillStyle = "#a9b7b0";
+            ctx.textAlign = "right";
+            ctx.fillText(row.texts.set, width - padX, y + 30);
+            ctx.textAlign = "left";
+            if (index < rows.length - 1) {
+                ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(padX, row.top + row.height - 2);
+                ctx.lineTo(width - padX, row.top + row.height - 2);
+                ctx.stroke();
+            }
+        });
+
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+        ctx.beginPath();
+        ctx.moveTo(padX, footerTop);
+        ctx.lineTo(width - padX, footerTop);
+        ctx.stroke();
+        ctx.font = `600 ${isDense ? 17 : 18}px Avenir, Helvetica, Arial, sans-serif`;
+        ctx.fillStyle = "#34d399";
+        ctx.fillText("DIET TRACKER", padX, footerTop + 34);
+
+        return canvas;
+    }
+
+    async function shareWorkoutCard(summary) {
+        try {
+            const canvas = drawWorkoutShareCard(summary);
+            const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+            const file = new File([blob], "treino-card.png", { type: "image/png" });
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                await navigator.share({ files: [file], title: "Meu treino", text: summary.workout_name || "Treino concluído" });
+            } else {
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = "treino-card.png";
+                link.click();
+                setTimeout(() => URL.revokeObjectURL(url), 10_000);
+                showToast("Card baixado. Envie como quiser.", "success");
+            }
+        } catch (error) {
+            if (error?.name !== "AbortError") {
+                showToast(error.message || "Não foi possível gerar o card.", "error");
+            }
+        }
+    }
+
     function renderWorkoutDetail(options = {}) {
-        const plan = workoutView.plan;
         const details = byId("viewWorkoutPlanDetails");
-        if (!plan || !details) return;
+        if (!details) return;
         const previousScroll = options.preserveScroll ? details.scrollTop : 0;
+        if (workoutView.completedSummary) {
+            const title = byId("viewWorkoutPlanTitle");
+            if (title) title.textContent = workoutView.shareOpen ? "Workout Share" : "Resumo do treino";
+            details.innerHTML = renderCompletedWorkoutSummary();
+            details.scrollTop = previousScroll;
+            if (options.focusSelector) requestAnimationFrame(() => details.querySelector(options.focusSelector)?.focus());
+            return;
+        }
+        const plan = workoutView.plan;
+        if (!plan) return;
         if (workoutView.selectedDay >= workoutView.days.length) workoutView.selectedDay = 0;
         const day = selectedWorkoutDay();
         const summaryMeta = [
@@ -1522,6 +1903,12 @@
                 ? preferredDayIndex
                 : Math.min(reopenSelectedDay, Math.max(workoutView.days.length - 1, 0));
             workoutView.session = null;
+            workoutView.completedSummary = null;
+            workoutView.shareOpen = false;
+            workoutView.shareDraft = null;
+            workoutView.sharePhotoToken += 1;
+            workoutView.summaryOrigin = "workout";
+            workoutView.setDrafts.clear();
             workoutView.sessionError = "";
             workoutView.pendingAction = "";
             workoutView.replacementPanels.clear();
@@ -1784,7 +2171,11 @@
         } finally {
             if (viewVersion === workoutView.viewVersion && workoutView.pendingAction === actionKey) {
                 workoutView.pendingAction = "";
-                renderWorkoutDetail({ preserveScroll: true });
+                renderWorkoutDetail({
+                    focusSelector: workoutView.completedSummary
+                        ? '[data-workout-action="open-workout-share"]'
+                        : null,
+                });
             }
         }
     }
@@ -1793,6 +2184,13 @@
         const exercise = findSelectedExercise(exerciseId);
         const session = workoutView.session;
         if (!exercise || !session || workoutView.pendingAction) return;
+        let performedSets;
+        try {
+            performedSets = performedSetsFromView(exercise.id);
+        } catch (error) {
+            showToast(error.message, "error");
+            return;
+        }
         const actionKey = `complete-${exercise.id}`;
         const viewVersion = workoutView.viewVersion;
         activeDockRequestToken += 1;
@@ -1800,12 +2198,13 @@
         workoutView.sessionError = "";
         renderWorkoutDetail({ preserveScroll: true });
         try {
-            const result = await apiRequest(`/workout_sessions/${apiSegment(session.id)}/exercises/${apiSegment(exercise.id)}/complete`, { method: "POST" });
+            const result = await apiRequest(`/workout_sessions/${apiSegment(session.id)}/exercises/${apiSegment(exercise.id)}/complete`, { method: "POST", body: { sets: performedSets } });
             if (String(activeWorkoutSummary?.session?.id || "") === String(session.id)) {
                 activeWorkoutSummary = { ...activeWorkoutSummary, session: result.session };
             }
             if (viewVersion !== workoutView.viewVersion || !isCurrentWorkoutSession(session.id)) return;
             workoutView.session = result.session;
+            workoutView.setDrafts.delete(String(exercise.id));
             workoutView.replacementPanels.delete(String(exercise.id));
             showToast("Exercício concluído. Vamos para o próximo!", "success");
         } catch (error) {
@@ -1828,10 +2227,21 @@
         workoutView.pendingAction = actionKey;
         renderWorkoutDetail({ preserveScroll: true });
         try {
-            await apiRequest(`/workout_sessions/${apiSegment(session.id)}/finish`, { method: "POST" });
+            const result = await apiRequest(`/workout_sessions/${apiSegment(session.id)}/finish`, { method: "POST" });
             if (String(activeWorkoutSummary?.session?.id || "") === String(session.id)) clearActiveWorkoutDock();
             if (viewVersion !== workoutView.viewVersion || !isCurrentWorkoutSession(session.id)) return;
             workoutView.session = null;
+            workoutView.completedSummary = {
+                ...result.summary,
+                weekly_progress: result.weekly_progress,
+                exercise_goals_reached: asArray(result.exercise_goals_reached),
+                achievements_unlocked: asArray(result.achievements_unlocked),
+            };
+            workoutView.summaryOrigin = "workout";
+            workoutView.shareOpen = false;
+            workoutView.shareDraft = null;
+            workoutView.sharePhotoToken += 1;
+            workoutView.setDrafts.clear();
             clearActiveWorkoutDock();
             workoutView.replacementPanels.clear();
             showToast("Treino finalizado. Excelente trabalho!", "success");
@@ -2031,7 +2441,97 @@
                 await completeWorkoutExercise(exerciseId);
             } else if (action === "finish-session") {
                 await finishWorkoutSession();
+            } else if (action === "add-set") {
+                const rows = control.closest(".workout-set-entry")?.querySelector(".workout-set-entry__rows");
+                const order = rows?.children.length + 1;
+                if (rows && order <= 20) {
+                    rows.insertAdjacentHTML("beforeend", workoutSetRowMarkup(order));
+                    captureWorkoutSetDraft(exerciseId || control.closest("[data-exercise-id]")?.dataset.exerciseId);
+                }
+            } else if (action === "open-workout-share") {
+                workoutShareDraft(workoutView.completedSummary);
+                workoutView.shareOpen = true;
+                renderWorkoutDetail({ focusSelector: ".workout-share-header h3" });
+            } else if (action === "back-to-summary") {
+                workoutView.shareOpen = false;
+                renderWorkoutDetail({ focusSelector: '[data-workout-action="open-workout-share"]' });
+            } else if (action === "toggle-share-exercise") {
+                const draft = workoutShareDraft(workoutView.completedSummary);
+                const key = String(exerciseId);
+                if (draft.selectedExerciseIds.has(key)) draft.selectedExerciseIds.delete(key);
+                else draft.selectedExerciseIds.add(key);
+                renderWorkoutDetail({ preserveScroll: true, focusSelector: `[data-workout-action="toggle-share-exercise"][data-exercise-id="${key}"]` });
+            } else if (action === "choose-share-photo") {
+                byId("workoutSharePhotoInput")?.click();
+            } else if (action === "remove-share-photo") {
+                workoutView.sharePhotoToken += 1;
+                workoutShareDraft(workoutView.completedSummary).photoDataUrl = null;
+                renderWorkoutDetail({ preserveScroll: true, focusSelector: '[data-workout-action="choose-share-photo"]' });
+            } else if (action === "share-workout-card") {
+                await shareWorkoutCard(workoutView.completedSummary);
+            } else if (action === "view-exercise-progress") {
+                closeViewWorkoutPlanModal();
+                window.openExerciseProgress?.(control.dataset.exerciseKey);
+            } else if (action === "set-exercise-goal") {
+                await createExerciseGoalFromSummary(control.dataset.exerciseKey, control.dataset.exerciseName);
+            } else if (action === "save-workout-profile") {
+                workoutView.completedSummary = null;
+                workoutView.shareOpen = false;
+                workoutView.shareDraft = null;
+                workoutView.sharePhotoToken += 1;
+                workoutView.summaryOrigin = "workout";
+                closeViewWorkoutPlanModal();
+                showTab("activities");
+                showToast("Atividade salva no seu perfil.", "success");
+            } else if (action === "close-summary") {
+                const fromActivities = workoutView.summaryOrigin === "activities";
+                workoutView.completedSummary = null;
+                workoutView.shareOpen = false;
+                workoutView.shareDraft = null;
+                workoutView.sharePhotoToken += 1;
+                workoutView.summaryOrigin = "workout";
+                if (fromActivities) {
+                    closeViewWorkoutPlanModal();
+                    showTab("activities");
+                } else {
+                    renderWorkoutDetail();
+                }
             }
+        });
+        byId("viewWorkoutPlanDetails")?.addEventListener("change", async (event) => {
+            if (event.target.id !== "workoutSharePhotoInput") return;
+            const file = event.target.files?.[0];
+            if (!file) return;
+            const token = ++workoutView.sharePhotoToken;
+            const sessionId = workoutView.completedSummary?.session_id;
+            if (!file.type.startsWith("image/")) {
+                showToast("Selecione um arquivo de imagem.", "error");
+                return;
+            }
+            if (file.size > 15 * 1024 * 1024) {
+                showToast("A foto deve ter no máximo 15 MB.", "error");
+                return;
+            }
+            try {
+                const image = await downscaleImageFile(file, 1600);
+                if (
+                    token !== workoutView.sharePhotoToken
+                    || !workoutView.shareOpen
+                    || String(workoutView.completedSummary?.session_id) !== String(sessionId)
+                ) return;
+                workoutShareDraft(workoutView.completedSummary).photoDataUrl = image.dataUrl;
+                const cached = new Image();
+                cached.src = image.dataUrl;
+                cached.decode?.().then(() => workoutSharePhotoCache.set(image.dataUrl, cached)).catch(() => workoutSharePhotoCache.set(image.dataUrl, cached));
+                renderWorkoutDetail({ preserveScroll: true, focusSelector: '[data-workout-action="choose-share-photo"]' });
+            } catch (error) {
+                showToast(error.message || "Não foi possível carregar a foto.", "error");
+            }
+        });
+        byId("viewWorkoutPlanDetails")?.addEventListener("input", (event) => {
+            if (!event.target.matches("[data-workout-set-load], [data-workout-set-repetitions], [data-workout-set-warmup]")) return;
+            const exerciseId = event.target.closest("[data-workout-swipe-card]")?.dataset.exerciseId;
+            captureWorkoutSetDraft(exerciseId);
         });
         byId("viewWorkoutPlanDetails")?.addEventListener("pointerdown", (event) => {
             const card = event.target.closest("[data-workout-swipe-card]");
@@ -2099,6 +2599,7 @@
     window.loadWorkoutPlans = loadWorkoutPlans;
     window.viewDietPlan = viewDietPlan;
     window.viewWorkoutPlan = viewWorkoutPlan;
+    window.openWorkoutActivity = openWorkoutActivity;
     window.loadActiveWorkoutDock = loadActiveWorkoutDock;
     window.clearActiveWorkoutDock = clearActiveWorkoutDock;
     window.invalidateWorkoutView = invalidateWorkoutView;

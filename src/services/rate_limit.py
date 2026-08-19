@@ -22,24 +22,14 @@ class _LimiterState:
             hits.append(now)
             return True
 
-    def clear(self, key=None):
-        with self._lock:
-            if key is None:
-                self._hits.clear()
-            else:
-                self._hits.pop(key, None)
-
-
 _state = _LimiterState()
 
 
-def _client_key(scope):
-    remote = request.remote_addr or "unknown"
-    account = ""
-    if scope in {"ai", "auth"}:
-        from flask import session
+def _client_key():
+    from flask import session
 
-        account = str(session.get("user_id") or "")
+    remote = request.remote_addr or "unknown"
+    account = str(session.get("user_id") or "")
     return f"{remote}|{account}"
 
 
@@ -59,7 +49,7 @@ def rate_limit(name, default_limit, default_window):
         @wraps(f)
         def wrapper(*args, **kwargs):
             limit, window = _rate_config(name) or (default_limit, default_window)
-            key = _client_key("auth" if name in {"login", "register"} else "ai")
+            key = _client_key()
             if not _state.allow(key, int(limit), int(window)):
                 return jsonify({"error": "Muitas tentativas. Aguarde um instante."}), 429
             return f(*args, **kwargs)
