@@ -148,6 +148,8 @@ class User(db.Model):
 
 
 class OAuthIdentity(db.Model):
+    __tablename__ = "oauth_identity"
+
     __table_args__ = (
         db.UniqueConstraint("provider", "issuer", "subject", name="uq_oauth_identity_provider_issuer_subject"),
     )

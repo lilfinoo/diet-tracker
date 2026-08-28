@@ -15,6 +15,10 @@ GOOGLE_PAYLOAD = {
 }
 
 
+def test_google_identity_uses_migrated_table_name():
+    assert OAuthIdentity.__tablename__ == "oauth_identity"
+
+
 def _mock_google(monkeypatch, payload=None):
     monkeypatch.setattr(
         "google.oauth2.id_token.verify_oauth2_token",

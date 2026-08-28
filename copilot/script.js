@@ -771,7 +771,7 @@ async function handleGoogleCredential(result) {
             credentials: 'include',
             body: JSON.stringify({ credential: result.credential })
         });
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
         if (response.status === 409 && data.code === 'username_required') {
             googleSignupToken = data.signup_token;
             getElement('googleUsernameForm')?.classList.remove('hidden');
@@ -779,7 +779,7 @@ async function handleGoogleCredential(result) {
             showAuthMessage('Só falta escolher seu nome de usuário.', 'info');
             return;
         }
-        if (!response.ok) throw new Error(data.error || 'Não foi possível entrar com Google.');
+        if (!response.ok) throw new Error(data.error || 'Não foi possível entrar com Google. Tente novamente.');
         completeAuthentication(data.user, data.csrf_token);
     } catch (error) {
         showAuthMessage(error.message, 'error');
@@ -797,7 +797,7 @@ async function finishGoogleSignup(event) {
             credentials: 'include',
             body: JSON.stringify({ signup_token: googleSignupToken, username })
         });
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || 'Não foi possível concluir o cadastro.');
         googleSignupToken = null;
         getElement('googleUsernameForm')?.classList.add('hidden');
