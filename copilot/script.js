@@ -4,9 +4,15 @@
 let currentUser = null;
 let currentTab = 'diet';
 let dietEntries = [];
+let dietEntriesLoadPromise = null;
+let dietEntriesLoadRange = { startDate: null, endDate: null };
 let measurements = [];
+let measurementHasMore = false;
+let measurementRequestToken = 0;
 let pendingAuthIntent = null;
 let pendingPostProfileResume = null;
+let googleSignupToken = null;
+let profileAchievementsState = { selected: [], achievements: [], badges: [], limit: 3, filter: 'all', savingToken: null };
 
 // API Base URL
 const API_BASE = '/api';
@@ -29,35 +35,23 @@ function addEventListenerSafe(id, event, handler) {
 }
 // Toast global para feedback visual
 function showToast(msg, tipo="success") {
+    document.querySelectorAll('.toast:not(#globalLoading)').forEach((existing) => existing.remove());
+
     let toast = document.createElement("div");
     toast.className = "toast " + tipo;
     toast.innerText = msg;
+    toast.setAttribute("role", tipo === "error" ? "alert" : "status");
+    toast.setAttribute("aria-live", tipo === "error" ? "assertive" : "polite");
     document.body.appendChild(toast);
 
     const fluid = typeof Fluid !== "undefined" ? Fluid : null;
-    const reduced = typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-    if (fluid && !reduced) {
-        toast.style.willChange = "transform, opacity";
-        toast.style.transform = "translate3d(0,-12px,0) scale(0.97)";
-        toast.style.opacity = "0";
-        requestAnimationFrame(() => {
-            fluid.animate(toast, { y: 0, scale: 1, opacity: 1 }, { response: 0.32, damping: 1.0 });
-        });
+    if (fluid) {
         if (tipo === "success") fluid.haptic.tap();
         else if (tipo === "error") fluid.haptic.snap();
     }
 
     setTimeout(() => {
-        if (fluid && !reduced) {
-            fluid.animate(toast, { y: -10, opacity: 0 }, {
-                response: 0.25,
-                damping: 1.0,
-                onComplete() { toast.remove(); }
-            });
-        } else {
-            toast.remove();
-        }
+        toast.remove();
     }, 2900);
 }
 
@@ -67,6 +61,8 @@ function showAuthMessage(message, type = 'info') {
     if (!messageEl) return;
     messageEl.textContent = message;
     messageEl.className = `message ${type}`;
+    messageEl.setAttribute("role", type === "error" ? "alert" : "status");
+    messageEl.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
     messageEl.style.display = "block";
     setTimeout(() => {
         messageEl.textContent = "";
@@ -92,6 +88,8 @@ function showDietMessage(msg, type="info") {
     }
     el.textContent = msg;
     el.className = "modal-message " + type;
+    el.setAttribute("role", type === "error" ? "alert" : "status");
+    el.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
     setTimeout(() => { el.textContent = ""; }, 4000);
 }
 
@@ -102,6 +100,8 @@ function showGlobalLoading(msg="Carregando...") {
         loading = document.createElement("div");
         loading.id = "globalLoading";
         loading.className = "toast info";
+        loading.setAttribute("role", "status");
+        loading.setAttribute("aria-live", "polite");
         loading.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${msg}`;
         document.body.appendChild(loading);
     }
@@ -148,17 +148,36 @@ function bindChoiceCardGrid(gridId, targetId) {
     const grid = getElement(gridId);
     const target = getElement(targetId);
     if (!grid || !target) return;
-    grid.querySelectorAll(".choice-card").forEach(card => {
+    const cards = Array.from(grid.querySelectorAll(".choice-card"));
+
+    function selectCard(card, focus = false) {
+        const value = card.dataset.value;
+        if (!value) return;
+        target.value = value;
+        cards.forEach(candidate => {
+            const selected = candidate === card;
+            candidate.classList.toggle("is-active", selected);
+            candidate.setAttribute("aria-checked", selected ? "true" : "false");
+            candidate.tabIndex = selected ? 0 : -1;
+        });
+        target.dispatchEvent(new Event("change", { bubbles: true }));
+        if (focus) card.focus();
+    }
+
+    cards.forEach((card, index) => {
+        card.tabIndex = index === 0 ? 0 : -1;
         card.addEventListener("click", function() {
-            const value = card.dataset.value;
-            if (!value) return;
-            target.value = value;
-            grid.querySelectorAll(".choice-card").forEach(c => c.classList.toggle("is-active", c === card));
-            card.setAttribute("aria-checked", "true");
-            grid.querySelectorAll(".choice-card").forEach(c => {
-                if (c !== card) c.setAttribute("aria-checked", "false");
-            });
-            target.dispatchEvent(new Event("change", { bubbles: true }));
+            selectCard(card);
+        });
+        card.addEventListener("keydown", function(event) {
+            const keys = ["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp", "Home", "End"];
+            if (!keys.includes(event.key)) return;
+            event.preventDefault();
+            const direction = ["ArrowLeft", "ArrowUp"].includes(event.key) ? -1 : 1;
+            const nextIndex = event.key === "Home" ? 0
+                : event.key === "End" ? cards.length - 1
+                : (cards.indexOf(card) + direction + cards.length) % cards.length;
+            selectCard(cards[nextIndex], true);
         });
     });
 }
@@ -172,7 +191,12 @@ function syncChoiceCardGrid(gridId, targetId) {
         const active = card.dataset.value === value;
         card.classList.toggle("is-active", active);
         card.setAttribute("aria-checked", active ? "true" : "false");
+        card.tabIndex = active ? 0 : -1;
     });
+    if (!value) {
+        const firstCard = grid.querySelector(".choice-card");
+        if (firstCard) firstCard.tabIndex = 0;
+    }
 }
 
 function bindStepper(stepperEl) {
@@ -265,6 +289,9 @@ document.addEventListener('DOMContentLoaded', function() {
     checkAuthStatus();
     setupAppStyleControls();
     syncChoiceCards();
+    initializeAchievementControls();
+    initializeGoogleAuth();
+    addEventListenerSafe('googleUsernameForm', 'submit', finishGoogleSignup);
 
     // Autocomplete local para descrição dos alimentos
     const dietDescription = getElement("dietDescription");
@@ -489,7 +516,7 @@ async function handleDietFormSubmit() {
         if (response.ok) {
             showToast("Dieta salva com sucesso!", "success");
             closeDietModal();
-            loadDietEntries();
+            loadDietEntries({ showLoading: false });
             loadTodayCardapio();
         } else {
             const errorData = await response.json();
@@ -622,8 +649,8 @@ function setDefaultDates() {
     const dateFields = [
         { id: 'dietStartDate', value: today },
         { id: 'dietEndDate', value: today },
-        { id: 'measurementStartDate', value: weekAgo },
-        { id: 'measurementEndDate', value: today },
+        { id: 'measurementStartDate', value: '' },
+        { id: 'measurementEndDate', value: '' },
         { id: 'dietDate', value: today },
         { id: 'measurementDate', value: today }
     ];
@@ -646,17 +673,21 @@ async function checkAuthStatus() {
         if (response.ok) {
             const data = await response.json();
             if (data.logged_in) {
+                if (data.csrf_token) setCsrfToken(data.csrf_token);
                 currentUser = data.user;
                 showMainScreen();
             } else {
+                setCsrfToken(null);
                 currentUser = null;
                 showMainScreen();
             }
         } else {
+            setCsrfToken(null);
             showMainScreen();
         }
     } catch (error) {
         console.error('Auth check failed:', error);
+        setCsrfToken(null);
         showMainScreen();
     }
 }
@@ -679,7 +710,7 @@ function closeAuthModal() {
 
 function requireAuth(reason, options = {}) {
     if (currentUser) {
-        if (options.premium && !currentUser.is_premium) {
+        if (options.premium && !hasAiAccess()) {
             showToast('Este recurso utiliza IA e está disponível no plano Premium.', 'info');
             return false;
         }
@@ -694,6 +725,98 @@ function requireAuth(reason, options = {}) {
     });
     return false;
 }
+
+function hasAiAccess() {
+    return Boolean(currentUser?.is_premium || (currentUser && Number(currentUser.ai_trial_uses || 0) < 3));
+}
+
+async function initializeGoogleAuth() {
+    try {
+        const response = await fetch(`${API_BASE}/auth/config`);
+        const config = response.ok ? await response.json() : {};
+        if (!config.google_client_id) return;
+        getElement('googleAuthSection')?.classList.remove('hidden');
+        getElement('googleHeaderButton')?.classList.remove('hidden');
+        const script = document.createElement('script');
+        script.src = 'https://accounts.google.com/gsi/client';
+        script.async = true;
+        script.defer = true;
+        script.onload = () => {
+            google.accounts.id.initialize({
+                client_id: config.google_client_id,
+                callback: handleGoogleCredential
+            });
+            google.accounts.id.renderButton(getElement('googleSignInButton'), {
+                theme: 'outline', size: 'large', width: 320, text: 'continue_with'
+            });
+        };
+        document.head.appendChild(script);
+    } catch (error) {
+        console.error('Google auth configuration failed:', error);
+    }
+}
+
+function openAuthWithGoogle() {
+    openAuthModal('Entre com sua conta Google em um toque.', 'login');
+    if (window.google?.accounts?.id) {
+        try { google.accounts.id.prompt(); } catch (error) { /* o modal oficial permanece como caminho alternativo */ }
+    }
+}
+
+async function handleGoogleCredential(result) {
+    try {
+        const response = await fetch(`${API_BASE}/auth/google`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ credential: result.credential })
+        });
+        const data = await response.json();
+        if (response.status === 409 && data.code === 'username_required') {
+            googleSignupToken = data.signup_token;
+            getElement('googleUsernameForm')?.classList.remove('hidden');
+            getElement('googleUsername')?.focus();
+            showAuthMessage('Só falta escolher seu nome de usuário.', 'info');
+            return;
+        }
+        if (!response.ok) throw new Error(data.error || 'Não foi possível entrar com Google.');
+        completeAuthentication(data.user, data.csrf_token);
+    } catch (error) {
+        showAuthMessage(error.message, 'error');
+    }
+}
+
+async function finishGoogleSignup(event) {
+    event.preventDefault();
+    const username = getElement('googleUsername')?.value.trim();
+    if (!googleSignupToken || !username) return;
+    try {
+        const response = await fetch(`${API_BASE}/auth/google`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ signup_token: googleSignupToken, username })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Não foi possível concluir o cadastro.');
+        googleSignupToken = null;
+        getElement('googleUsernameForm')?.classList.add('hidden');
+        completeAuthentication(data.user, data.csrf_token);
+    } catch (error) {
+        showAuthMessage(error.message, 'error');
+    }
+}
+
+function completeAuthentication(user, csrfToken = null) {
+    currentUser = user;
+    setCsrfToken(csrfToken);
+    closeAppModal(getElement('loginScreen'));
+    showMainScreen({ skipProfile: true });
+    checkUserProfile();
+    showToast('Você entrou com sucesso.', 'success');
+}
+
+window.handleGoogleCredential = handleGoogleCredential;
 
 Object.defineProperty(window, 'currentUser', { get: () => currentUser });
 window.requireAuth = requireAuth;
@@ -718,6 +841,12 @@ function showMainScreen(options = {}) {
         if (profileUserName) profileUserName.textContent = username;
         const profileMembership = getElement('profileMembership');
         if (profileMembership) profileMembership.textContent = currentUser.is_premium ? 'Membro Premium' : 'Plano gratuito';
+        renderProfileBadges(currentUser);
+        const aiAccessLabel = getElement('homeAiAccessLabel');
+        if (aiAccessLabel) {
+            const remaining = Math.max(0, 3 - Number(currentUser.ai_trial_uses || 0));
+            aiAccessLabel.textContent = currentUser.is_premium ? 'Premium' : `${remaining} ${remaining === 1 ? 'uso grátis' : 'usos grátis'}`;
+        }
         const homeDate = getElement('homeDate');
         if (homeDate) {
             const formatted = new Intl.DateTimeFormat('pt-BR', {
@@ -733,45 +862,326 @@ function showMainScreen(options = {}) {
         getElement('adminPanelBtn')?.classList.toggle('hidden', !isAdmin);
         getElement('profileAdminLink')?.classList.toggle('hidden', !isAdmin);
         getElement('professionalPanelBtn')?.classList.toggle('hidden', !isProfessional);
-        getElement('professionalNavBtn')?.classList.toggle('hidden', !isProfessional);
     } else {
         const welcomeUser = getElement('welcomeUser');
-        if (welcomeUser) welcomeUser.textContent = 'Explore o Diet Tracker';
+        if (welcomeUser) welcomeUser.textContent = 'Explore o Fit-Tracker.AI';
         ['headerUserInitial', 'homeUserInitial', 'profileUserInitial'].forEach(id => {
             const element = getElement(id);
-            if (element) element.textContent = 'D';
+            if (element) element.textContent = 'F';
         });
         const profileUserName = getElement('profileUserName');
         if (profileUserName) profileUserName.textContent = 'Conheça seu espaço';
         const profileMembership = getElement('profileMembership');
         if (profileMembership) profileMembership.textContent = 'Entre para acompanhar sua evolução';
+        const profileBadges = getElement('profileBadges');
+        if (profileBadges) profileBadges.innerHTML = '';
+        const aiAccessLabel = getElement('homeAiAccessLabel');
+        if (aiAccessLabel) aiAccessLabel.textContent = '3 usos grátis';
         getElement('adminPanelBtn')?.classList.add('hidden');
         getElement('profileAdminLink')?.classList.add('hidden');
         getElement('professionalPanelBtn')?.classList.add('hidden');
-        getElement('professionalNavBtn')?.classList.add('hidden');
         if (window.clearActiveWorkoutDock) window.clearActiveWorkoutDock();
     }
 
     getElement('guestAuthActions')?.classList.toggle('hidden', Boolean(currentUser));
     getElement('userHeaderButton')?.classList.toggle('hidden', !currentUser);
+    const showHeaderPill = currentUser?.is_premium !== true;
+    getElement('premiumHeaderPill')?.classList.toggle('hidden', !showHeaderPill);
+    getElement('profileUpgradePill')?.classList.toggle('hidden', !(currentUser && !currentUser.is_premium));
     getElement('profileLoginAction')?.classList.toggle('hidden', Boolean(currentUser));
     getElement('profileLogoutAction')?.classList.toggle('hidden', !currentUser);
     getElement('editProfileBtn')?.classList.toggle('hidden', !currentUser);
+    getElement('profileGuestPanel')?.classList.toggle('hidden', Boolean(currentUser));
+    getElement('profileAuthenticatedContent')?.classList.toggle('hidden', !currentUser);
 
-    const chatNavBtn = document.querySelector(`[onclick="showTab('chat')"]`);
+    const chatNavBtn = document.querySelector(`.nav-btn[onclick="showTab('chat')"]`);
     if (chatNavBtn) {
         chatNavBtn.style.display = '';
-        chatNavBtn.classList.toggle('is-locked', !currentUser?.is_premium);
-        chatNavBtn.setAttribute('aria-label', currentUser?.is_premium ? 'Assistente IA' : 'Assistente IA, recurso Premium');
+        chatNavBtn.classList.toggle('is-locked', !hasAiAccess());
+        chatNavBtn.setAttribute('aria-label', hasAiAccess() ? 'Assistente IA' : 'Assistente IA, recurso Premium');
     }
 
     showTab(options.tab || 'diet');
     if (currentUser) {
         if (!options.skipProfile) checkUserProfile();
+        window.loadWorkoutTodayCard?.();
         if (window.loadActiveWorkoutDock) window.loadActiveWorkoutDock();
         if (window.loadOwnProfessionalRelationship) window.loadOwnProfessionalRelationship();
+    } else {
+        window.renderWorkoutTodayCard?.();
     }
     window.dispatchEvent(new CustomEvent('diettracker:auth-ready', { detail: { user: currentUser } }));
+}
+
+function formatProfileHighlightLabel(highlight) {
+    const item = highlight?.item || highlight;
+    if (!item) return 'Destaque';
+    if ((highlight?.target_kind || item.kind) === 'achievement') return item.title || 'Conquista';
+    if ((highlight?.target_kind || item.kind) === 'badge') {
+        const rank = item.badge_rank || item.badge?.badge_rank;
+        if (item.code === 'pioneiro' && rank) return `${item.title} #${rank}`;
+        return item.title || 'Insígnia';
+    }
+    return item.title || 'Destaque';
+}
+
+function renderProfileBadges(user) {
+    const profileBadges = getElement('profileBadges');
+    if (!profileBadges) return;
+    const highlights = Array.isArray(user.profile_highlights) ? user.profile_highlights.slice(0, 3) : [];
+    if (!highlights.length) {
+        profileBadges.classList.add('hidden');
+        return;
+    }
+    profileBadges.classList.remove('hidden');
+    profileBadges.innerHTML = highlights.map(highlight => `<span class="profile-badge">${escapeHtml(formatProfileHighlightLabel(highlight))}</span>`).join('');
+}
+
+function selectionToken(item) {
+    return `${item.kind}:${item.code}`;
+}
+
+function availableToken(item) {
+    return `${item.kind}:${item.code}`;
+}
+
+function selectionLabel(selection) {
+    const item = [...profileAchievementsState.achievements, ...profileAchievementsState.badges].find(entry => availableToken(entry) === selectionToken(selection));
+    if (item) return formatProfileHighlightLabel(item);
+    return selection.kind === 'badge' ? selection.code : selection.code;
+}
+
+async function loadAchievementsTab() {
+    if (!currentUser) return;
+    const hero = getElement('achievementHero');
+    const catalog = getElement('profileHighlightsAvailable');
+    const badges = getElement('badgesCatalog');
+    if (hero) hero.innerHTML = '<div class="plans-loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Calculando sua trajetória...</span></div>';
+    if (catalog) catalog.innerHTML = '<div class="plans-loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Carregando conquistas...</span></div>';
+    if (badges) badges.innerHTML = '';
+    try {
+        const response = await fetch(`${API_BASE}/progress/achievements`, { credentials: 'include' });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Não foi possível carregar as conquistas.');
+        if (!Array.isArray(data.items) || !Array.isArray(data.badges) || !Array.isArray(data.selected)) {
+            throw new Error('O catálogo recebido está desatualizado. Recarregue a página.');
+        }
+        profileAchievementsState = {
+            selected: data.selected.map(item => ({ kind: item.target_kind, code: item.item?.code })),
+            achievements: data.items.map(item => ({ kind: 'achievement', ...item })),
+            badges: data.badges.map(item => ({ kind: 'badge', ...item })),
+            limit: Number(data.highlight_limit) || 3,
+            filter: profileAchievementsState.filter || 'all',
+            savingToken: null,
+        };
+        renderAchievementsTab();
+    } catch (error) {
+        if (hero) hero.innerHTML = `<div class="achievement-load-error"><strong>Não foi possível carregar</strong><p>${escapeHtml(error.message)}</p><button type="button" data-achievement-action="retry">Tentar novamente</button></div>`;
+        if (catalog) catalog.innerHTML = '<div class="achievement-empty"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i><strong>Catálogo indisponível</strong><p>Use o botão acima para tentar novamente.</p></div>';
+    }
+}
+
+function achievementCategoryIcon(category, hidden) {
+    if (hidden) return 'fa-question';
+    return {
+        treino: 'fa-dumbbell',
+        recorde: 'fa-trophy',
+        meta: 'fa-bullseye',
+        consistencia: 'fa-fire',
+    }[category] || 'fa-award';
+}
+
+function tierLabel(tier) {
+    return {
+        bronze: 'Bronze',
+        prata: 'Prata',
+        ouro: 'Ouro',
+        platina: 'Platina',
+        elite: 'Elite',
+        lendario: 'Lendária',
+    }[tier] || 'Conquista';
+}
+
+function renderAchievementCard(item, selectedTokens) {
+    const isUnlocked = Boolean(item.unlocked);
+    const isSelected = selectedTokens.has(availableToken(item));
+    const isSaving = Boolean(profileAchievementsState.savingToken);
+    const isSavingThis = profileAchievementsState.savingToken === availableToken(item);
+    const hiddenLocked = Boolean(item.hidden && !isUnlocked);
+    const tier = item.tier || 'bronze';
+    const progress = item.progress;
+    const progressMarkup = !isUnlocked && progress
+        ? `<div class="achievement-progress"><div><span>${escapeHtml(progress.current)} de ${escapeHtml(progress.target)}</span><strong>${escapeHtml(progress.percentage)}%</strong></div><i><span style="width:${Math.max(0, Math.min(100, Number(progress.percentage) || 0))}%"></span></i></div>`
+        : '';
+    const action = isUnlocked
+        ? `<button type="button" class="achievement-pin-action${isSelected ? ' is-selected' : ''}" data-highlight-kind="achievement" data-highlight-code="${escapeHtml(item.code)}"${isSaving ? ' disabled' : ''}><i class="fas ${isSavingThis ? 'fa-spinner fa-spin' : (isSelected ? 'fa-check' : 'fa-thumbtack')}" aria-hidden="true"></i>${isSavingThis ? 'Salvando...' : (isSelected ? 'Fixada' : 'Fixar no perfil')}</button>`
+        : '<span class="achievement-locked-label"><i class="fas fa-lock" aria-hidden="true"></i> Ainda bloqueada</span>';
+    const date = isUnlocked
+        ? `<time datetime="${escapeHtml(item.unlocked.unlocked_at)}">Conquistada em ${new Date(item.unlocked.unlocked_at).toLocaleDateString('pt-BR')}</time>`
+        : '';
+    return `
+        <article class="achievement-card achievement-tier--${escapeHtml(tier)}${isUnlocked ? ' is-unlocked' : ' is-locked'}${hiddenLocked ? ' is-hidden' : ''}">
+            <div class="achievement-medallion"><i class="fas ${achievementCategoryIcon(item.category, hiddenLocked)}" aria-hidden="true"></i></div>
+            <div class="achievement-card__body">
+                <div class="achievement-card__eyebrow"><span>${hiddenLocked ? 'Oculta' : escapeHtml(tierLabel(tier))}</span><small>${escapeHtml(item.category || 'geral')}</small></div>
+                <h4>${escapeHtml(item.title)}</h4>
+                <p>${escapeHtml(item.description)}</p>
+                ${progressMarkup}
+                ${date}
+            </div>
+            <footer>${action}</footer>
+        </article>`;
+}
+
+function renderBadgeCard(item, selectedTokens) {
+    const isSelected = selectedTokens.has(availableToken(item));
+    const isSaving = Boolean(profileAchievementsState.savingToken);
+    const isSavingThis = profileAchievementsState.savingToken === availableToken(item);
+    const rank = item.badge_rank;
+    return `
+        <article class="achievement-card achievement-card--badge is-unlocked">
+            <div class="achievement-medallion"><i class="fas ${item.code === 'pioneiro' ? 'fa-compass' : 'fa-infinity'}" aria-hidden="true"></i></div>
+            <div class="achievement-card__body">
+                <div class="achievement-card__eyebrow"><span>Insígnia</span><small>história</small></div>
+                <h4>${escapeHtml(item.code === 'pioneiro' && rank ? `${item.title} #${rank}` : item.title)}</h4>
+                <p>${escapeHtml(item.description || '')}</p>
+                <time datetime="${escapeHtml(item.granted_at)}">Recebida em ${new Date(item.granted_at).toLocaleDateString('pt-BR')}</time>
+            </div>
+            <footer><button type="button" class="achievement-pin-action${isSelected ? ' is-selected' : ''}" data-highlight-kind="badge" data-highlight-code="${escapeHtml(item.code)}"${isSaving ? ' disabled' : ''}><i class="fas ${isSavingThis ? 'fa-spinner fa-spin' : (isSelected ? 'fa-check' : 'fa-thumbtack')}" aria-hidden="true"></i>${isSavingThis ? 'Salvando...' : (isSelected ? 'Fixada' : 'Fixar no perfil')}</button></footer>
+        </article>`;
+}
+
+function renderAchievementsTab() {
+    const selectedEl = getElement('profileHighlightsSelected');
+    const availableEl = getElement('profileHighlightsAvailable');
+    const badgesEl = getElement('badgesCatalog');
+    const heroEl = getElement('achievementHero');
+    const achievementsSection = getElement('achievementsCatalogSection');
+    const badgesSection = getElement('badgesCatalogSection');
+    if (!selectedEl || !availableEl || !badgesEl || !heroEl || !achievementsSection || !badgesSection) return;
+
+    const selectedTokens = new Set(profileAchievementsState.selected.map(selectionToken));
+    const unlockedCount = profileAchievementsState.achievements.filter(item => item.unlocked).length;
+    heroEl.innerHTML = `<div><span class="content-kicker">Progresso reconhecido</span><h3>${unlockedCount} de ${profileAchievementsState.achievements.length} conquistas</h3><p>Marcos reais da sua rotina, sem rankings ou competição de força.</p></div><div class="achievement-hero__stats"><span><strong>${profileAchievementsState.badges.length}</strong> insígnias</span><span><strong>${profileAchievementsState.selected.length}</strong> fixadas</span></div>`;
+
+    selectedEl.innerHTML = Array.from({ length: profileAchievementsState.limit }, (_, index) => {
+        const selection = profileAchievementsState.selected[index];
+        return selection
+            ? `<button type="button" class="achievement-slot is-filled" data-highlight-kind="${escapeHtml(selection.kind)}" data-highlight-code="${escapeHtml(selection.code)}"${profileAchievementsState.savingToken ? ' disabled' : ''}><span>${index + 1}</span><strong>${escapeHtml(selectionLabel(selection))}</strong><small>Remover</small></button>`
+            : `<div class="achievement-slot"><span>${index + 1}</span><strong>Espaço livre</strong><small>Fixe uma conquista</small></div>`;
+    }).join('');
+
+    const filter = profileAchievementsState.filter;
+    const achievementItems = profileAchievementsState.achievements.filter(item => {
+        if (filter === 'unlocked') return Boolean(item.unlocked);
+        if (filter === 'progress') return !item.unlocked;
+        return filter !== 'badges';
+    });
+    achievementsSection.classList.toggle('hidden', filter === 'badges');
+    badgesSection.classList.toggle('hidden', !['all', 'badges'].includes(filter));
+    availableEl.innerHTML = achievementItems.length
+        ? achievementItems.map(item => renderAchievementCard(item, selectedTokens)).join('')
+        : '<div class="achievement-empty"><i class="fas fa-award"></i><strong>Nenhum item neste filtro</strong><p>Continue acompanhando sua evolução.</p></div>';
+    badgesEl.innerHTML = profileAchievementsState.badges.length
+        ? profileAchievementsState.badges.map(item => renderBadgeCard(item, selectedTokens)).join('')
+        : '<div class="achievement-empty"><i class="fas fa-shield"></i><strong>Nenhuma insígnia ainda</strong><p>Insígnias representam momentos únicos da sua história.</p></div>';
+
+    document.querySelectorAll('[data-achievement-filter]').forEach(button => {
+        button.classList.toggle('is-active', button.dataset.achievementFilter === filter);
+    });
+}
+
+function setAchievementFilter(filter) {
+    if (!['all', 'unlocked', 'progress', 'badges'].includes(filter)) return;
+    profileAchievementsState.filter = filter;
+    renderAchievementsTab();
+}
+
+function initializeAchievementControls() {
+    const tab = getElement('achievementsTab');
+    if (!tab || tab.dataset.controlsBound === '1') return;
+    tab.dataset.controlsBound = '1';
+    tab.addEventListener('click', (event) => {
+        const filterButton = event.target.closest('[data-achievement-filter]');
+        if (filterButton) {
+            setAchievementFilter(filterButton.dataset.achievementFilter);
+            return;
+        }
+        const retryButton = event.target.closest('[data-achievement-action="retry"]');
+        if (retryButton) {
+            loadAchievementsTab();
+            return;
+        }
+        const highlightButton = event.target.closest('[data-highlight-kind][data-highlight-code]');
+        if (highlightButton && !highlightButton.disabled) {
+            toggleProfileHighlight(highlightButton.dataset.highlightKind, highlightButton.dataset.highlightCode);
+        }
+    });
+}
+
+async function openProfileHighlights() {
+    showTab('achievements');
+}
+
+function closeProfileHighlights() {
+    showTab('stats');
+}
+
+async function toggleProfileHighlight(kind, code) {
+    if (profileAchievementsState.savingToken) return;
+    const target = [...profileAchievementsState.achievements, ...profileAchievementsState.badges]
+        .find(item => item.kind === kind && item.code === code);
+    if (!target || (kind === 'achievement' && !target.unlocked)) return;
+    const token = `${kind}:${code}`;
+    const previous = profileAchievementsState.selected.slice();
+    const current = profileAchievementsState.selected.slice();
+    const index = current.findIndex(item => selectionToken(item) === token);
+    if (index >= 0) {
+        current.splice(index, 1);
+    } else {
+        if (current.length >= profileAchievementsState.limit) {
+            showToast('Você pode fixar no máximo 3 destaques.', 'error');
+            return;
+        }
+        current.push({ kind, code });
+    }
+    profileAchievementsState.selected = current;
+    profileAchievementsState.savingToken = token;
+    renderAchievementsTab();
+    try {
+        await saveProfileHighlights({ silent: true });
+    } catch (error) {
+        profileAchievementsState.selected = previous;
+        profileAchievementsState.savingToken = null;
+        renderAchievementsTab();
+        showToast(error.message, 'error');
+    }
+}
+
+async function saveProfileHighlights(options = {}) {
+    const response = await fetch(`${API_BASE}/profile/highlights`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ items: profileAchievementsState.selected }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Não foi possível salvar os destaques.');
+    currentUser.profile_highlights = data.selected;
+    profileAchievementsState = {
+        selected: Array.isArray(data.selected)
+            ? data.selected.map(item => ({ kind: item.target_kind, code: item.item?.code }))
+            : [],
+        achievements: profileAchievementsState.achievements,
+        badges: profileAchievementsState.badges,
+        limit: Number(data.limit) || 3,
+        filter: profileAchievementsState.filter,
+        savingToken: null,
+    };
+    renderAchievementsTab();
+    renderProfileBadges(currentUser);
+    if (!options.silent) showToast(data.message, 'success');
+    return data;
 }
 
 async function resumeAfterAuthentication(resume, requiresProfile) {
@@ -801,7 +1211,8 @@ function renderGuestPresentation(tabName) {
         diet: ['dietTableBody', 'Registre refeições e acompanhe seus macros', 'Crie uma conta para salvar seu diário alimentar e acompanhar metas personalizadas.'],
         diet_plans: ['dietPlansTableBody', 'Cardápios alinhados ao seu objetivo', 'Explore o questionário e crie planos alimentares personalizados com IA Premium.'],
         workout_plans: ['workoutPlansTableBody', 'Organize e execute seus treinos', 'Explore o gerador e salve planos para acompanhar cada sessão.'],
-        measurements: ['measurementTableBody', 'Acompanhe sua evolução corporal', 'Entre para registrar peso, medidas e composição ao longo do tempo.']
+        measurements: ['measurementTableBody', 'Acompanhe sua evolução corporal', 'Entre para registrar peso, medidas e composição ao longo do tempo.'],
+        stats: ['measurementTableBody', 'Seu espaço em um só lugar', 'Entre para acompanhar medidas, treinos, metas e conquistas.']
     };
     const presentation = presentations[tabName];
     if (presentation) {
@@ -816,11 +1227,13 @@ function renderGuestPresentation(tabName) {
     }
     if (tabName === 'stats') {
         const latest = getElement('latestMeasurement');
-        if (latest) latest.innerHTML = '<strong>Seu histórico em um só lugar</strong><span>Entre para acompanhar medidas, refeições e evolução.</span>';
+        if (latest) latest.innerHTML = '<strong>Seu histórico em um só lugar</strong><span>Entre para acompanhar medidas, treinos, metas e conquistas.</span>';
         const total = getElement('totalDietEntries');
         const recent = getElement('recentDietEntries');
         if (total) total.textContent = '—';
         if (recent) recent.textContent = '—';
+        const recentActivities = getElement('profileRecentActivities');
+        if (recentActivities) recentActivities.innerHTML = '<div class="guest-presentation"><i class="fas fa-person-running"></i><div><strong>Atividades recentes</strong><p>Entre para ver seus treinos e progresso.</p></div></div>';
     }
 }
 
@@ -1036,10 +1449,12 @@ function updateVoiceButton() {
     if (isRecording) {
         button.innerHTML = '⏹️';
         button.title = 'Parar gravação';
+        button.setAttribute('aria-label', 'Parar gravação de voz');
         button.classList.add('recording');
     } else {
         button.innerHTML = '🎤';
         button.title = 'Falar com a IA';
+        button.setAttribute('aria-label', 'Falar com a IA');
         button.classList.remove('recording');
     }
 }
@@ -1070,11 +1485,13 @@ function speakLastResponse() {
         utterance.onstart = () => {
             speakButton.innerHTML = '⏸️';
             speakButton.title = 'Pausar reprodução';
+            speakButton.setAttribute('aria-label', 'Pausar resposta da IA');
         };
         
         utterance.onend = () => {
             speakButton.innerHTML = '🔊';
             speakButton.title = 'Ouvir última resposta';
+            speakButton.setAttribute('aria-label', 'Ouvir última resposta da IA');
         };
     }
     
@@ -1130,6 +1547,7 @@ async function handleLogin(e) {
         const data = await response.json();
         if (response.ok) {
             currentUser = data.user;
+            if (data.csrf_token) setCsrfToken(data.csrf_token);
             const intent = pendingAuthIntent;
             const destination = intent?.tab || currentTab;
             pendingAuthIntent = null;
@@ -1179,6 +1597,7 @@ async function handleRegister(e) {
         const data = await response.json();
         if (response.ok) {
             currentUser = data.user;
+            if (data.csrf_token) setCsrfToken(data.csrf_token);
             const intent = pendingAuthIntent;
             const destination = intent?.tab || currentTab;
             pendingAuthIntent = null;
@@ -1201,12 +1620,14 @@ async function logout() {
             credentials: "include"
         });
         currentUser = null;
+        setCsrfToken(null);
         window.clearWorkoutProgress?.();
         showMainScreen({ tab: 'diet' });
         showToast("Logout realizado com sucesso", "success");
     } catch (error) {
         console.error("Logout error:", error);
         currentUser = null;
+        setCsrfToken(null);
         window.clearWorkoutProgress?.();
         showMainScreen({ tab: 'diet' });
     }
@@ -1219,7 +1640,11 @@ function showTab(tabName) {
         openAuthModal('Entre para acessar seu histórico de atividades.', 'login', { tab: 'activities' });
         return;
     }
-    if (tabName === 'chat' && !currentUser?.is_premium) {
+    if (tabName === 'achievements' && !currentUser) {
+        openAuthModal('Entre para acessar suas conquistas.', 'login', { tab: 'achievements' });
+        return;
+    }
+    if (tabName === 'chat' && !hasAiAccess()) {
         if (!currentUser) {
             openAuthModal('Entre para conhecer o Assistente IA. Este é um recurso Premium.', 'register', { tab: 'chat', premium: true });
             return;
@@ -1235,6 +1660,7 @@ function showTab(tabName) {
     // Remove active class from all nav buttons
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.classList.remove('active');
+        btn.removeAttribute('aria-current');
     });
     
     // Hide all tab contents
@@ -1242,10 +1668,10 @@ function showTab(tabName) {
         tab.classList.add('hidden');
     });
     
-    const chatNavBtn = document.querySelector(`[onclick="showTab('chat')"]`);
+    const chatNavBtn = document.querySelector(`.nav-btn[onclick="showTab('chat')"]`);
     if (chatNavBtn) {
         chatNavBtn.style.display = '';
-        chatNavBtn.classList.toggle('is-locked', !currentUser?.is_premium);
+        chatNavBtn.classList.toggle('is-locked', !hasAiAccess());
     }
 
     // Show selected tab
@@ -1255,10 +1681,11 @@ function showTab(tabName) {
     }
     
     // Add active class to clicked button
-    const navTabName = ['measurements', 'activities'].includes(tabName) ? 'stats' : tabName;
+    const navTabName = ['measurements', 'activities', 'achievements'].includes(tabName) ? 'stats' : tabName;
     const activeBtn = document.querySelector(`.nav-btn[onclick="showTab('${navTabName}')"]`);
     if (activeBtn) {
         activeBtn.classList.add('active');
+        activeBtn.setAttribute('aria-current', 'page');
     }
     
     currentTab = tabName;
@@ -1279,9 +1706,13 @@ function showTab(tabName) {
         loadMeasurements();
     } else if (tabName === 'stats') {
         loadStats();
+        loadMeasurementSummary();
         window.loadProgressOverview?.();
+        loadRecentActivities();
     } else if (tabName === 'activities') {
         window.loadWorkoutActivities?.();
+    } else if (tabName === 'achievements') {
+        loadAchievementsTab();
     } else if (tabName === 'diet_plans') { // Carrega planos de dieta
         loadDietPlans();
     } else if (tabName === 'workout_plans') { // Carrega planos de treino
@@ -1290,6 +1721,165 @@ function showTab(tabName) {
         window.loadProfessionalDashboard?.();
     }
 }
+
+async function openPlansModal() {
+    openAppModal(getElement('plansModal'));
+    const grid = getElement('plansGrid');
+    try {
+        const [plansResponse, applicationResponse] = await Promise.all([
+            fetch(`${API_BASE}/plans`),
+            currentUser ? fetch(`${API_BASE}/professional-application`, { credentials: 'include' }) : Promise.resolve(null)
+        ]);
+        const data = await plansResponse.json();
+        const applicationData = applicationResponse && applicationResponse.ok ? await applicationResponse.json() : { application: null };
+        if (!plansResponse.ok) throw new Error(data.error || 'Não foi possível carregar os planos.');
+        window.__dtApplication = applicationData.application;
+        const currentPlan = currentUser?.plan_code || 'free';
+        grid.innerHTML = data.plans.map(plan => {
+            const isCurrent = plan.code === currentPlan;
+            let action;
+            if (isCurrent) {
+                action = '<button type="button" class="btn-primary" disabled>Seu plano atual</button>';
+            } else if (plan.price_brl === 0) {
+                action = '';
+            } else if (plan.code === 'premium_student') {
+                action = data.provider_configured
+                    ? `<button type="button" class="btn-primary" onclick="startBillingCheckout('${plan.code}', this)">Assinar por R$ ${Number(plan.price_brl).toFixed(0)}/mês</button>`
+                    : '<button type="button" class="btn-primary" disabled>Pagamento em breve</button>';
+            } else {
+                action = professionalPlanAction(plan, data.provider_configured);
+            }
+            return `
+            <article class="pricing-card${isCurrent ? ' is-current' : ''}">
+                <h4>${escapeHtml(plan.name)}</h4>
+                <p class="pricing-card__price"><strong>R$ ${Number(plan.price_brl).toFixed(0)}</strong><span>${plan.price_brl ? '/mês' : ''}</span></p>
+                <ul>${(plan.features || []).map(feature => `<li><i class="fas fa-check" aria-hidden="true"></i>${escapeHtml(feature)}</li>`).join('')}</ul>
+                ${action}
+            </article>`;
+        }).join('');
+        renderSubscriptionManagement(data.provider_configured);
+        getElement('billingNotice').textContent = data.provider_configured
+            ? 'Cartão renova automaticamente. No PIX, uma nova cobrança é gerada todo mês.'
+            : 'O pagamento será habilitado após a configuração do provedor.';
+    } catch (error) {
+        grid.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
+    }
+}
+
+function professionalPlanAction(plan, providerConfigured) {
+    const application = window.__dtApplication;
+    if (!currentUser) return '<button type="button" class="btn-secondary" onclick="closePlansModal(); openAuthModal(\'Entre para solicitar aprovação profissional.\', \'register\')">Entrar para solicitar</button>';
+    if (!application || ['rejected'].includes(application.status)) {
+        return `<button type="button" class="btn-secondary" onclick="showProfessionalRequestForm('${plan.code}')">Solicitar aprovação</button>`;
+    }
+    if (application.status === 'pending') {
+        return `<p class="pricing-status">Análise em andamento${application.plan_code !== plan.code ? ` (plano: ${escapeHtml(application.plan_code)})` : ''}.</p>`;
+    }
+    if (!providerConfigured) return '<button type="button" class="btn-primary" disabled>Pagamento em breve</button>';
+    return `<button type="button" class="btn-primary" onclick="startBillingCheckout('${plan.code}', this)">Assinar por R$ ${Number(plan.price_brl).toFixed(0)}/mês</button>`;
+}
+
+function showProfessionalRequestForm(planCode) {
+    const grid = getElement('plansGrid');
+    grid.insertAdjacentHTML('beforeend', `
+        <form id="professionalRequestForm" class="professional-request">
+            <h4>Solicitar aprovação profissional</h4>
+            <input type="hidden" name="plan_code" value="${escapeHtml(planCode)}">
+            <label>Nome completo<input name="full_name" maxlength="120" required></label>
+            <label>Profissão<select name="profession" required>
+                <option value="personal_trainer">Personal trainer (CREF)</option>
+                <option value="nutritionist">Nutricionista (CRN)</option>
+            </select></label>
+            <label>Número do registro<input name="registration_number" maxlength="40" required placeholder="Ex.: 000000-G/UF"></label>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary" onclick="this.closest('form').remove()">Cancelar</button>
+                <button type="submit" class="btn-primary">Enviar solicitação</button>
+            </div>
+        </form>`);
+    getElement('professionalRequestForm').addEventListener('submit', submitProfessionalApplication);
+}
+
+async function submitProfessionalApplication(event) {
+    event.preventDefault();
+    const form = event.target;
+    const payload = Object.fromEntries(new FormData(form).entries());
+    try {
+        const response = await fetch(`${API_BASE}/professional-application`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Não foi possível enviar a solicitação.');
+        showToast(data.message, 'success');
+        openPlansModal();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function startBillingCheckout(planCode, button) {
+    if (!requireAuth('Crie sua conta para assinar e desbloquear o plano Premium.', { mode: 'register' })) return;
+    if (button) button.disabled = true;
+    try {
+        const response = await fetch(`${API_BASE}/billing/checkout`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ plan_code: planCode, payment_method: choosePaymentMethod() })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Não foi possível iniciar o pagamento.');
+        window.location.href = data.checkout_url;
+    } catch (error) {
+        if (button) button.disabled = false;
+        showToast(error.message, 'error');
+    }
+}
+
+function choosePaymentMethod() {
+    return window.confirm('Usar cartão de crédito (renovação automática)?\n\nOK = Cartão\nCancelar = PIX mensal') ? 'credit_card' : 'pix';
+}
+
+function renderSubscriptionManagement(providerConfigured) {
+    const container = getElement('subscriptionManage');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!currentUser?.is_premium) return;
+    fetch(`${API_BASE}/subscription`, { credentials: 'include' })
+        .then(response => response.json())
+        .then(data => {
+            const subscription = data.subscription;
+            if (!subscription || subscription.status !== 'active') return;
+            const until = subscription.current_period_end ? new Date(subscription.current_period_end).toLocaleDateString('pt-BR') : null;
+            container.innerHTML = `
+                <section class="subscription-manage">
+                    <div><strong>${escapeHtml(subscription.plan_code)}</strong>${until ? `<small>Ativo até ${escapeHtml(until)}</small>` : ''}</div>
+                    ${providerConfigured ? '<button type="button" class="btn-secondary" onclick="cancelMySubscription()">Cancelar assinatura</button>' : ''}
+                </section>`;
+        })
+        .catch(() => {});
+}
+
+async function cancelMySubscription() {
+    if (!window.confirm('Cancelar a assinatura? Você mantém o acesso até o fim do período já pago.')) return;
+    try {
+        const response = await fetch(`${API_BASE}/billing/cancel`, { method: 'POST', credentials: 'include' });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Não foi possível cancelar.');
+        showToast(data.message, 'success');
+        await checkAuthStatus();
+        openPlansModal();
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+function closePlansModal() {
+    closeAppModal(getElement('plansModal'));
+}
+
 function showLogin() {
     const loginForm = getElement("loginForm");
     const registerForm = getElement("registerForm");
@@ -1328,13 +1918,44 @@ function clearForms() {
 let activeModal = null;
 let modalTrigger = null;
 
+function getModalFocusable(modal) {
+    if (!modal) return [];
+    const selector = "a[href], button:not([disabled]), input:not([disabled]):not([type='hidden']), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+    return Array.from(modal.querySelectorAll(selector)).filter(element => {
+        return !element.hidden && element.getAttribute("aria-hidden") !== "true" && element.getClientRects().length > 0;
+    });
+}
+
+function updateModalBackground(modal) {
+    document.querySelectorAll("[data-modal-background-inert]").forEach(element => {
+        element.inert = false;
+        delete element.dataset.modalBackgroundInert;
+    });
+    if (!modal) return;
+
+    const background = modal.parentElement === document.body
+        ? [getElement("mainScreen")]
+        : [document.querySelector(".app-header"), document.querySelector(".app-shell"), getElement("activeWorkoutDock")];
+    document.querySelectorAll(".modal.show").forEach(otherModal => {
+        if (otherModal !== modal) background.push(otherModal);
+    });
+    background.filter(Boolean).forEach(element => {
+        element.inert = true;
+        element.dataset.modalBackgroundInert = "true";
+    });
+}
+
 function openAppModal(modal) {
     if (!modal) return;
     modalTrigger = document.activeElement;
+    modal._modalTrigger = modalTrigger;
+    modal._previousActiveModal = activeModal && activeModal !== modal ? activeModal : null;
     activeModal = modal;
     modal.classList.add("show");
+    modal.setAttribute("aria-hidden", "false");
     document.body.classList.add("modal-open");
-    const focusTarget = modal.querySelector(".btn-close, input:not([type='hidden']), select, textarea, button");
+    updateModalBackground(modal);
+    const focusTarget = getModalFocusable(modal)[0];
     if (focusTarget) requestAnimationFrame(() => focusTarget.focus());
 
     const fluid = typeof Fluid !== "undefined" ? Fluid : null;
@@ -1383,12 +2004,18 @@ function finalizeModalClose(modal) {
     }
     modal.style.opacity = "";
     modal.classList.remove("show");
+    modal.setAttribute("aria-hidden", "true");
     if (activeModal === modal) {
-        activeModal = null;
-        document.body.classList.remove("modal-open");
-        if (modalTrigger instanceof HTMLElement) modalTrigger.focus();
-        modalTrigger = null;
+        const previousModal = modal._previousActiveModal?.classList.contains("show") ? modal._previousActiveModal : null;
+        activeModal = previousModal;
+        document.body.classList.toggle("modal-open", Boolean(previousModal));
+        updateModalBackground(previousModal);
+        const trigger = modal._modalTrigger;
+        if (trigger instanceof HTMLElement && !trigger.inert) trigger.focus();
+        modalTrigger = previousModal?._modalTrigger || null;
     }
+    modal._previousActiveModal = null;
+    modal._modalTrigger = null;
 }
 
 function closeAppModal(modal) {
@@ -1421,7 +2048,29 @@ function closeAppModal(modal) {
 }
 
 document.addEventListener("keydown", function(event) {
-    if (event.key === "Escape" && activeModal && activeModal.dataset.modalLocked !== "true") closeAppModal(activeModal);
+    if (!activeModal) return;
+    if (event.key === "Escape" && activeModal.dataset.modalLocked !== "true") {
+        closeAppModal(activeModal);
+        return;
+    }
+    if (event.key !== "Tab") return;
+
+    const focusable = getModalFocusable(activeModal);
+    if (!focusable.length) {
+        event.preventDefault();
+        activeModal.setAttribute("tabindex", "-1");
+        activeModal.focus();
+        return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && (document.activeElement === first || !activeModal.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && (document.activeElement === last || !activeModal.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+    }
 });
 
 function showAddDietModal() {
@@ -1578,14 +2227,16 @@ function closeViewWorkoutPlanModal() {
 }
 
 // Data functions
-async function loadDietEntries() {
+async function loadDietEntries(options = {}) {
     if (!currentUser) {
         renderGuestPresentation('diet');
         return;
     }
-    showGlobalLoading();
+    if (options.showLoading !== false) showGlobalLoading();
     const startDate = getElement("dietStartDate")?.value;
     const endDate = getElement("dietEndDate")?.value;
+    const requestRange = { startDate: startDate || null, endDate: endDate || null };
+    dietEntriesLoadRange = requestRange;
     
     try {
         let url = `${API_BASE}/diet`;
@@ -1593,21 +2244,32 @@ async function loadDietEntries() {
         if (startDate) params.append('start_date', startDate);
         if (endDate) params.append('end_date', endDate);
         if (params.toString()) url += '?' + params.toString();
-        
-        const response = await fetch(url, {
-            credentials: 'include'
-        });
-        
-        if (response.ok) {
-            dietEntries = await response.json();
+
+        dietEntriesLoadPromise = fetch(url, { credentials: 'include' })
+            .then(async (response) => {
+                if (!response.ok) {
+                    console.error('Failed to load diet entries');
+                    return null;
+                }
+                return response.json();
+            })
+            .catch((error) => {
+                console.error('Error loading diet entries:', error);
+                return null;
+            });
+
+        const entries = await dietEntriesLoadPromise;
+        if (entries) {
+            dietEntries = entries;
             renderDietTable();
-        } else {
-            console.error('Failed to load diet entries');
         }
     } catch (error) {
         console.error('Error loading diet entries:', error);
     } finally {
-        hideGlobalLoading();
+        if (dietEntriesLoadRange.startDate === requestRange.startDate && dietEntriesLoadRange.endDate === requestRange.endDate) {
+            dietEntriesLoadPromise = null;
+        }
+        if (options.showLoading !== false) hideGlobalLoading();
     }
 }
 
@@ -1619,12 +2281,15 @@ async function loadMeasurements() {
     showGlobalLoading();
     const startDate = getElement("measurementStartDate")?.value;
     const endDate = getElement("measurementEndDate")?.value;
+    const token = ++measurementRequestToken;
     
     try {
         let url = `${API_BASE}/measurements`;
         const params = new URLSearchParams();
         if (startDate) params.append('start_date', startDate);
         if (endDate) params.append('end_date', endDate);
+        params.append('limit', '20');
+        if (measurements.length && !startDate && !endDate) params.append('offset', String(measurements.length));
         if (params.toString()) url += '?' + params.toString();
         
         const response = await fetch(url, {
@@ -1632,7 +2297,15 @@ async function loadMeasurements() {
         });
         
         if (response.ok) {
-            measurements = await response.json();
+            const data = await response.json();
+            const items = Array.isArray(data) ? data : (data.items || []);
+            if (token !== measurementRequestToken) return;
+            if (params.has('offset') && measurements.length) {
+                measurements = [...measurements, ...items];
+            } else {
+                measurements = items;
+            }
+            measurementHasMore = items.length >= 20;
             renderMeasurementTable();
         } else {
             console.error('Failed to load measurements');
@@ -1640,7 +2313,72 @@ async function loadMeasurements() {
     } catch (error) {
         console.error('Error loading measurements:', error);
     } finally {
-        hideGlobalLoading();
+        if (token === measurementRequestToken) hideGlobalLoading();
+    }
+}
+
+async function loadMeasurementSummary() {
+    const summary = getElement('measurementSummary');
+    if (!summary || !currentUser) {
+        if (summary) summary.innerHTML = '';
+        return;
+    }
+    try {
+        const response = await fetch(`${API_BASE}/measurements?limit=2`, { credentials: 'include' });
+        if (!response.ok) { summary.innerHTML = ''; return; }
+        const data = await response.json();
+        const items = Array.isArray(data) ? data : (data.items || []);
+        if (!items.length) {
+            summary.innerHTML = '<div class="measurement-summary__empty"><i class="fas fa-ruler-combined"></i><div><strong>Nenhuma medição ainda</strong><p>Registre a primeira para acompanhar sua evolução.</p></div><button type="button" onclick="showAddMeasurementModal()">Adicionar medição</button></div>';
+            return;
+        }
+        const latest = items[0];
+        const previous = items[1];
+        const weightDiff = latest.weight != null && previous?.weight != null ? (latest.weight - previous.weight).toFixed(1) : null;
+        summary.innerHTML = `
+            <div class="measurement-summary__hero">
+                <div><small>Peso atual</small><strong>${escapeHtml(latest.weight)} kg</strong></div>
+                ${weightDiff ? `<div class="measurement-summary__delta ${Number(weightDiff) > 0 ? 'measurement-summary__delta--up' : 'measurement-summary__delta--down'}"><i class="fas fa-${Number(weightDiff) > 0 ? 'arrow-up' : 'arrow-down'}"></i> ${weightDiff.replace('-', '−')} kg</div>` : ''}
+            </div>
+            <div class="measurement-summary__meta">
+                ${latest.body_fat != null ? `<span>${escapeHtml(latest.body_fat)}% gordura</span>` : ''}
+                ${latest.muscle_mass != null ? `<span>${escapeHtml(latest.muscle_mass)} kg massa</span>` : ''}
+                <span>${formatDate(latest.date)}</span>
+            </div>
+        `;
+    } catch (error) {
+        summary.innerHTML = '';
+    }
+}
+
+async function loadRecentActivities() {
+    const container = getElement('profileRecentActivities');
+    if (!container || !currentUser) {
+        if (container) container.innerHTML = '';
+        return;
+    }
+    container.innerHTML = '<div class="plans-loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Carregando atividades...</span></div>';
+    try {
+        const response = await fetch(`${API_BASE}/activities?limit=3`, { credentials: 'include' });
+        if (!response.ok) { container.innerHTML = ''; return; }
+        const data = await response.json();
+        const items = Array.isArray(data) ? data : (data.items || []);
+        if (!items.length) {
+            container.innerHTML = '<div class="profile-recent-activities__empty"><i class="fas fa-person-running"></i><p>Nenhuma atividade registrada ainda.</p></div>';
+            return;
+        }
+        container.innerHTML = items.map(activity => {
+            const completedAt = new Date(activity.completed_at);
+            const time = completedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+            const duration = Math.round(Number(activity.duration_seconds || 0) / 60);
+            return `<article class="profile-recent-card" onclick="showTab('activities')" role="button" tabindex="0">
+                <div class="profile-recent-card__icon"><i class="fas fa-dumbbell"></i></div>
+                <div><strong>${escapeHtml(activity.workout_name)}</strong><p>${time} · ${duration}min · ${activity.exercises_performed || 0} exercícios</p></div>
+                <i class="fas fa-chevron-right" aria-hidden="true"></i>
+            </article>`;
+        }).join('');
+    } catch (error) {
+        container.innerHTML = '';
     }
 }
 
@@ -1881,12 +2619,16 @@ async function loadTodayCardapio() {
     const today = localDateInputValue();
     cardapioDay = getStoredCardapioDay();
 
-    const [plansRes, entriesRes] = await Promise.all([
-        fetch(`${API_BASE}/diet_plans`, { credentials: 'include' }),
-        fetch(`${API_BASE}/diet?start_date=${today}&end_date=${today}`, { credentials: 'include' })
-    ]);
-
-    cardapioTodayEntries = entriesRes.ok ? await entriesRes.json() : [];
+    const plansRes = await fetch(`${API_BASE}/diet_plans`, { credentials: 'include' });
+    if (dietEntriesLoadPromise && dietEntriesLoadRange.startDate === today && dietEntriesLoadRange.endDate === today) {
+        const entries = await dietEntriesLoadPromise;
+        cardapioTodayEntries = Array.isArray(entries) ? entries.slice() : [];
+    } else if (dietEntriesLoadRange.startDate === today && dietEntriesLoadRange.endDate === today && Array.isArray(dietEntries)) {
+        cardapioTodayEntries = dietEntries.slice();
+    } else {
+        const entriesRes = await fetch(`${API_BASE}/diet?start_date=${today}&end_date=${today}`, { credentials: 'include' });
+        cardapioTodayEntries = entriesRes.ok ? await entriesRes.json() : [];
+    }
 
     if (!plansRes.ok) {
         renderTodayCardapio(null, 'Não foi possível carregar seu plano de dieta.');
@@ -2051,7 +2793,7 @@ async function quickLogPlanMeal(mealId, mode) {
         });
         if (response.ok) {
             showToast("Refeição registrada!", "success");
-            loadDietEntries();
+            loadDietEntries({ showLoading: false });
             loadTodayCardapio();
         } else {
             const errorData = await response.json();
@@ -2216,6 +2958,10 @@ function renderMeasurementTable() {
             </div>
             ${measurement.notes ? `<p class="measurement-card__notes"><i class="far fa-note-sticky"></i> ${escapeHtml(measurement.notes)}</p>` : ''}
         </article>`).join('');
+
+    if (measurementHasMore) {
+        container.insertAdjacentHTML('beforeend', `<div class="profile-load-more"><button type="button" onclick="loadMeasurements()">Carregar mais</button></div>`);
+    }
 }
 
 
@@ -2296,7 +3042,7 @@ async function deleteDietEntry(id) {
         const response = await fetch(`/api/diet/${id}`, { method: "DELETE", credentials: 'include' });
         if (response.ok) {
             showToast("Refeição excluída!", "success");
-            loadDietEntries();
+            loadDietEntries({ showLoading: false });
         } else {
             const errorData = await response.json();
             showToast(errorData.error || "Erro ao excluir!", "error");
@@ -2333,7 +3079,10 @@ async function deleteMeasurement(id) {
         const response = await fetch(`/api/measurements/${id}`, { method: "DELETE", credentials: 'include' });
         if (response.ok) {
             showToast("Medição excluída!", "success");
+            measurements = [];
+            measurementHasMore = false;
             loadMeasurements();
+            loadMeasurementSummary();
         } else {
             const errorData = await response.json();
             showToast(errorData.error || "Erro ao excluir!", "error");
@@ -2360,7 +3109,8 @@ function clearMeasurementFilters() {
     
     if (startDate) startDate.value = "";
     if (endDate) endDate.value = "";
-    
+    measurements = [];
+    measurementHasMore = false;
     loadMeasurements();
 }
 

@@ -225,7 +225,7 @@ def test_workout_generation_uses_fallback_model(app, monkeypatch):
 def test_macro_endpoint_reports_invalid_ai_json(client, monkeypatch):
     register(client)
     monkeypatch.setattr(
-        "src.routes.user_routes.calculate_nutrition",
+        "src.routes.profile_routes.calculate_nutrition",
         lambda description, image_bytes=None, mime_type=None: (_ for _ in ()).throw(
             AIResponseError("invalid JSON")
         ),
@@ -249,7 +249,7 @@ def test_macro_endpoint_with_photo_passes_image_to_ai(client, monkeypatch):
             "precision": "alta",
         }
 
-    monkeypatch.setattr("src.routes.user_routes.calculate_nutrition", fake_calculate)
+    monkeypatch.setattr("src.routes.profile_routes.calculate_nutrition", fake_calculate)
     gif = base64.b64encode(b"\xff\xd8\xff\xe0fakejpg").decode()
     response = client.post(
         "/api/diet/ai_macros",
@@ -263,7 +263,7 @@ def test_macro_endpoint_with_photo_passes_image_to_ai(client, monkeypatch):
 def test_macro_endpoint_photo_without_description_is_valid(client, monkeypatch):
     register(client)
     monkeypatch.setattr(
-        "src.routes.user_routes.calculate_nutrition",
+        "src.routes.profile_routes.calculate_nutrition",
         lambda description, image_bytes=None, mime_type=None: {
             "calories": 1,
             "protein": 1,
@@ -324,7 +324,7 @@ def test_chat_reports_other_invalid_ai_response(app, client, monkeypatch):
         User.query.filter_by(username="alice").one().is_premium = True
         db.session.commit()
     monkeypatch.setattr(
-        "src.routes.user_routes.generate_response",
+        "src.routes.plan_routes.generate_response",
         lambda *args: (_ for _ in ()).throw(AIResponseError("Resposta inválida da IA.")),
     )
 
@@ -340,7 +340,7 @@ def test_chat_reports_gemini_quota_limit(app, client, monkeypatch):
         User.query.filter_by(username="alice").one().is_premium = True
         db.session.commit()
     monkeypatch.setattr(
-        "src.routes.user_routes.generate_response",
+        "src.routes.plan_routes.generate_response",
         lambda *args: (_ for _ in ()).throw(AIQuotaExceededError("A cota da IA foi atingida. Tente novamente em cerca de 30 segundos.")),
     )
 

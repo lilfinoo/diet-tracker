@@ -20,6 +20,12 @@ class Config:
     SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "true"
     MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", 10 * 1024 * 1024))
     CORS_ORIGINS = _csv("CORS_ORIGINS")
+    GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+    GOOGLE_SIGNUP_TOKEN_MAX_AGE = int(os.getenv("GOOGLE_SIGNUP_TOKEN_MAX_AGE", "600"))
+    ASAAS_API_KEY = os.getenv("ASAAS_API_KEY")
+    ASAAS_API_BASE_URL = os.getenv("ASAAS_API_BASE_URL", "https://api-sandbox.asaas.com/v3")
+    ASAAS_WEBHOOK_TOKEN = os.getenv("ASAAS_WEBHOOK_TOKEN")
+    PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL")
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
     GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
     GEMINI_CHAT_MODEL = os.getenv("GEMINI_CHAT_MODEL", "gemini-flash-lite-latest")
@@ -55,9 +61,15 @@ class TestConfig(Config):
     SECRET_KEY = "test-secret-key"
     SQLALCHEMY_DATABASE_URI = "sqlite://"
     SESSION_COOKIE_SECURE = False
+    CSRF_PROTECTION = False
     GEMINI_API_KEY = None
+    GOOGLE_CLIENT_ID = "test-google-client-id"
+    ASAAS_API_KEY = None
+    ASAAS_API_BASE_URL = "https://api-sandbox.asaas.com/v3"
+    ASAAS_WEBHOOK_TOKEN = "test-webhook-token-0123456789abcdef"
+    PUBLIC_BASE_URL = "https://test.example"
     WORKOUTX_API_KEY = None
-    RATE_LIMITS = {"login": (100, 60), "register": (100, 60), "ai": (100, 60)}
+    RATE_LIMITS = {"login": (1000, 60), "register": (1000, 60), "ai": (1000, 60)}
 
 
 class ProductionConfig(Config):
@@ -69,8 +81,24 @@ class ProductionConfig(Config):
                 ("SECRET_KEY", cls.SECRET_KEY),
                 ("DATABASE_URL", os.getenv("DATABASE_URL")),
                 ("GEMINI_API_KEY", cls.GEMINI_API_KEY),
+                ("PUBLIC_BASE_URL", cls.PUBLIC_BASE_URL),
             )
             if not value
         ]
         if missing:
             raise RuntimeError(f"Missing required production configuration: {', '.join(missing)}")
+
+        if os.getenv("SESSION_COOKIE_SECURE", "false").lower() != "true":
+            raise RuntimeError("SESSION_COOKIE_SECURE must be true in production")
+
+        if cls.ASAAS_API_KEY and not cls.ASAAS_WEBHOOK_TOKEN:
+            raise RuntimeError("ASAAS_WEBHOOK_TOKEN is required when ASAAS_API_KEY is set")
+
+        if cls.ASAAS_API_KEY and not cls.ASAAS_API_BASE_URL:
+            raise RuntimeError("ASAAS_API_BASE_URL is required when ASAAS_API_KEY is set")
+
+        if not cls.CORS_ORIGINS:
+            raise RuntimeError("CORS_ORIGINS must be configured in production")
+
+        if not getattr(cls, "CSRF_PROTECTION", True):
+            raise RuntimeError("CSRF_PROTECTION must be enabled in production")

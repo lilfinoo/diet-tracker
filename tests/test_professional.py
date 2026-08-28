@@ -160,6 +160,36 @@ def test_admin_revoking_professional_releases_students(app):
         assert ProfessionalStudentRelationship.query.filter_by(status="active").count() == 0
 
 
+def test_professional_scope_limits_plan_type(app):
+    trainer_client = app.test_client()
+    register(trainer_client, "scoped-trainer")
+    enable_professional(app, "scoped-trainer")
+    with app.app_context():
+        trainer = User.query.filter_by(username="scoped-trainer").one()
+        trainer.professional_scope = "workout"
+        db.session.commit()
+
+    missing_student_id = uuid4()
+    assert trainer_client.get(
+        f"/api/professional/students/{missing_student_id}/diet-plans"
+    ).status_code == 403
+    assert trainer_client.get(
+        f"/api/professional/students/{missing_student_id}/workout-plans"
+    ).status_code == 404
+
+
+def test_professional_plan_limits_student_slots(app):
+    trainer_client = app.test_client()
+    register(trainer_client, "limited-trainer")
+    enable_professional(app, "limited-trainer")
+
+    for _ in range(5):
+        assert trainer_client.post("/api/professional/invitations", json={}).status_code == 201
+    response = trainer_client.post("/api/professional/invitations", json={})
+    assert response.status_code == 409
+    assert "5 alunos" in response.get_json()["error"]
+
+
 def test_admin_revoking_professional_invalidates_pending_invites(app):
     trainer_client = app.test_client()
     register(trainer_client, "trainer")

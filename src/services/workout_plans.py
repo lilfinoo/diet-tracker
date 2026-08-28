@@ -9,11 +9,13 @@ CATALOG_PATH = Path(__file__).resolve().parent.parent / "data" / "exercises.json
 GOALS = {"hypertrophy", "strength", "conditioning", "fat_loss", "mobility"}
 EXPERIENCE_LEVELS = {"beginner", "intermediate", "advanced"}
 SPLITS_BY_DAYS = {
+    1: {"full_body"},
     2: {"full_body", "upper_lower"},
     3: {"full_body", "upper_lower", "abc"},
     4: {"full_body", "upper_lower", "abc", "abcd"},
     5: {"full_body", "upper_lower", "abc", "abcd", "abcde"},
     6: {"full_body", "upper_lower", "abc", "abcd", "abcde"},
+    7: {"full_body"},
 }
 EQUIPMENT_GROUPS = {
     "pull_up_bar": {"pullup_bar"},
@@ -124,6 +126,8 @@ def expand_equipment(equipment):
 
 
 def recommend_split(days_per_week, experience_level):
+    if days_per_week in {1, 7}:
+        return "full_body"
     if days_per_week == 2:
         return "full_body"
     if days_per_week == 3:
@@ -271,7 +275,7 @@ def validate_workout_questionnaire(data):
     if experience not in EXPERIENCE_LEVELS:
         errors["experience_level"] = "Selecione seu nível de experiência."
     if days not in SPLITS_BY_DAYS:
-        errors["days_per_week"] = "Escolha entre 2 e 6 dias por semana."
+        errors["days_per_week"] = "Escolha entre 1 e 7 dias por semana."
     if duration not in {20, 30, 45, 60, 75, 90}:
         errors["session_duration"] = "Selecione uma duração válida."
 
@@ -376,7 +380,7 @@ def normalize_workout_output(data, questionnaire):
         "intermediate": {"beginner", "intermediate"},
         "advanced": EXPERIENCE_LEVELS,
     }[questionnaire["experience_level"]]
-    for day_index, (day, spec) in enumerate(zip(days, specs, strict=True), start=1):
+    for day_index, (day, spec) in enumerate(zip(days, specs), start=1):
         exercises = day.get("exercises") if isinstance(day, dict) else None
         duration = questionnaire["session_duration"]
         minimum, maximum = (3, 5) if duration <= 30 else (4, 7) if duration <= 60 else (6, 8)

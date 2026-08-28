@@ -1,6 +1,7 @@
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Optional
 
 from src.models.user import (
     AchievementUnlock,
@@ -10,45 +11,83 @@ from src.models.user import (
     WorkoutWeeklyGoal,
     db,
 )
-from src.services.workout_progress import backfill_session_weeks, user_timezone
+from src.services.workout_progress import backfill_session_weeks, user_timezone, weekly_progress
 
 
 ACHIEVEMENTS = {
     "first_step": {
         "title": "Primeiro passo",
         "description": "Conclua seu primeiro treino.",
+        "category": "treino",
+        "tier": "bronze",
+        "track": "sessions",
+        "threshold": 1,
     },
     "workout_10": {
         "title": "10 treinos",
         "description": "Conclua 10 treinos.",
+        "category": "treino",
+        "tier": "prata",
+        "track": "sessions",
+        "threshold": 10,
     },
     "workout_50": {
         "title": "50 treinos",
         "description": "Conclua 50 treinos.",
+        "category": "treino",
+        "tier": "ouro",
+        "track": "sessions",
+        "threshold": 50,
     },
     "workout_100": {
         "title": "100 treinos",
         "description": "Conclua 100 treinos.",
+        "category": "treino",
+        "tier": "platina",
+        "track": "sessions",
+        "threshold": 100,
     },
     "first_pr": {
         "title": "Primeiro recorde",
         "description": "Conquiste seu primeiro recorde pessoal.",
+        "category": "recorde",
+        "tier": "bronze",
+        "track": "records",
+        "threshold": 1,
     },
     "evolving": {
         "title": "Em evolu\u00e7\u00e3o",
         "description": "Conquiste 10 recordes pessoais.",
+        "category": "recorde",
+        "tier": "prata",
+        "track": "records",
+        "threshold": 10,
     },
     "big_day": {
         "title": "Grande dia",
         "description": "Conquiste 3 recordes pessoais no mesmo treino.",
+        "category": "recorde",
+        "tier": "ouro",
+        "track": "records_same_session",
+        "threshold": 3,
+        "hidden": True,
+        "hidden_hint": "Uma única sessão pode mudar muita coisa.",
     },
     "first_goal": {
         "title": "Meta alcan\u00e7ada",
         "description": "Alcance sua primeira meta de carga.",
+        "category": "meta",
+        "tier": "bronze",
+        "track": "goals",
+        "threshold": 1,
     },
     "consistent": {
         "title": "Consist\u00eancia",
         "description": "Cumpra a meta semanal por 4 semanas seguidas.",
+        "category": "consistencia",
+        "tier": "ouro",
+        "track": "weekly_streak",
+        "threshold": 4,
     },
 }
 ACHIEVEMENT_CATALOG = ACHIEVEMENTS
@@ -57,8 +96,8 @@ ACHIEVEMENT_CATALOG = ACHIEVEMENTS
 @dataclass(frozen=True)
 class _UnlockCandidate:
     unlocked_at: datetime
-    workout_session_id: int | None = None
-    exercise_goal_id: object | None = None
+    workout_session_id: Optional[int] = None
+    exercise_goal_id: Optional[object] = None
 
 
 def _qualifying_sessions(user_id):
@@ -263,6 +302,53 @@ def serialize_unlock(unlock):
 
 def serialize_unlocks(items):
     return [serialize_unlock(item) for item in items]
+
+
+def achievement_catalog(user_id):
+    unlocked = {
+        item.achievement_code: item
+        for item in AchievementUnlock.query.filter_by(user_id=user_id).all()
+    }
+    sessions = _qualifying_sessions(user_id)
+    records = _highlighted_events(user_id)
+    records_by_session = defaultdict(int)
+    for event in records:
+        records_by_session[event.workout_session_id] += 1
+    metrics = {
+        "sessions": len(sessions),
+        "records": len(records),
+        "records_same_session": max(records_by_session.values(), default=0),
+        "goals": ExerciseGoal.query.filter_by(user_id=user_id, status="achieved").count(),
+        "weekly_streak": ((weekly_progress(user_id).get("current") or {}).get("streak") or 0),
+    }
+
+    items = []
+    for code, definition in ACHIEVEMENTS.items():
+        unlock = unlocked.get(code)
+        hidden = bool(definition.get("hidden"))
+        current = int(metrics.get(definition.get("track"), 0))
+        target = int(definition.get("threshold") or 1)
+        item = {
+            "code": code,
+            "title": definition.get("title", code),
+            "description": definition.get("description", ""),
+            "category": definition.get("category", "geral"),
+            "tier": definition.get("tier", "bronze"),
+            "hidden": hidden,
+            "hidden_hint": definition.get("hidden_hint"),
+            "progress": {
+                "current": min(current, target),
+                "target": target,
+                "percentage": min(100, round((current / target) * 100)) if target else 100,
+            },
+            "unlocked": serialize_unlock(unlock) if unlock else None,
+        }
+        if hidden and unlock is None:
+            item["title"] = "Conquista oculta"
+            item["description"] = definition.get("hidden_hint") or "Continue evoluindo para revelar esta conquista."
+            item["progress"] = None
+        items.append(item)
+    return items
 
 
 def unlocks(user_id):

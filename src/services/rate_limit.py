@@ -26,11 +26,8 @@ _state = _LimiterState()
 
 
 def _client_key():
-    from flask import session
-
     remote = request.remote_addr or "unknown"
-    account = str(session.get("user_id") or "")
-    return f"{remote}|{account}"
+    return remote
 
 
 def _rate_config(name):
@@ -49,7 +46,7 @@ def rate_limit(name, default_limit, default_window):
         @wraps(f)
         def wrapper(*args, **kwargs):
             limit, window = _rate_config(name) or (default_limit, default_window)
-            key = _client_key()
+            key = (id(current_app._get_current_object()), name, _client_key())
             if not _state.allow(key, int(limit), int(window)):
                 return jsonify({"error": "Muitas tentativas. Aguarde um instante."}), 429
             return f(*args, **kwargs)

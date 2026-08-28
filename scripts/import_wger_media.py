@@ -11,6 +11,7 @@ import time
 import unicodedata
 from difflib import SequenceMatcher
 from pathlib import Path
+from typing import Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -101,7 +102,7 @@ def name_score(left_names: set[str], right_names: set[str]) -> float:
     return round(best, 2)
 
 
-def select_image(exercise: dict, exclude_ai: bool, image_id: int | None = None) -> dict | None:
+def select_image(exercise: dict, exclude_ai: bool, image_id: Optional[int] = None) -> Optional[dict]:
     images = list(exercise.get("images") or [])
     if exclude_ai:
         images = [image for image in images if not image.get("is_ai_generated")]

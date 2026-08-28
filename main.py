@@ -14,8 +14,17 @@ load_dotenv()
 from src.config import Config, ProductionConfig
 from src.models.user import db
 from src.models.user import User
+from src.routes.auth_routes import auth_bp
+from src.routes.billing_routes import billing_bp
+from src.routes.admin_routes import admin_bp
+from src.routes.plan_routes import plan_bp
+from src.routes.session_routes import session_bp
+from src.routes.progress_routes import progress_bp
+from src.routes.workout_routes import workout_bp
+from src.routes.profile_routes import profile_bp
 from src.routes.user_routes import user_bp
 from src.routes.professional_routes import professional_bp
+from src.services.badges import backfill_historical_badges, grant_signup_badges
 
 
 @event.listens_for(Engine, "connect")
@@ -44,6 +53,14 @@ def create_app(config_class=Config):
     db.init_app(app)
     Migrate(app, db)
 
+    app.register_blueprint(auth_bp, url_prefix="/api")
+    app.register_blueprint(billing_bp, url_prefix="/api")
+    app.register_blueprint(plan_bp, url_prefix="/api")
+    app.register_blueprint(admin_bp, url_prefix="/api")
+    app.register_blueprint(session_bp, url_prefix="/api")
+    app.register_blueprint(progress_bp, url_prefix="/api")
+    app.register_blueprint(workout_bp, url_prefix="/api")
+    app.register_blueprint(profile_bp, url_prefix="/api")
     app.register_blueprint(user_bp, url_prefix="/api")
     app.register_blueprint(professional_bp, url_prefix="/api")
 
@@ -64,6 +81,16 @@ def create_app(config_class=Config):
             abort(404)
         return None
 
+    @app.after_request
+    def apply_security_headers(response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        if os.getenv("FLASK_ENV") == "production":
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        return response
+
     @app.cli.command("create-admin")
     @click.argument("username")
     @click.password_option()
@@ -74,6 +101,8 @@ def create_app(config_class=Config):
             user = User(username=username)
             user.set_password(password)
             db.session.add(user)
+        db.session.flush()
+        grant_signup_badges(user)
         user.is_admin = True
         db.session.commit()
         click.echo(f"Administrator ready: {username}")
@@ -92,6 +121,8 @@ def create_app(config_class=Config):
         if user is None:
             user = User(username=username)
             db.session.add(user)
+        db.session.flush()
+        grant_signup_badges(user)
         user.set_password(password)
         user.is_admin = True
         user.is_premium = True
@@ -101,8 +132,19 @@ def create_app(config_class=Config):
         db.session.commit()
         click.echo(f"Owner ready: {username}")
 
+    @app.cli.command("seed-badges")
+    def seed_badges():
+        """Backfill Pioneer and Desde Sempre badges for existing users."""
+        granted = backfill_historical_badges()
+        db.session.commit()
+        click.echo(f"Badges seeded: {len(granted)}")
+
     @app.route("/admin")
     def serve_admin():
+        return send_from_directory(app.static_folder, "admin.html")
+
+    @app.route("/admin/")
+    def serve_admin_slash():
         return send_from_directory(app.static_folder, "admin.html")
 
     @app.route("/api/health")

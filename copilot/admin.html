@@ -1,1064 +1,852 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard Administrativo</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            color: #333;
-        }
-
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        /* Header */
-        .header {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border-radius: 20px;
-            padding: 20px 30px;
-            margin-bottom: 30px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .header h1 {
-            color: #2c3e50;
-            font-size: 2.2rem;
-            font-weight: 700;
-        }
-
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-
-        .user-avatar {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            background: linear-gradient(45deg, #667eea, #764ba2);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 1.2rem;
-            font-weight: bold;
-        }
-
-        /* Navigation Tabs */
-        .nav-tabs {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 30px;
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 15px;
-            padding: 10px;
-        }
-
-        .nav-btn {
-            background: transparent;
-            border: none;
-            padding: 15px 25px;
-            border-radius: 12px;
-            color: white;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .nav-btn:hover {
-            background: rgba(255, 255, 255, 0.2);
-            transform: translateY(-2px);
-        }
-
-        .nav-btn.active {
-            background: rgba(255, 255, 255, 0.9);
-            color: #333;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-        }
-
-        /* Tab Content */
-        .tab-content {
-            display: none;
-            animation: fadeIn 0.5s ease-in-out;
-        }
-
-        .tab-content.active {
-            display: block;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        /* Dashboard Cards */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 25px;
-            margin-bottom: 30px;
-        }
-
-        .stat-card {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border-radius: 20px;
-            padding: 30px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .stat-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: linear-gradient(90deg, #667eea, #764ba2);
-        }
-
-        .stat-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
-        }
-
-        .stat-icon {
-            width: 60px;
-            height: 60px;
-            border-radius: 15px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.5rem;
-            color: white;
-            margin-bottom: 20px;
-        }
-
-        .stat-number {
-            font-size: 2.5rem;
-            font-weight: 700;
-            color: #2c3e50;
-            margin-bottom: 10px;
-        }
-
-        .stat-label {
-            color: #7f8c8d;
-            font-size: 1rem;
-            font-weight: 500;
-        }
-
-        /* Content Sections */
-        .content-section {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border-radius: 20px;
-            padding: 30px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-            margin-bottom: 30px;
-        }
-
-        .media-review-grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
-        .media-review-card { padding: 18px; border-radius: 16px; background: #fff; box-shadow: 0 4px 20px rgba(0,0,0,.06); }
-        .media-review-card h3 { margin-bottom: 5px; }
-        .media-review-reference { width: 100%; height: 180px; margin-bottom: 12px; object-fit: contain; border-radius: 10px; background: #f1f5f9; }
-        .media-review-meta { color: #64748b; font-size: .85rem; margin-bottom: 12px; }
-        .media-review-search { display: flex; gap: 8px; margin: 12px 0; }
-        .media-review-search input { min-width: 0; flex: 1; }
-        .media-candidates { display: grid; gap: 9px; }
-        .media-candidate { display: grid; grid-template-columns: 92px 1fr; gap: 10px; padding: 8px; border: 2px solid #e5e7eb; border-radius: 10px; background: #fafafa; cursor: pointer; text-align: left; }
-        .media-candidate.selected { border-color: #667eea; background: #f0f1ff; }
-        .media-candidate img { width: 92px; height: 92px; object-fit: contain; background: #111827; border-radius: 7px; }
-        .media-candidate strong, .media-candidate small { display: block; }
-        .media-candidate small { margin-top: 4px; color: #64748b; }
-        .media-review-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
-
-        .section-title {
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: #2c3e50;
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        /* Tables */
-        .table-container {
-            overflow-x: auto;
-            border-radius: 12px;
-            background: white;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        th, td {
-            padding: 15px;
-            text-align: left;
-            border-bottom: 1px solid #ecf0f1;
-        }
-
-        th {
-            background: #f8f9fa;
-            font-weight: 600;
-            color: #2c3e50;
-        }
-
-        tr:hover {
-            background: #f8f9fa;
-        }
-
-        /* Buttons */
-        .btn {
-            background: linear-gradient(45deg, #667eea, #764ba2);
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 10px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
-        }
-
-        .btn-secondary {
-            background: #95a5a6;
-        }
-
-        .btn-danger {
-            background: #e74c3c;
-        }
-
-        /* Form Controls */
-        .form-group {
-            margin-bottom: 20px;
-        }
-
-        .form-control {
-            width: 100%;
-            padding: 12px 16px;
-            border: 2px solid #ecf0f1;
-            border-radius: 10px;
-            font-size: 1rem;
-            transition: all 0.3s ease;
-        }
-
-        .form-control:focus {
-            outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-
-        /* Loading States */
-        .loading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 40px;
-            color: #7f8c8d;
-            font-size: 1.1rem;
-        }
-
-        .loading i {
-            animation: spin 1s linear infinite;
-            margin-right: 10px;
-        }
-
-        @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-
-        /* Activity Timeline */
-        .activity-item {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            padding: 15px 0;
-            border-bottom: 1px solid #ecf0f1;
-        }
-
-        .activity-item:last-child {
-            border-bottom: none;
-        }
-
-        .activity-icon {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 0.9rem;
-        }
-
-        .activity-content {
-            flex: 1;
-        }
-
-        .activity-title {
-            font-weight: 600;
-            color: #2c3e50;
-            margin-bottom: 5px;
-        }
-
-        .activity-time {
-            color: #7f8c8d;
-            font-size: 0.9rem;
-        }
-
-        /* Status Badges */
-        .status-badge {
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .status-active {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .status-inactive {
-            background: #f8d7da;
-            color: #721c24;
-        }
-
-        .status-pending {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-        /* Charts */
-        .chart-container {
-            position: relative;
-            height: 400px;
-            margin: 20px 0;
-        }
-
-        /* Search Bar */
-        .search-bar {
-            display: flex;
-            gap: 15px;
-            margin-bottom: 20px;
-            align-items: center;
-        }
-
-        .search-input {
-            flex: 1;
-            max-width: 300px;
-        }
-
-        /* Responsive */
-        @media (max-width: 768px) {
-            .container {
-                padding: 15px;
-            }
-
-            .header {
-                flex-direction: column;
-                gap: 20px;
-                text-align: center;
-            }
-
-            .nav-tabs {
-                flex-wrap: wrap;
-                justify-content: center;
-            }
-
-            .stats-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .stat-card {
-                padding: 20px;
-            }
-
-            .search-bar {
-                flex-direction: column;
-                align-items: stretch;
-            }
-
-            .search-input {
-                max-width: 100%;
-            }
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin | Fit-Tracker.AI</title>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #050b16;
+      --panel: rgba(10, 18, 34, .82);
+      --panel-2: rgba(12, 22, 42, .92);
+      --line: rgba(148, 163, 184, .16);
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #3b82f6;
+      --accent-2: #60a5fa;
+      --good: #2dd4bf;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+      --radius: 24px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(59, 130, 246, .24), transparent 28%),
+        radial-gradient(circle at top right, rgba(96, 165, 250, .18), transparent 30%),
+        linear-gradient(180deg, #030712 0%, var(--bg) 100%);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    button, input, select, textarea { font: inherit; }
+    .shell { max-width: 1480px; margin: 0 auto; padding: 20px; }
+    .topbar, .panel, .card, .modal-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      backdrop-filter: blur(20px);
+      box-shadow: 0 30px 80px rgba(0, 0, 0, .24);
+    }
+    .topbar {
+      border-radius: 30px;
+      padding: 18px;
+      display: grid;
+      gap: 16px;
+      grid-template-columns: 1.2fr .8fr;
+      align-items: center;
+    }
+    .brand { display: flex; gap: 14px; align-items: center; }
+    .brand-badge {
+      width: 52px; height: 52px; border-radius: 18px;
+      display: grid; place-items: center;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: white; font-size: 1.2rem;
+    }
+    .eyebrow { color: var(--accent-2); text-transform: uppercase; letter-spacing: .18em; font-size: .72rem; margin: 0 0 4px; }
+    .title { margin: 0; font-size: clamp(1.4rem, 4vw, 2.3rem); }
+    .sub { margin: 6px 0 0; color: var(--muted); }
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+    .control, .action, .pill, .tab, .chip {
+      border-radius: 999px; border: 1px solid var(--line);
+      background: rgba(15, 23, 42, .7); color: var(--text);
+    }
+    .control { padding: 10px 14px; }
+    .action, .tab { cursor: pointer; transition: .18s ease; }
+    .action { padding: 10px 14px; font-weight: 700; }
+      .action.primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+    .action:hover, .tab:hover { transform: translateY(-1px); }
+    .nav {
+      margin-top: 18px; display: flex; gap: 10px; flex-wrap: wrap;
+    }
+    .tab { padding: 12px 16px; color: var(--muted); }
+      .tab.active { color: white; background: rgba(59, 130, 246, .22); border-color: rgba(59, 130, 246, .4); }
+    .grid { display: grid; gap: 16px; }
+    .overview-grid { grid-template-columns: repeat(12, 1fr); margin-top: 18px; }
+    .card {
+      border-radius: var(--radius); padding: 18px; overflow: hidden;
+    }
+    .metric { grid-column: span 3; }
+    .metric .label { color: var(--muted); font-size: .9rem; }
+    .metric .value { margin-top: 8px; font-size: 2rem; font-weight: 800; }
+    .metric .delta { margin-top: 8px; color: #cbd5e1; font-size: .9rem; }
+    .span-8 { grid-column: span 8; }
+    .span-4 { grid-column: span 4; }
+    .span-6 { grid-column: span 6; }
+    .span-12 { grid-column: span 12; }
+    .section-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .section-head h2, .section-head h3 { margin: 0; }
+    .section-head p { margin: 4px 0 0; color: var(--muted); }
+    .chart {
+      display: grid; gap: 10px; align-items: end; min-height: 260px;
+      grid-template-columns: repeat(auto-fit, minmax(22px, 1fr));
+    }
+    .bar-wrap { display: grid; gap: 8px; align-items: end; justify-items: center; }
+    .bar { width: 100%; min-height: 14px; border-radius: 16px 16px 8px 8px; background: linear-gradient(180deg, #38bdf8, #7c3aed); }
+    .bar.secondary { background: linear-gradient(180deg, #f59e0b, #ef4444); }
+    .bar-label { color: var(--muted); font-size: .78rem; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; }
+    .bar-value { font-size: .8rem; color: #e2e8f0; }
+    .mini-stats { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .mini { border: 1px solid var(--line); border-radius: 18px; padding: 12px; background: rgba(15, 23, 42, .4); }
+    .mini .k { color: var(--muted); font-size: .82rem; }
+    .mini .v { font-size: 1.25rem; font-weight: 800; margin-top: 6px; }
+    .list { display: grid; gap: 10px; }
+    .item {
+      display: flex; justify-content: space-between; gap: 12px; align-items: center;
+      border: 1px solid var(--line); border-radius: 18px; padding: 12px 14px; background: rgba(15, 23, 42, .45);
+    }
+    .item .meta { color: var(--muted); font-size: .88rem; }
+    .muted { color: var(--muted); }
+    .section { display: none; margin-top: 18px; }
+    .section.active { display: block; }
+    .table-wrap { overflow: auto; border-radius: 20px; border: 1px solid var(--line); }
+    table { width: 100%; border-collapse: collapse; min-width: 1000px; background: rgba(7, 17, 31, .6); }
+    th, td { padding: 12px 14px; text-align: left; border-bottom: 1px solid rgba(148, 163, 184, .12); vertical-align: top; }
+    th { position: sticky; top: 0; background: rgba(12, 18, 32, .96); z-index: 1; color: #cbd5e1; }
+    tr:hover td { background: rgba(124, 58, 237, .07); }
+    .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .small { padding: 8px 10px; font-size: .82rem; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: .8rem; }
+    .chip.good { color: #bbf7d0; }
+    .chip.warn { color: #fde68a; }
+    .chip.bad { color: #fecaca; }
+    .filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+    .filters input, .filters select, .filters textarea {
+      background: rgba(15, 23, 42, .72); color: var(--text); border: 1px solid var(--line);
+      border-radius: 14px; padding: 10px 12px;
+    }
+    .reviews-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+    .review-card { background: rgba(15, 23, 42, .55); border: 1px solid var(--line); border-radius: 22px; padding: 14px; }
+    .review-card h4 { margin: 0 0 8px; }
+    .review-card .meta { color: var(--muted); font-size: .86rem; }
+    .review-card textarea { width: 100%; min-height: 72px; margin-top: 10px; resize: vertical; }
+    .candidate-list { display: grid; gap: 8px; margin-top: 10px; }
+    .candidate {
+      display: grid; grid-template-columns: 88px 1fr; gap: 10px; align-items: center;
+      border: 1px solid var(--line); border-radius: 16px; padding: 8px; background: rgba(2, 6, 23, .4); cursor: pointer;
+    }
+    .candidate img { width: 88px; height: 88px; object-fit: contain; border-radius: 12px; background: #020617; }
+      .candidate.selected { outline: 2px solid var(--accent-2); }
+    .candidate strong, .candidate small { display: block; }
+    .candidate small { color: var(--muted); margin-top: 4px; }
+    .status { font-size: .8rem; }
+    .empty { padding: 20px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 20px; }
+    .toast {
+      position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+      background: rgba(15, 23, 42, .96); color: white; border: 1px solid var(--line);
+      padding: 12px 16px; border-radius: 999px; box-shadow: 0 20px 50px rgba(0,0,0,.3);
+      opacity: 0; pointer-events: none; transition: .2s ease;
+    }
+    .toast.show { opacity: 1; }
+    .modal {
+      position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+      background: rgba(2, 6, 23, .68); padding: 20px; z-index: 30;
+    }
+    .modal.show { display: flex; }
+    .modal-card { width: min(520px, 100%); border-radius: 28px; padding: 18px; }
+    .modal-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 12px; }
+    .modal-body { display: grid; gap: 12px; }
+    .modal-body input, .modal-body select, .modal-body textarea {
+      background: rgba(15, 23, 42, .72); color: var(--text); border: 1px solid var(--line); border-radius: 14px; padding: 11px 12px; width: 100%;
+    }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
+    @media (max-width: 980px) {
+      .topbar { grid-template-columns: 1fr; }
+      .controls { justify-content: flex-start; }
+      .metric, .span-8, .span-4, .span-6 { grid-column: span 12; }
+      table { min-width: 860px; }
+    }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <!-- Header -->
-        <header class="header">
-            <h1><i class="fas fa-tachometer-alt"></i> Dashboard Administrativo</h1>
-            <div class="user-info">
-                <div class="user-avatar">
-                    <i class="fas fa-user"></i>
-                </div>
-                <div>
-                    <div style="font-weight: 600;">Administrador</div>
-                    <div style="color: #7f8c8d; font-size: 0.9rem;">admin@sistema.com</div>
-                </div>
-            </div>
-        </header>
-
-        <!-- Navigation Tabs -->
-        <nav class="nav-tabs">
-            <button class="nav-btn active" data-tab="dashboard" onclick="showTab('dashboard')">
-                <i class="fas fa-chart-line"></i> Dashboard
-            </button>
-            <button class="nav-btn" data-tab="users" onclick="showTab('users')">
-                <i class="fas fa-users"></i> Usuários
-            </button>
-            <button class="nav-btn" data-tab="media" onclick="showTab('media')">
-                <i class="fas fa-photo-film"></i> Mídia
-            </button>
-            <button class="nav-btn" data-tab="analytics" onclick="showTab('analytics')">
-                <i class="fas fa-chart-bar"></i> Analytics
-            </button>
-            <button class="nav-btn" data-tab="settings" onclick="showTab('settings')">
-                <i class="fas fa-cog"></i> Configurações
-            </button>
-        </nav>
-
-        <!-- Dashboard Tab -->
-        <div id="dashboardTab" class="tab-content active">
-            <!-- Dashboard Cards -->
-            <div id="dashboardStats" class="stats-grid">
-                <div class="loading">
-                    <i class="fas fa-spinner"></i>
-                    Carregando estatísticas...
-                </div>
-            </div>
-            <!-- /Dashboard Cards -->
-
-            <!-- Recent Activity -->
-            <div class="content-section">
-                <h2 class="section-title">
-                    <i class="fas fa-clock"></i>
-                    Atividades Recentes
-                </h2>
-                <div id="recentActivity">
-                    <div class="loading">
-                        <i class="fas fa-spinner"></i>
-                        Carregando atividades...
-                    </div>
-                </div>
-            </div>
-            <!-- /Recent Activity -->
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-badge"><i class="fa-solid fa-shield-halved"></i></div>
+        <div>
+          <p class="eyebrow">Painel administrativo</p>
+          <h1 class="title">Visão geral do produto</h1>
+          <p class="sub">Métricas de uso, assinatura, revisões e operações reais.</p>
         </div>
+      </div>
+      <div class="controls">
+        <input class="control" id="fromDate" type="date" />
+        <input class="control" id="toDate" type="date" />
+        <button class="action" data-period="7" id="period7">7 dias</button>
+        <button class="action" data-period="30" id="period30">30 dias</button>
+        <button class="action" data-period="90" id="period90">90 dias</button>
+        <button class="action primary" id="refreshBtn"><i class="fa-solid fa-arrows-rotate"></i> Atualizar</button>
+        <a class="action" id="csvLink" href="#" target="_blank" rel="noreferrer"><i class="fa-solid fa-file-csv"></i> CSV</a>
+      </div>
+    </header>
 
-        <div id="mediaTab" class="tab-content">
-            <div class="content-section">
-                <h2 class="section-title"><i class="fas fa-photo-film"></i> Revisão de GIFs</h2>
-                <p style="margin-bottom:20px;color:#64748b;">Compare os exercícios do catálogo com candidatos da WorkoutX. Somente GIFs aprovados aparecem para os alunos.</p>
-                <div id="mediaReviewGrid" class="media-review-grid"><div class="loading"><i class="fas fa-spinner"></i> Carregando fila...</div></div>
+    <nav class="nav">
+      <button class="tab active" data-section="overview">Visão geral</button>
+      <button class="tab" data-section="users">Usuários</button>
+      <button class="tab" data-section="reviews">Revisões</button>
+      <button class="tab" data-section="reports">Relatórios</button>
+    </nav>
+
+    <section class="section active" id="overview">
+      <div class="grid overview-grid" id="metricsGrid"></div>
+      <div class="grid" style="margin-top:16px; grid-template-columns: repeat(12, 1fr);">
+        <article class="card span-8">
+          <div class="section-head">
+            <div>
+              <h3>Evolução do uso</h3>
+              <p>Novos usuários e usuários ativos no período.</p>
             </div>
+          </div>
+          <div class="chart" id="usageChart"></div>
+        </article>
+        <article class="card span-4">
+          <div class="section-head">
+            <div>
+              <h3>Distribuição</h3>
+              <p>Status do ecossistema.</p>
+            </div>
+          </div>
+          <div class="mini-stats" id="distributionStats"></div>
+        </article>
+        <article class="card span-6">
+          <div class="section-head">
+            <div>
+              <h3>Atividade diária</h3>
+              <p>Dietas, medições, chats e treinos concluídos.</p>
+            </div>
+          </div>
+          <div class="chart" id="activityChart"></div>
+        </article>
+        <article class="card span-6">
+          <div class="section-head">
+            <div>
+              <h3>Assinaturas</h3>
+              <p>Plano Premium e profissionais ativos.</p>
+            </div>
+          </div>
+          <div class="chart" id="subscriptionChart"></div>
+        </article>
+        <article class="card span-12">
+          <div class="section-head">
+            <div>
+              <h3>Atividade recente</h3>
+              <p>Sem expor conteúdo sensível.</p>
+            </div>
+          </div>
+          <div class="list" id="recentActivity"></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="users">
+      <article class="card">
+        <div class="section-head">
+          <div>
+            <h3>Usuários</h3>
+            <p>Operações reais: banir, premium, profissional e admin.</p>
+          </div>
         </div>
-
-        <!-- Users Tab -->
-        <div id="usersTab" class="tab-content">
-            <!-- Users Controls -->
-            <div class="content-section">
-                <div class="search-bar">
-                    <input type="text" id="userSearch" class="form-control search-input" placeholder="Buscar usuários...">
-                    <button id="refreshUsersBtn" class="btn">
-                        <i class="fas fa-sync-alt"></i> Atualizar
-                    </button>
-                    <button id="addUserBtn" class="btn">
-                        <i class="fas fa-plus"></i> Novo Usuário
-                    </button>
-                </div>
-            </div>
-            <!-- /Users Controls -->
-
-            <!-- Users Table -->
-            <div class="content-section">
-                <h2 class="section-title">
-                    <i class="fas fa-users"></i>
-                    Lista de Usuários
-                </h2>
-                <div id="usersTable" class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Nome</th>
-                                <th>Status</th>
-                                <th>Criado em</th>
-                                <th>Ações</th>
-                            </tr>
-                        </thead>
-                        <tbody id="usersTableBody">
-                            <tr>
-                                <td colspan="5" class="loading">
-                                    <i class="fas fa-spinner"></i>
-                                    Carregando usuários...
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            <!-- /Users Table -->
+        <div class="filters">
+          <input id="userSearch" placeholder="Buscar por nome" />
+          <select id="userRoleFilter">
+            <option value="all">Todos</option>
+            <option value="admins">Admins</option>
+            <option value="premium">Premium</option>
+            <option value="professional">Profissionais</option>
+            <option value="banned">Banidos</option>
+          </select>
         </div>
-
-        <!-- Analytics Tab -->
-        <div id="analyticsTab" class="tab-content">
-            <!-- Analytics Controls -->
-            <div class="content-section">
-                <div class="search-bar">
-                    <select id="periodSelect" class="form-control search-input">
-                        <option value="7">Últimos 7 dias</option>
-                        <option value="30">Últimos 30 dias</option>
-                        <option value="90">Últimos 90 dias</option>
-                    </select>
-                    <button id="refreshAnalyticsBtn" class="btn">
-                        <i class="fas fa-sync-alt"></i> Atualizar
-                    </button>
-                    <button id="exportAnalyticsBtn" class="btn btn-secondary">
-                        <i class="fas fa-download"></i> Exportar
-                    </button>
-                </div>
-            </div>
-            <!-- /Analytics Controls -->
-
-            <!-- Analytics Charts -->
-            <div class="content-section">
-                <h2 class="section-title">
-                    <i class="fas fa-chart-line"></i>
-                    Gráfico de Usuários
-                </h2>
-                <div class="chart-container">
-                    <canvas id="usersChart"></canvas>
-                </div>
-            </div>
-
-            <div class="content-section">
-                <h2 class="section-title">
-                    <i class="fas fa-chart-bar"></i>
-                    Gráfico de Atividades
-                </h2>
-                <div class="chart-container">
-                    <canvas id="activityChart"></canvas>
-                </div>
-            </div>
-            <!-- /Analytics Charts -->
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Usuário</th><th>Plano</th><th>Conta</th><th>Atividade</th><th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="usersTable"></tbody>
+          </table>
         </div>
+      </article>
+    </section>
 
-        <!-- Settings Tab -->
-        <div id="settingsTab" class="tab-content">
-            <!-- System Settings -->
-            <div class="content-section">
-                <h2 class="section-title">
-                    <i class="fas fa-cog"></i>
-                    Configurações do Sistema
-                </h2>
-                <div id="systemSettings">
-                    <div class="form-group">
-                        <label for="siteName">Nome do Site:</label>
-                        <input type="text" id="siteName" class="form-control" placeholder="Digite o nome do site">
-                    </div>
-                    <div class="form-group">
-                        <label for="adminEmail">Email do Administrador:</label>
-                        <input type="email" id="adminEmail" class="form-control" placeholder="Digite o email do administrador">
-                    </div>
-                    <div class="form-group">
-                        <label for="maxUsers">Máximo de Usuários:</label>
-                        <input type="number" id="maxUsers" class="form-control" placeholder="Digite o número máximo de usuários">
-                        <small class="input-hint">Você pode ajustar os valores manualmente.</small>
-                    </div>
-                    <button id="saveSettingsBtn" class="btn">
-                        <i class="fas fa-save"></i> Salvar Configurações
-                    </button>
-                </div>
+    <section class="section" id="reviews">
+      <div class="grid" style="grid-template-columns: repeat(12, 1fr);">
+        <article class="card span-6">
+          <div class="section-head">
+            <div>
+              <h3>Solicitações profissionais</h3>
+              <p>Aprovar ou rejeitar com nota.</p>
             </div>
-            <!-- /System Settings -->
+            <select id="applicationStatusFilter" class="control" style="min-width: 150px;">
+              <option value="pending">Pendentes</option>
+              <option value="approved">Aprovadas</option>
+              <option value="rejected">Rejeitadas</option>
+              <option value="all">Todas</option>
+            </select>
+          </div>
+          <div class="list" id="applicationsList"></div>
+        </article>
+        <article class="card span-6">
+          <div class="section-head">
+            <div>
+              <h3>Revisão de mídia</h3>
+              <p>Fila de GIFs para aprovação.</p>
+            </div>
+          </div>
+          <div class="reviews-grid" id="mediaQueue"></div>
+        </article>
+      </div>
+    </section>
 
-            <!-- Backup Settings -->
-            <div class="content-section">
-                <h2 class="section-title">
-                    <i class="fas fa-database"></i>
-                    Backup e Manutenção
-                </h2>
-                <div id="backupSettings">
-                    <p>Último backup: <span id="lastBackupDate">Carregando...</span></p>
-                    <div style="margin-top: 20px;">
-                        <button id="createBackupBtn" class="btn">
-                            <i class="fas fa-cloud-upload-alt"></i> Criar Backup
-                        </button>
-                        <button id="restoreBackupBtn" class="btn btn-secondary">
-                            <i class="fas fa-cloud-download-alt"></i> Restaurar Backup
-                        </button>
-                        <button id="clearCacheBtn" class="btn btn-danger">
-                            <i class="fas fa-trash"></i> Limpar Cache
-                        </button>
-                    </div>
-                </div>
+    <section class="section" id="reports">
+      <div class="grid" style="grid-template-columns: repeat(12, 1fr);">
+        <article class="card span-6">
+          <div class="section-head">
+            <div>
+              <h3>Relatório agregado</h3>
+              <p>Priorizando uso e assinatura.</p>
             </div>
-            <!-- /Backup Settings -->
+          </div>
+          <div class="mini-stats" id="reportStats"></div>
+        </article>
+        <article class="card span-6">
+          <div class="section-head">
+            <div>
+              <h3>Exportação</h3>
+              <p>CSV agregado do período atual.</p>
+            </div>
+          </div>
+          <div class="list">
+            <div class="item"><div><strong>CSV</strong><div class="meta">Baixe o resumo do período selecionado.</div></div><a class="action primary" id="downloadCsv2" href="#" target="_blank">Baixar</a></div>
+          </div>
+        </article>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal" id="professionalModal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h3 style="margin:0;">Ativar profissional</h3>
+          <p class="muted" style="margin:4px 0 0;">Escolha a especialidade permitida.</p>
         </div>
-
-        <button type="button" id="generateMacrosBtn">
-            <span id="generateMacrosBtnText">Gerar macros com IA</span>
-            <span id="generateMacrosLoading" class="hidden"><i class="fas fa-spinner fa-spin"></i></span>
-        </button>
+        <button class="action small" id="closeProfessionalModal">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <select id="professionalScopeSelect">
+          <option value="diet">Dietas</option>
+          <option value="workout">Treinos</option>
+          <option value="both">Dietas e treinos</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="action" id="cancelProfessional">Cancelar</button>
+        <button class="action primary" id="confirmProfessional">Salvar</button>
+      </div>
     </div>
+  </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="js/exercise-media.js"></script>
-    <script>
-        // Tab navigation functionality
-        function showTab(tabName) {
-            // Hide all tab contents
-            const tabContents = document.querySelectorAll('.tab-content');
-            tabContents.forEach(tab => {
-                tab.classList.remove('active');
-            });
+  <div class="modal" id="noteModal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h3 style="margin:0;" id="noteTitle">Análise</h3>
+          <p class="muted" style="margin:4px 0 0;">Adicione uma nota opcional.</p>
+        </div>
+        <button class="action small" id="closeNoteModal">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <textarea id="noteInput" placeholder="Nota interna"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="action" id="cancelNote">Cancelar</button>
+        <button class="action primary" id="confirmNote">Enviar</button>
+      </div>
+    </div>
+  </div>
 
-            // Remove active class from all nav buttons
-            const navButtons = document.querySelectorAll('.nav-btn');
-            navButtons.forEach(btn => {
-                btn.classList.remove('active');
-            });
+  <div class="toast" id="toast"></div>
 
-            // Show selected tab
-            const selectedTab = document.getElementById(tabName + 'Tab');
-            if (selectedTab) {
-                selectedTab.classList.add('active');
-            }
+  <script>
+    const API = '/api';
+    const state = {
+      analytics: null,
+      users: [],
+      applications: [],
+      mediaQueue: [],
+      currentProfessionalUser: null,
+      currentReview: null,
+      periodDays: 30,
+    };
 
-            // Add active class to clicked nav button
-            const selectedButton = document.querySelector(`[data-tab="${tabName}"]`);
-            if (selectedButton) {
-                selectedButton.classList.add('active');
-            }
+    const els = {
+      fromDate: document.getElementById('fromDate'),
+      toDate: document.getElementById('toDate'),
+      csvLink: document.getElementById('csvLink'),
+      downloadCsv2: document.getElementById('downloadCsv2'),
+      metricsGrid: document.getElementById('metricsGrid'),
+      usageChart: document.getElementById('usageChart'),
+      activityChart: document.getElementById('activityChart'),
+      subscriptionChart: document.getElementById('subscriptionChart'),
+      distributionStats: document.getElementById('distributionStats'),
+      recentActivity: document.getElementById('recentActivity'),
+      usersTable: document.getElementById('usersTable'),
+      userSearch: document.getElementById('userSearch'),
+      userRoleFilter: document.getElementById('userRoleFilter'),
+      applicationStatusFilter: document.getElementById('applicationStatusFilter'),
+      applicationsList: document.getElementById('applicationsList'),
+      mediaQueue: document.getElementById('mediaQueue'),
+      reportStats: document.getElementById('reportStats'),
+      toast: document.getElementById('toast'),
+      professionalModal: document.getElementById('professionalModal'),
+      professionalScopeSelect: document.getElementById('professionalScopeSelect'),
+      confirmProfessional: document.getElementById('confirmProfessional'),
+      noteModal: document.getElementById('noteModal'),
+      noteTitle: document.getElementById('noteTitle'),
+      noteInput: document.getElementById('noteInput'),
+      confirmNote: document.getElementById('confirmNote'),
+    };
 
-            // Load tab-specific data
-            loadTabData(tabName);
+    const fmt = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function showToast(message) {
+      els.toast.textContent = message;
+      els.toast.classList.add('show');
+      clearTimeout(showToast.t);
+      showToast.t = setTimeout(() => els.toast.classList.remove('show'), 2200);
+    }
+
+    let csrfToken = null;
+
+    function setCsrfToken(token) {
+      csrfToken = token || null;
+    }
+
+    async function api(path, options = {}) {
+      const method = String(options.method || 'GET').toUpperCase();
+      const headers = { ...(options.headers || {}) };
+      if (csrfToken && !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method) && !headers['X-CSRF-Token']) {
+        headers['X-CSRF-Token'] = csrfToken;
+      }
+      const res = await fetch(`${API}${path}`, { credentials: 'include', ...options, headers });
+      const contentType = res.headers.get('content-type') || '';
+      const data = contentType.includes('application/json') ? await res.json() : await res.text();
+      if (!res.ok) {
+        throw new Error((data && data.error) || 'Falha na requisição');
+      }
+      return data;
+    }
+
+    async function refreshSession() {
+      const session = await api('/check_session');
+      if (session.logged_in && session.csrf_token) setCsrfToken(session.csrf_token);
+      return session;
+    }
+
+    function rangeForDays(days) {
+      const to = new Date();
+      const from = new Date();
+      from.setDate(to.getDate() - (days - 1));
+      return { from: toDateInput(from), to: toDateInput(to) };
+    }
+
+    function toDateInput(date) {
+      const d = new Date(date);
+      const offset = d.getTimezoneOffset();
+      const local = new Date(d.getTime() - offset * 60000);
+      return local.toISOString().slice(0, 10);
+    }
+
+    function currentRange() {
+      return { from: els.fromDate.value, to: els.toDate.value };
+    }
+
+    function rangeDays(from, to) {
+      const start = new Date(`${from}T00:00:00`);
+      const end = new Date(`${to}T00:00:00`);
+      return Math.max(1, Math.round((end - start) / 86400000) + 1);
+    }
+
+    function currentBucket() {
+      const { from, to } = currentRange();
+      return rangeDays(from, to) > 45 ? 'week' : 'day';
+    }
+
+    function updateCsvLink() {
+      const { from, to } = currentRange();
+      const params = new URLSearchParams({ from, to, bucket: currentBucket() });
+      const href = `${API}/admin/analytics.csv?${params.toString()}`;
+      els.csvLink.href = href;
+      els.downloadCsv2.href = href;
+    }
+
+    function setPeriod(days) {
+      state.periodDays = days;
+      const range = rangeForDays(days);
+      els.fromDate.value = range.from;
+      els.toDate.value = range.to;
+      updateCsvLink();
+    }
+
+    function metricCard(label, value, delta, icon) {
+      return `
+        <article class="card metric">
+          <div class="label"><i class="fa-solid ${escapeHtml(icon)}"></i> ${escapeHtml(label)}</div>
+          <div class="value">${escapeHtml(value)}</div>
+          <div class="delta">${escapeHtml(delta)}</div>
+        </article>
+      `;
+    }
+
+    function renderBars(container, labels, values, colorClass = '') {
+      const numericValues = values.map(item => typeof item === 'object' ? Number(item.value || 0) : Number(item || 0));
+      const max = Math.max(1, ...numericValues);
+      container.innerHTML = labels.map((label, i) => {
+        const item = values[i];
+        const numeric = typeof item === 'object' ? Number(item.value || 0) : Number(item || 0);
+        const display = typeof item === 'object' && item.value_label ? item.value_label : numeric;
+        const height = Math.max(10, Math.round((numeric / max) * 180));
+        return `
+          <div class="bar-wrap">
+            <div class="bar-value">${escapeHtml(display)}</div>
+            <div class="bar ${colorClass}" style="height:${height}px"></div>
+            <div class="bar-label">${escapeHtml(label)}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderOverview() {
+      if (!state.analytics) return;
+      const a = state.analytics;
+      const s = a.summary;
+      els.metricsGrid.innerHTML = [
+        metricCard('Usuários', s.total_users, `+${s.new_users} novos no período`, 'fa-users'),
+        metricCard('Ativos', s.active_users, 'Uso recente de dietas, medições, chats e treinos', 'fa-chart-line'),
+        metricCard('Premium', s.premium_users, `${s.active_subscriptions} assinaturas ativas`, 'fa-crown'),
+        metricCard('Profissionais', s.professional_users, `${a.breakdowns.applications.pending} solicitações pendentes`, 'fa-user-doctor'),
+      ].join('');
+
+      renderBars(els.usageChart, a.series.labels, a.series.new_users.map((n, i) => ({ value: n, value_label: `${n} novos · ${a.series.active_users[i]} ativos` })), '');
+      renderBars(els.activityChart, a.series.labels, a.series.activity.map(x => x.diet_entries + x.measurements + x.chat_messages + x.workout_sessions), 'secondary');
+      renderBars(els.subscriptionChart, a.series.labels, a.series.subscriptions.map(x => x.premium_student + x.professional_single + x.professional_complete), '');
+
+      els.distributionStats.innerHTML = [
+        ['Admins', s.admin_users],
+        ['Banidos', s.banned_users],
+        ['Assinaturas', s.active_subscriptions],
+        ['Pendentes', a.breakdowns.applications.pending],
+      ].map(([k, v]) => `<div class="mini"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(v)}</div></div>`).join('');
+
+      els.recentActivity.innerHTML = a.recent_activities?.length ? a.recent_activities.map(item => `
+        <div class="item">
+          <div>
+            <strong>${escapeHtml(item.type)}</strong>
+            <div class="meta">@${escapeHtml(item.username)}</div>
+          </div>
+          <div class="meta">${escapeHtml(fmt.format(new Date(item.created_at)))}</div>
+        </div>
+      `).join('') : '<div class="empty">Sem atividade recente.</div>';
+
+      els.reportStats.innerHTML = [
+        ['Novos usuários', s.new_users],
+        ['Ativos', s.active_users],
+        ['Premium', s.premium_users],
+        ['Profissionais', s.professional_users],
+        ['Apps pendentes', a.breakdowns.applications.pending],
+        ['Apps aprovadas', a.breakdowns.applications.approved],
+      ].map(([k, v]) => `<div class="mini"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(v)}</div></div>`).join('');
+    }
+
+    function userChips(user) {
+      const chips = [];
+      if (user.is_admin) chips.push('<span class="chip">Admin</span>');
+      if (user.is_premium) chips.push('<span class="chip good">Premium</span>');
+      if (user.is_professional) chips.push(`<span class="chip warn">Prof ${escapeHtml(user.professional_scope || '')}</span>`);
+      if (user.is_banned) chips.push('<span class="chip bad">Banido</span>');
+      return chips.join(' ');
+    }
+
+    function renderUsers() {
+      const q = els.userSearch.value.trim().toLowerCase();
+      const role = els.userRoleFilter.value;
+      const rows = state.users.filter(user => {
+        const matchText = !q || [user.username, user.plan_code, user.professional_scope].filter(Boolean).join(' ').toLowerCase().includes(q);
+        const matchRole = role === 'all' || (role === 'admins' && user.is_admin) || (role === 'premium' && user.is_premium) || (role === 'professional' && user.is_professional) || (role === 'banned' && user.is_banned);
+        return matchText && matchRole;
+      });
+      els.usersTable.innerHTML = rows.length ? rows.map(user => `
+        <tr>
+          <td>
+            <strong>${escapeHtml(user.username)}</strong><br>
+            <span class="muted">${escapeHtml(user.created_at ? fmt.format(new Date(user.created_at)) : 'sem data')}</span>
+          </td>
+          <td>
+            <div>${escapeHtml(user.plan_code)}</div>
+            <div class="muted">IA: ${escapeHtml(user.ai_trial_uses)}</div>
+          </td>
+          <td>${userChips(user)}</td>
+          <td>
+            <div class="muted">Dietas ${escapeHtml(user.diet_entries_count)} · Medições ${escapeHtml(user.measurements_count)} · Chats ${escapeHtml(user.chat_messages_count)}</div>
+            <div class="muted">Treinos ${escapeHtml(user.workout_plans_count)} · Cardápios ${escapeHtml(user.diet_plans_count)}</div>
+          </td>
+          <td>
+            <div class="row-actions">
+              <button class="action small" data-action="${escapeHtml(user.is_banned ? 'unban' : 'ban')}" data-user="${escapeHtml(user.id)}">${escapeHtml(user.is_banned ? 'Desbanir' : 'Banir')}</button>
+              <button class="action small" data-action="premium" data-user="${escapeHtml(user.id)}" data-value="${escapeHtml(!user.is_premium)}">${escapeHtml(user.is_premium ? 'Remover Premium' : 'Dar Premium')}</button>
+              <button class="action small" data-action="professional" data-user="${escapeHtml(user.id)}" data-value="${escapeHtml(!user.is_professional)}">${escapeHtml(user.is_professional ? 'Revogar Prof.' : 'Conceder Prof.')}</button>
+              <button class="action small" data-action="admin" data-user="${escapeHtml(user.id)}">${escapeHtml(user.is_admin ? 'Remover Admin' : 'Tornar Admin')}</button>
+            </div>
+          </td>
+        </tr>
+      `).join('') : '<tr><td colspan="5" class="empty">Nenhum usuário encontrado.</td></tr>';
+    }
+
+    function renderApplications() {
+      const items = state.applications;
+      els.applicationsList.innerHTML = items.length ? items.map(app => `
+        <div class="item" style="align-items:flex-start;">
+          <div>
+            <strong>@${escapeHtml(app.username)}</strong>
+            <div class="meta">${escapeHtml(app.full_name)} · ${escapeHtml(app.profession)} · ${escapeHtml(app.plan_code)}</div>
+            <div class="meta">Registro: ${escapeHtml(app.registration_number)}</div>
+            <div class="meta">${escapeHtml(app.created_at ? fmt.format(new Date(app.created_at)) : '')}</div>
+            ${app.admin_note ? `<div class="meta">Nota: ${escapeHtml(app.admin_note)}</div>` : ''}
+          </div>
+          ${app.status === 'pending' ? `
+            <div class="row-actions" style="flex-direction:column; align-items:stretch;">
+              <textarea placeholder="Nota opcional" data-note-for="${escapeHtml(app.id)}"></textarea>
+              <button class="action small" data-review="approve" data-application="${escapeHtml(app.id)}">Aprovar</button>
+              <button class="action small" data-review="reject" data-application="${escapeHtml(app.id)}">Rejeitar</button>
+            </div>
+          ` : `<span class="chip ${app.status === 'approved' ? 'good' : 'bad'}">${escapeHtml(app.status)}</span>`}
+        </div>
+      `).join('') : '<div class="empty">Nenhuma solicitação nessa visão.</div>';
+    }
+
+    function renderMediaQueue() {
+      els.mediaQueue.innerHTML = state.mediaQueue.length ? state.mediaQueue.map(item => `
+        <div class="review-card" data-media-card="${item.catalog_key}">
+          <h4>${escapeHtml(item.name)}</h4>
+          <div class="meta">${escapeHtml(item.equipment)} · ${escapeHtml(item.primary_muscle)}</div>
+          <div class="meta">${escapeHtml(item.movement_pattern)}</div>
+          <div class="meta">Consulta: ${escapeHtml(item.search_query)}</div>
+          ${item.review ? `<div class="meta">Atual: ${escapeHtml(item.review.provider_name || item.review.provider_id)} · ${escapeHtml(item.review.status)}</div>` : ''}
+          <div class="media-review-search">
+            <input type="search" placeholder="Buscar candidato" data-media-search="${escapeHtml(item.catalog_key)}">
+            <button class="action small" data-media-search-btn="${escapeHtml(item.catalog_key)}">Buscar</button>
+          </div>
+          <div class="candidate-list" data-media-results="${escapeHtml(item.catalog_key)}"></div>
+          <div class="media-review-actions">
+            <button class="action primary small" data-media-approve="${escapeHtml(item.catalog_key)}">Aprovar selecionado</button>
+          </div>
+        </div>
+      `).join('') : '<div class="empty">Sem itens na fila.</div>';
+    }
+
+    async function loadUsers() {
+      state.users = await api('/admin/users');
+      renderUsers();
+    }
+
+    async function loadApplications() {
+      const status = els.applicationStatusFilter.value;
+      const qs = status === 'all' ? '' : `?status=${encodeURIComponent(status)}`;
+      state.applications = await api(`/admin/professional-applications${qs}`);
+      renderApplications();
+    }
+
+    async function loadMediaQueue() {
+      const data = await api('/admin/exercise-media/review');
+      state.mediaQueue = data.items || [];
+      renderMediaQueue();
+    }
+
+    async function loadAnalytics() {
+      const { from, to } = currentRange();
+      const bucket = currentBucket();
+      state.analytics = await api(`/admin/analytics?from=${from}&to=${to}&bucket=${bucket}`);
+      state.analytics.recent_activities = await api('/admin/recent_activity');
+      updateCsvLink();
+      renderOverview();
+    }
+
+    async function loadAll() {
+      await Promise.all([loadAnalytics(), loadUsers(), loadApplications(), loadMediaQueue()]);
+    }
+
+    async function doUserAction(userId, action, value) {
+      let path = '';
+      let options = { method: 'POST' };
+      if (action === 'ban' || action === 'unban' || action === 'admin') {
+        path = action === 'admin' ? `/admin/users/${userId}/toggle_admin` : `/admin/users/${userId}/${action}`;
+      } else if (action === 'premium') {
+        path = `/admin/users/${userId}/premium`;
+        options = { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_premium: value === 'true' }) };
+      } else if (action === 'professional') {
+        if (value === 'true') {
+          state.currentProfessionalUser = userId;
+          els.professionalScopeSelect.value = 'diet';
+          els.professionalModal.classList.add('show');
+          return;
         }
+        path = `/admin/users/${userId}/professional`;
+        options = { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_professional: false }) };
+      }
+      await api(path, options);
+      showToast('Usuário atualizado');
+      await loadUsers();
+      await loadAnalytics();
+    }
 
-        // Load data for specific tab
-        function loadTabData(tabName) {
-            switch(tabName) {
-                case 'dashboard':
-                    loadDashboardData();
-                    break;
-                case 'users':
-                    loadUsersData();
-                    break;
-                case 'media':
-                    loadMediaReview();
-                    break;
-                case 'analytics':
-                    loadAnalyticsData();
-                    break;
-                case 'settings':
-                    loadSettingsData();
-                    break;
-            }
-        }
+    async function reviewApplication(applicationId, decision, note) {
+      await api(`/admin/professional-applications/${applicationId}/review`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision, note })
+      });
+      showToast(decision === 'approve' ? 'Solicitação aprovada' : 'Solicitação rejeitada');
+      await Promise.all([loadApplications(), loadUsers(), loadAnalytics()]);
+    }
 
-        // Dashboard: Estatísticas e Atividades Recentes
-        async function loadDashboardData() {
-            // Estatísticas
-            try {
-                const res = await fetch('/api/admin/dashboard', { credentials: 'include' });
-                const data = await res.json();
-                const statsDiv = document.getElementById('dashboardStats');
-                if (statsDiv) {
-                    statsDiv.innerHTML = `
-                        <div class="stat-card">
-                            <div class="stat-icon" style="background: #667eea;"><i class="fas fa-users"></i></div>
-                            <div class="stat-number">${data.total_users}</div>
-                            <div class="stat-label">Usuários</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon" style="background: #764ba2;"><i class="fas fa-user-shield"></i></div>
-                            <div class="stat-number">${data.total_admins}</div>
-                            <div class="stat-label">Admins</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon" style="background: #e74c3c;"><i class="fas fa-user-slash"></i></div>
-                            <div class="stat-number">${data.total_banned}</div>
-                            <div class="stat-label">Banidos</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon" style="background: #27ae60;"><i class="fas fa-utensils"></i></div>
-                            <div class="stat-number">${data.total_diet_entries}</div>
-                            <div class="stat-label">Dietas</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon" style="background: #f39c12;"><i class="fas fa-ruler"></i></div>
-                            <div class="stat-number">${data.total_measurements}</div>
-                            <div class="stat-label">Medidas</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon" style="background: #16a085;"><i class="fas fa-comments"></i></div>
-                            <div class="stat-number">${data.total_chat_messages}</div>
-                            <div class="stat-label">Mensagens Chat</div>
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                document.getElementById('dashboardStats').innerHTML = '<div class="loading"><i class="fas fa-exclamation-triangle"></i> Erro ao carregar estatísticas</div>';
-            }
+    async function loadMediaCandidates(catalogKey, query, replace = false) {
+      const container = document.querySelector(`[data-media-results="${catalogKey}"]`);
+      const items = await api(`/admin/exercise-media/search?query=${encodeURIComponent(query)}`);
+      container.innerHTML = items.items.map((candidate, idx) => `
+        <button class="candidate ${replace && idx === 0 ? 'selected' : ''}" data-catalog-key="${escapeHtml(catalogKey)}" data-provider-id="${escapeHtml(candidate.id)}">
+          <img src="/api/admin/exercise-media/candidates/${encodeURIComponent(candidate.id)}" alt="${escapeHtml(candidate.name)}">
+          <div>
+            <strong>${escapeHtml(candidate.name)}</strong>
+            <small>${escapeHtml(candidate.equipment || 'sem equipamento')} · ${escapeHtml(candidate.primary_muscle || '')}</small>
+          </div>
+        </button>
+      `).join('') || '<div class="empty">Sem resultados.</div>';
+    }
 
-            // Atividades Recentes
-            try {
-                const res = await fetch('/api/admin/recent_activity', { credentials: 'include' });
-                const activities = await res.json();
-                const activityDiv = document.getElementById('recentActivity');
-                if (activityDiv) {
-                    if (!activities.length) {
-                        activityDiv.innerHTML = '<div class="loading">Nenhuma atividade recente.</div>';
-                        return;
-                    }
-                    activityDiv.innerHTML = activities.map(act => {
-                        let icon = '';
-                        let color = '';
-                        let desc = '';
-                        if (act.type === 'user') {
-                            icon = 'fa-user-plus'; color = '#667eea';
-                            desc = `Novo usuário: <strong>${escapeHtml(act.username)}</strong>`;
-                        } else if (act.type === 'diet') {
-                            icon = 'fa-utensils'; color = '#27ae60';
-                            desc = `Nova dieta de <strong>${escapeHtml(act.username)}</strong>: ${escapeHtml(act.description)}`;
-                        } else if (act.type === 'measurement') {
-                            icon = 'fa-ruler'; color = '#f39c12';
-                            desc = `Nova medição de <strong>${escapeHtml(act.username)}</strong>`;
-                        } else if (act.type === 'chat') {
-                            icon = 'fa-comments'; color = '#16a085';
-                            desc = `Nova mensagem no chat de <strong>${escapeHtml(act.username)}</strong>`;
-                        }
-                        const date = new Date(act.created_at).toLocaleString('pt-BR');
-                        return `
-                            <div class="activity-item">
-                                <div class="activity-icon" style="background:${color};"><i class="fas ${icon}"></i></div>
-                                <div class="activity-content">
-                                    <div class="activity-title">${desc}</div>
-                                    <div class="activity-time">${date}</div>
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
-                }
-            } catch (error) {
-                document.getElementById('recentActivity').innerHTML = '<div class="loading"><i class="fas fa-exclamation-triangle"></i> Erro ao carregar atividades</div>';
-            }
-        }
-
-        // Usuários
-        async function loadUsersData() {
-            try {
-                const res = await fetch('/api/admin/users', { credentials: 'include' });
-                const users = await res.json();
-                const tbody = document.getElementById('usersTableBody');
-                if (tbody) {
-                    if (!users.length) {
-                        tbody.innerHTML = `<tr><td colspan="5" class="loading">Nenhum usuário encontrado.</td></tr>`;
-                        return;
-                    }
-                    tbody.innerHTML = users.map(user => `
-                        <tr>
-                            <td>${escapeHtml(user.id)}</td>
-                            <td>${escapeHtml(user.username)}</td>
-                            <td>
-                                <span class="status-badge ${user.is_banned ? 'status-inactive' : 'status-active'}">
-                                    ${user.is_banned ? 'Banido' : 'Ativo'}
-                                </span>
-                                ${user.is_admin ? '<span class="status-badge status-pending" style="margin-left:5px;">Admin</span>' : ''}
-                                ${user.is_professional ? '<span class="status-badge status-pending" style="margin-left:5px;">Personal</span>' : ''}
-                                <span class="status-badge ${user.is_premium ? 'status-active' : 'status-inactive'}" style="margin-left:5px;">
-                                    ${user.is_premium ? 'Premium' : 'Grátis'}
-                                </span>
-                            </td>
-                            <td>${user.created_at ? new Date(user.created_at).toLocaleString('pt-BR') : '-'}</td>
-                            <td>
-                                <button class="btn" onclick='setPremium(${JSON.stringify(String(user.id))}, ${user.is_premium})'>
-                                    <i class="fas ${user.is_premium ? 'fa-star-half-alt' : 'fa-star'}"></i>
-                                    ${user.is_premium ? 'Revogar Premium' : 'Conceder Premium'}
-                                </button>
-                                <button class="btn" onclick='setProfessional(${JSON.stringify(String(user.id))}, ${user.is_professional})'>
-                                    <i class="fas fa-user-tie"></i>
-                                    ${user.is_professional ? 'Revogar Personal' : 'Tornar Personal'}
-                                </button>
-                                <button class="btn btn-danger" onclick='banUser(${JSON.stringify(String(user.id))}, ${user.is_banned})'><i class="fas fa-user-slash"></i></button>
-                            </td>
-                        </tr>
-                    `).join('');
-                }
-            } catch (error) {
-                document.getElementById('usersTableBody').innerHTML = `<tr><td colspan="5" class="loading">Erro ao carregar usuários.</td></tr>`;
-            }
-        }
-
-        const mediaReviewState = {};
-
-        async function loadMediaReview() {
-            const container = document.getElementById('mediaReviewGrid');
-            try {
-                const response = await fetch('/api/admin/exercise-media/review', { credentials: 'include' });
-                if (!response.ok) throw new Error('Não foi possível carregar a fila.');
-                const data = await response.json();
-                container.innerHTML = data.items.map(item => {
-                    mediaReviewState[item.catalog_key] = { item, candidates: [], selected: item.review?.provider_id || '' };
-                    return renderMediaReviewCard(item.catalog_key);
-                }).join('');
-            } catch (error) {
-                container.innerHTML = `<div class="loading">${escapeHtml(error.message)}</div>`;
-            }
-        }
-
-        function renderMediaReviewCard(key) {
-            const state = mediaReviewState[key];
-            const { item, candidates, selected } = state;
-            const referenceImage = window.EXERCISE_MEDIA?.[key]?.image;
-            const candidatesHtml = candidates.map(candidate => `<button type="button" class="media-candidate${candidate.id === selected ? ' selected' : ''}" onclick="selectMediaCandidate('${escapeHtml(key)}','${escapeHtml(candidate.id)}')"><img src="/api/admin/exercise-media/candidates/${encodeURIComponent(candidate.id)}" alt="GIF de ${escapeHtml(candidate.name)}"><span><strong>${escapeHtml(candidate.name)}</strong><small>${escapeHtml(candidate.equipment || 'Equipamento não informado')} · ID ${escapeHtml(candidate.id)}</small></span></button>`).join('');
-            const approved = item.review ? `<p class="media-review-meta">Aprovado: ${escapeHtml(item.review.provider_name)} (${escapeHtml(item.review.provider_equipment || '-')})</p>` : '';
-            const reference = referenceImage ? `<img class="media-review-reference" src="${escapeHtml(referenceImage)}" alt="Referência atual de ${escapeHtml(item.name)}">` : '';
-            return `<article class="media-review-card" id="media-card-${escapeHtml(key)}"><h3>${escapeHtml(item.name)}</h3><p class="media-review-meta">${escapeHtml(item.equipment)} · ${escapeHtml(item.primary_muscle)} · ${escapeHtml(item.movement_pattern)}</p>${reference}${approved}<div class="media-review-search"><input id="media-query-${escapeHtml(key)}" class="form-control" value="${escapeHtml(item.search_query)}" maxlength="80" aria-label="Buscar candidato"><button class="btn" type="button" onclick="searchMediaCandidates('${escapeHtml(key)}')">Buscar</button></div><div class="media-candidates">${candidatesHtml || '<small>Busque para ver candidatos da WorkoutX.</small>'}</div><div class="media-review-actions"><button class="btn" type="button" onclick="approveMediaCandidate('${escapeHtml(key)}')"${selected ? '' : ' disabled'}>Aprovar selecionado</button></div></article>`;
-        }
-
-        async function searchMediaCandidates(key) {
-            const query = document.getElementById(`media-query-${key}`).value.trim();
-            if (query.length < 2) return;
-            const state = mediaReviewState[key];
-            const card = document.getElementById(`media-card-${key}`);
-            card.querySelector('.media-candidates').innerHTML = '<div class="loading">Buscando candidatos...</div>';
-            try {
-                const response = await fetch(`/api/admin/exercise-media/search?query=${encodeURIComponent(query)}`, { credentials: 'include' });
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error || 'Busca indisponível.');
-                state.candidates = data.items;
-                state.selected = '';
-                card.outerHTML = renderMediaReviewCard(key);
-            } catch (error) {
-                card.querySelector('.media-candidates').innerHTML = `<small>${escapeHtml(error.message)}</small>`;
-            }
-        }
-
-        function selectMediaCandidate(key, providerId) {
-            mediaReviewState[key].selected = providerId;
-            const card = document.getElementById(`media-card-${key}`);
-            card.outerHTML = renderMediaReviewCard(key);
-        }
-
-        async function approveMediaCandidate(key) {
-            const state = mediaReviewState[key];
-            if (!state.selected) return;
-            try {
-                const response = await fetch(`/api/admin/exercise-media/${encodeURIComponent(key)}`, {
-                    method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-                    body: JSON.stringify({ provider_id: state.selected })
-                });
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error || 'Não foi possível aprovar.');
-                state.item.review = data.review;
-                document.getElementById(`media-card-${key}`).outerHTML = renderMediaReviewCard(key);
-            } catch (error) {
-                alert(error.message);
-            }
-        }
-
-        // Analytics (Gráficos)
-        async function loadAnalyticsData() {
-            // Exemplo: adapte conforme seu endpoint de analytics
-            try {
-                const period = document.getElementById('periodSelect').value || 30;
-                const res = await fetch(`/api/admin/analytics?period=${period}`);
-                const data = await res.json();
-
-                // Gráfico de usuários
-                const usersChartCtx = document.getElementById('usersChart').getContext('2d');
-                if (window.usersChartInstance) window.usersChartInstance.destroy();
-                window.usersChartInstance = new Chart(usersChartCtx, {
-                    type: 'line',
-                    data: {
-                        labels: data.users.labels,
-                        datasets: [{
-                            label: 'Novos Usuários',
-                            data: data.users.values,
-                            backgroundColor: 'rgba(102,126,234,0.2)',
-                            borderColor: '#667eea',
-                            borderWidth: 2,
-                            fill: true
-                        }]
-                    }
-                });
-
-                // Gráfico de atividades
-                const activityChartCtx = document.getElementById('activityChart').getContext('2d');
-                if (window.activityChartInstance) window.activityChartInstance.destroy();
-                window.activityChartInstance = new Chart(activityChartCtx, {
-                    type: 'bar',
-                    data: {
-                        labels: data.activity.labels,
-                        datasets: [{
-                            label: 'Atividades',
-                            data: data.activity.values,
-                            backgroundColor: '#764ba2'
-                        }]
-                    }
-                });
-            } catch (error) {
-                document.getElementById('usersChart').parentElement.innerHTML = '<div class="loading">Erro ao carregar gráficos.</div>';
-                document.getElementById('activityChart').parentElement.innerHTML = '<div class="loading">Erro ao carregar gráficos.</div>';
-            }
-        }
-
-        // Settings (exemplo simples)
-        async function loadSettingsData() {
-            // Implemente conforme seu backend
-            // Exemplo: buscar e preencher configurações do sistema
-        }
-
-        function escapeHtml(value) {
-            const element = document.createElement('span');
-            element.textContent = value ?? '';
-            return element.innerHTML;
-        }
-
-        async function banUser(userId, isBanned) {
-            const action = isBanned ? 'unban' : 'ban';
-            const response = await fetch(`/api/admin/users/${userId}/${action}`, {
-                method: 'POST', credentials: 'include'
-            });
-            if (!response.ok) {
-                alert((await response.json()).error || 'Não foi possível atualizar o usuário.');
-                return;
-            }
-            loadUsersData();
-        }
-
-        async function setPremium(userId, isPremium) {
-            const grantPremium = !isPremium;
-            const action = grantPremium ? 'conceder' : 'revogar';
-            if (!confirm(`Deseja ${action} o acesso Premium deste usuário?`)) return;
-
-            const response = await fetch(`/api/admin/users/${userId}/premium`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ is_premium: grantPremium })
-            });
-            const data = await response.json();
-            if (!response.ok) {
-                alert(data.error || 'Não foi possível atualizar o acesso Premium.');
-                return;
-            }
-            loadUsersData();
-        }
-
-        async function setProfessional(userId, isProfessional) {
-            const grantProfessional = !isProfessional;
-            const action = grantProfessional ? 'habilitar' : 'revogar';
-            if (!confirm(`Deseja ${action} o perfil profissional deste usuário?`)) return;
-
-            const response = await fetch(`/api/admin/users/${userId}/professional`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ is_professional: grantProfessional })
-            });
-            const data = await response.json();
-            if (!response.ok) {
-                alert(data.error || 'Não foi possível atualizar o perfil profissional.');
-                return;
-            }
-            loadUsersData();
-        }
-
-        // Initialize dashboard on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            loadDashboardData();
+    function wireTabs() {
+      document.querySelectorAll('.tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+          document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+          btn.classList.add('active');
+          document.getElementById(btn.dataset.section).classList.add('active');
         });
+      });
+    }
 
-        // Event listeners for buttons (to be implemented)
-        document.addEventListener('DOMContentLoaded', function() {
-            // Dashboard buttons
-            const refreshUsersBtn = document.getElementById('refreshUsersBtn');
-            const addUserBtn = document.getElementById('addUserBtn');
-            const refreshAnalyticsBtn = document.getElementById('refreshAnalyticsBtn');
-            const exportAnalyticsBtn = document.getElementById('exportAnalyticsBtn');
-            const saveSettingsBtn = document.getElementById('saveSettingsBtn');
-            const createBackupBtn = document.getElementById('createBackupBtn');
-            const restoreBackupBtn = document.getElementById('restoreBackupBtn');
-            const clearCacheBtn = document.getElementById('clearCacheBtn');
-
-            // Add event listeners
-            if (refreshUsersBtn) {
-                refreshUsersBtn.addEventListener('click', function() {
-                    console.log('Refreshing users...');
-                    loadUsersData();
-                });
-            }
-
-            if (addUserBtn) {
-                addUserBtn.addEventListener('click', function() {
-                    console.log('Adding new user...');
-                    // Implement add user functionality
-                });
-            }
-
-            // Search functionality
-            const userSearch = document.getElementById('userSearch');
-            if (userSearch) {
-                userSearch.addEventListener('input', function() {
-                    console.log('Searching users:', this.value);
-                    // Implement search functionality
-                });
-            }
-
-            // Period selector
-            const periodSelect = document.getElementById('periodSelect');
-            if (periodSelect) {
-                periodSelect.addEventListener('change', function() {
-                    console.log('Period changed:', this.value);
-                    loadAnalyticsData();
-                });
-            }
+    function wireControls() {
+      document.querySelectorAll('[data-period]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          setPeriod(Number(btn.dataset.period));
+          await loadAnalytics();
         });
-    </script>
+      });
+      els.refreshBtn = document.getElementById('refreshBtn');
+      els.refreshBtn.addEventListener('click', loadAll);
+      els.fromDate.addEventListener('change', loadAnalytics);
+      els.toDate.addEventListener('change', loadAnalytics);
+      els.userSearch.addEventListener('input', renderUsers);
+      els.userRoleFilter.addEventListener('change', renderUsers);
+      els.applicationStatusFilter.addEventListener('change', loadApplications);
+      document.body.addEventListener('click', async (event) => {
+        const btn = event.target.closest('[data-user]');
+        if (btn) {
+          await doUserAction(btn.dataset.user, btn.dataset.action, btn.dataset.value);
+          return;
+        }
+        const reviewBtn = event.target.closest('[data-review]');
+        if (reviewBtn) {
+          const applicationId = reviewBtn.dataset.application;
+          const decision = reviewBtn.dataset.review;
+          const noteField = document.querySelector(`[data-note-for="${applicationId}"]`);
+          await reviewApplication(applicationId, decision, noteField ? noteField.value.trim() : '');
+          return;
+        }
+        const mediaSearchBtn = event.target.closest('[data-media-search-btn]');
+        if (mediaSearchBtn) {
+          const key = mediaSearchBtn.dataset.mediaSearchBtn;
+          const input = document.querySelector(`[data-media-search="${key}"]`);
+          if (input && input.value.trim().length >= 2) {
+            await loadMediaCandidates(key, input.value.trim());
+          }
+          return;
+        }
+        const mediaCandidate = event.target.closest('[data-catalog-key][data-provider-id]');
+        if (mediaCandidate) {
+          document.querySelectorAll(`[data-media-results="${mediaCandidate.dataset.catalogKey}"] .candidate`).forEach(el => el.classList.remove('selected'));
+          mediaCandidate.classList.add('selected');
+          mediaCandidate.closest('.review-card').dataset.selectedProviderId = mediaCandidate.dataset.providerId;
+          return;
+        }
+        const mediaApprove = event.target.closest('[data-media-approve]');
+        if (mediaApprove) {
+          const card = mediaApprove.closest('.review-card');
+          const providerId = card.dataset.selectedProviderId;
+          if (!providerId) {
+            showToast('Selecione um candidato primeiro');
+            return;
+          }
+          await api(`/admin/exercise-media/${encodeURIComponent(mediaApprove.dataset.mediaApprove)}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider_id: providerId })
+          });
+          showToast('GIF aprovado');
+          await loadMediaQueue();
+        }
+      });
+    }
+
+    function wireModals() {
+      document.getElementById('closeProfessionalModal').addEventListener('click', () => els.professionalModal.classList.remove('show'));
+      document.getElementById('cancelProfessional').addEventListener('click', () => els.professionalModal.classList.remove('show'));
+      els.confirmProfessional.addEventListener('click', async () => {
+        const scope = els.professionalScopeSelect.value;
+        await api(`/admin/users/${state.currentProfessionalUser}/professional`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_professional: true, professional_scope: scope })
+        });
+        els.professionalModal.classList.remove('show');
+        showToast('Profissional ativado');
+        await Promise.all([loadUsers(), loadAnalytics()]);
+      });
+      document.getElementById('closeNoteModal').addEventListener('click', () => els.noteModal.classList.remove('show'));
+      document.getElementById('cancelNote').addEventListener('click', () => els.noteModal.classList.remove('show'));
+      els.confirmNote.addEventListener('click', () => els.noteModal.classList.remove('show'));
+      els.noteModal.addEventListener('click', (event) => { if (event.target === els.noteModal) els.noteModal.classList.remove('show'); });
+      els.professionalModal.addEventListener('click', (event) => { if (event.target === els.professionalModal) els.professionalModal.classList.remove('show'); });
+    }
+
+    async function init() {
+      wireTabs();
+      wireControls();
+      wireModals();
+      setPeriod(30);
+      await refreshSession();
+      await loadAll();
+    }
+
+    init().catch(err => {
+      console.error(err);
+      showToast(err.message || 'Falha ao carregar o admin');
+    });
+  </script>
 </body>
 </html>

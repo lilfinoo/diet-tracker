@@ -102,10 +102,13 @@
         detail?.classList.remove("hidden");
         if (detail) detail.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Carregando aluno...</div>';
         try {
+            const scope = window.currentUser?.professional_scope;
+            const allowsWorkout = !scope || scope === "workout" || scope === "both";
+            const allowsDiet = !scope || scope === "diet" || scope === "both";
             const [student, workouts, diets] = await Promise.all([
                 api(`/professional/students/${segment(studentId)}`),
-                api(`/professional/students/${segment(studentId)}/workout-plans`),
-                api(`/professional/students/${segment(studentId)}/diet-plans`)
+                allowsWorkout ? api(`/professional/students/${segment(studentId)}/workout-plans`) : Promise.resolve([]),
+                allowsDiet ? api(`/professional/students/${segment(studentId)}/diet-plans`) : Promise.resolve([])
             ]);
             state.student = student;
             state.workoutPlans = workouts;
@@ -121,6 +124,9 @@
         const detail = byId("professionalStudentDetail");
         if (!student || !detail) return;
         const measurements = asArray(student.measurements).slice(0, 4);
+        const scope = window.currentUser?.professional_scope;
+        const allowsWorkout = !scope || scope === "workout" || scope === "both";
+        const allowsDiet = !scope || scope === "diet" || scope === "both";
         detail.innerHTML = `
             <div class="professional-student-header">
                 <button type="button" class="back-button" onclick="loadProfessionalDashboard()"><i class="fas fa-arrow-left"></i></button>
@@ -131,14 +137,14 @@
             <div class="professional-profile-grid">
                 ${profileFact("Idade", student.profile?.age, "anos")}${profileFact("Peso", student.profile?.weight, "kg")}${profileFact("Altura", student.profile?.height, "cm")}${profileFact("Atividade", student.profile?.activity_level)}
             </div>
-            <section class="professional-plan-section">
+            ${allowsWorkout ? `<section class="professional-plan-section">
                 <header><div><span class="content-kicker content-kicker--blue">Treinos</span><h3>Planos de treino</h3></div><div class="professional-create-actions"><button class="btn-secondary" onclick="createManualProfessionalPlan('workout')"><i class="fas fa-plus"></i> Manual</button><button class="btn-primary" onclick="openProfessionalPlanWizard('workout', '${esc(student.id)}')"><i class="fas fa-wand-magic-sparkles"></i> Gerar com IA</button></div></header>
                 <div class="professional-plan-grid">${state.workoutPlans.length ? state.workoutPlans.map((plan) => planCard(plan, "workout")).join("") : emptyPlan("treino")}</div>
-            </section>
-            <section class="professional-plan-section">
+            </section>` : ""}
+            ${allowsDiet ? `<section class="professional-plan-section">
                 <header><div><span class="content-kicker">Alimentação</span><h3>Planos alimentares</h3></div><div class="professional-create-actions"><button class="btn-secondary" onclick="createManualProfessionalPlan('diet')"><i class="fas fa-plus"></i> Manual</button><button class="btn-primary" onclick="openProfessionalPlanWizard('diet', '${esc(student.id)}')"><i class="fas fa-wand-magic-sparkles"></i> Gerar com IA</button></div></header>
                 <div class="professional-plan-grid">${state.dietPlans.length ? state.dietPlans.map((plan) => planCard(plan, "diet")).join("") : emptyPlan("alimentar")}</div>
-            </section>
+            </section>` : ""}
             <section class="professional-plan-section"><header><div><span class="content-kicker">Evolução</span><h3>Medidas recentes</h3></div></header><div class="professional-measure-grid">${measurements.length ? measurements.map(renderMeasurement).join("") : '<p class="muted">O aluno ainda não registrou medidas.</p>'}</div></section>`;
     }
 
@@ -191,7 +197,7 @@
     }
 
     function shareProfessionalInvite() {
-        const text = `Olá! Use este link para criar ou acessar sua conta e aceitar meu acompanhamento no Diet Tracker:\n${byId("professionalInviteLink").value}`;
+        const text = `Olá! Use este link para criar ou acessar sua conta e aceitar meu acompanhamento no Fit-Tracker.AI:\n${byId("professionalInviteLink").value}`;
         window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener");
     }
 

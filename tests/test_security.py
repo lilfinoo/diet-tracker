@@ -1,6 +1,10 @@
 import pytest
+from sqlalchemy import inspect
 
 from src.config import ProductionConfig
+from main import create_app
+from src.config import TestConfig
+from src.models.user import db
 
 
 def _register(client, username="alice", password="strong-password"):
@@ -45,6 +49,7 @@ def test_admin_page_requires_an_administrator(app, client):
         db.session.commit()
 
     assert client.get("/admin").status_code == 200
+    assert client.get("/admin/").status_code == 200
 
 
 def test_create_owner_grants_all_roles(app):
@@ -71,6 +76,17 @@ def test_rate_limit_exceeded_returns_429(client, app):
     assert responses[-1].is_json
 
 
+def test_rate_limit_buckets_are_isolated(client, app):
+    app.config["RATE_LIMITS"] = {"register": (1, 60), "login": (2, 60), "ai": (1, 60)}
+
+    assert _register(client, "alice").status_code == 201
+    login = _login(client, "alice", "wrong-password")
+    assert login.status_code == 401
+
+    assert _login(client, "alice", "wrong-password").status_code == 401
+    assert _register(client, "bob").status_code == 429
+
+
 def test_diet_field_length_limits(client):
     assert _register(client).status_code == 201
     long_description = client.post("/api/diet", json={
@@ -92,7 +108,10 @@ def test_profile_rejects_invalid_age(client):
 
 def test_production_config_requires_gemini_key(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://example/db")
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", "true")
     monkeypatch.setattr(ProductionConfig, "SECRET_KEY", "prod-secret")
+    monkeypatch.setattr(ProductionConfig, "PUBLIC_BASE_URL", "https://example.com")
+    monkeypatch.setattr(ProductionConfig, "CORS_ORIGINS", ["https://example.com"])
     monkeypatch.setattr(ProductionConfig, "GEMINI_API_KEY", None)
     with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
         ProductionConfig.validate()
@@ -100,6 +119,55 @@ def test_production_config_requires_gemini_key(monkeypatch):
 
 def test_production_config_accepts_complete_env(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://example/db")
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", "true")
     monkeypatch.setattr(ProductionConfig, "SECRET_KEY", "prod-secret")
+    monkeypatch.setattr(ProductionConfig, "PUBLIC_BASE_URL", "https://example.com")
+    monkeypatch.setattr(ProductionConfig, "CORS_ORIGINS", ["https://example.com"])
     monkeypatch.setattr(ProductionConfig, "GEMINI_API_KEY", "fake-key")
     ProductionConfig.validate()
+
+
+def test_workout_schedule_migration_adds_foreign_keys(tmp_path):
+    class MigrationConfig(TestConfig):
+        SQLALCHEMY_DATABASE_URI = f"sqlite:///{tmp_path / 'migration.db'}"
+
+    app = create_app(MigrationConfig)
+    runner = app.test_cli_runner()
+    assert runner.invoke(args=["db", "upgrade"]).exit_code == 0
+
+    with app.app_context():
+        foreign_keys = inspect(db.engine).get_foreign_keys("user_profile")
+        constrained_columns = {tuple(item["constrained_columns"]) for item in foreign_keys}
+
+    assert ("current_workout_plan_id",) in constrained_columns
+    assert ("pending_workout_plan_id",) in constrained_columns
+
+
+def test_security_headers_are_applied(client):
+    response = client.get("/api/health")
+
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["X-Frame-Options"] == "DENY"
+    assert response.headers["Referrer-Policy"] == "same-origin"
+
+
+def test_csrf_protects_authenticated_mutations(tmp_path):
+    class CsrfConfig(TestConfig):
+        CSRF_PROTECTION = True
+        SQLALCHEMY_DATABASE_URI = f"sqlite:///{tmp_path / 'csrf.db'}"
+
+    app = create_app(CsrfConfig)
+    with app.app_context():
+        db.create_all()
+
+    client = app.test_client()
+    register = client.post("/api/register", json={"username": "csrf-user", "password": "strong-password"})
+    assert register.status_code == 201
+    token = register.get_json()["csrf_token"]
+
+    blocked = client.post("/api/profile", json={"age": 30})
+    assert blocked.status_code == 403
+    assert blocked.get_json()["error"] == "Token CSRF inválido."
+
+    allowed = client.post("/api/profile", headers={"X-CSRF-Token": token}, json={"age": 30})
+    assert allowed.status_code == 200

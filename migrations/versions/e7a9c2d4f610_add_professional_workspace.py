@@ -63,10 +63,17 @@ def _add_plan_lifecycle(table_name):
 
 
 def upgrade():
-    with op.batch_alter_table("user", schema=None) as batch_op:
-        batch_op.add_column(
-            sa.Column("is_professional", sa.Boolean(), nullable=False, server_default=sa.false())
-        )
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        op.execute(sa.text("PRAGMA foreign_keys=OFF"))
+    try:
+        with op.batch_alter_table("user", schema=None) as batch_op:
+            batch_op.add_column(
+                sa.Column("is_professional", sa.Boolean(), nullable=False, server_default=sa.false())
+            )
+    finally:
+        if bind.dialect.name == "sqlite":
+            op.execute(sa.text("PRAGMA foreign_keys=ON"))
 
     _add_plan_lifecycle("workout_plan")
     _add_plan_lifecycle("diet_plan")
@@ -172,5 +179,12 @@ def downgrade():
     op.drop_table("professional_student_relationship")
     _drop_plan_lifecycle("diet_plan")
     _drop_plan_lifecycle("workout_plan")
-    with op.batch_alter_table("user", schema=None) as batch_op:
-        batch_op.drop_column("is_professional")
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        op.execute(sa.text("PRAGMA foreign_keys=OFF"))
+    try:
+        with op.batch_alter_table("user", schema=None) as batch_op:
+            batch_op.drop_column("is_professional")
+    finally:
+        if bind.dialect.name == "sqlite":
+            op.execute(sa.text("PRAGMA foreign_keys=ON"))

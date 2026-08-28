@@ -19,7 +19,7 @@ from src.models.user import (
     WorkoutSession,
     db,
 )
-from src.routes.user_routes import json_body, login_required, page_query
+from src.routes.common import json_body, login_required, page_query, _csrf_protect_request
 from src.services.ai import (
     AIQuotaExceededError,
     AIResponseError,
@@ -60,6 +60,11 @@ from src.services.workout_plans import (
 professional_bp = Blueprint("professional", __name__)
 
 
+@professional_bp.before_request
+def protect_professional_mutations():
+    return _csrf_protect_request()
+
+
 @professional_bp.errorhandler(400)
 @professional_bp.errorhandler(403)
 @professional_bp.errorhandler(404)
@@ -90,11 +95,38 @@ def professional_premium_required(function):
     @wraps(function)
     @professional_required
     def decorated_function(*args, **kwargs):
-        if not g.user.is_premium:
+        if not g.user.has_entitlement("premium"):
             return jsonify({"error": "Este recurso de IA exige plano Premium do profissional."}), 403
         return function(*args, **kwargs)
 
     return decorated_function
+
+
+def professional_scope_required(scope):
+    def decorator(function):
+        @wraps(function)
+        @professional_required
+        def decorated_function(*args, **kwargs):
+            # A null scope identifies professionals created before specialties existed.
+            if g.user.professional_scope not in {None, scope, "both"}:
+                return jsonify({"error": "Seu plano profissional não inclui este recurso."}), 403
+            return function(*args, **kwargs)
+
+        return decorated_function
+    return decorator
+
+
+def _occupied_student_slots(professional_id):
+    now = datetime.utcnow()
+    relationships = ProfessionalStudentRelationship.query.filter(
+        ProfessionalStudentRelationship.professional_user_id == professional_id,
+        ProfessionalStudentRelationship.status.in_(("active", "pending")),
+    ).all()
+    return sum(
+        relationship.status == "active"
+        or (relationship.invite_expires_at and relationship.invite_expires_at > now)
+        for relationship in relationships
+    )
 
 
 def _token_hash(token):
@@ -157,6 +189,8 @@ def _commit_or_conflict(message):
 @professional_bp.route("/professional/invitations", methods=["POST"])
 @professional_required
 def create_invitation():
+    if _occupied_student_slots(g.user.id) >= 5:
+        return jsonify({"error": "Seu plano permite acompanhar até 5 alunos."}), 409
     token = secrets.token_urlsafe(32)
     relationship = ProfessionalStudentRelationship(
         professional_user_id=g.user.id,
@@ -247,6 +281,12 @@ def accept_invitation(token):
     ).first()
     if active:
         return jsonify({"error": "Você já possui um profissional ativo."}), 409
+    active_students = ProfessionalStudentRelationship.query.filter_by(
+        professional_user_id=relationship.professional_user_id,
+        status="active",
+    ).count()
+    if active_students >= 5:
+        return jsonify({"error": "Este profissional já atingiu o limite de 5 alunos."}), 409
     relationship.student_user_id = g.user.id
     relationship.status = "active"
     relationship.accepted_at = datetime.utcnow()
@@ -367,7 +407,7 @@ def revoke_own_professional_relationship():
 
 
 @professional_bp.route("/professional/exercises", methods=["GET"])
-@professional_required
+@professional_scope_required("workout")
 def get_exercises():
     return jsonify([
         {
@@ -382,7 +422,7 @@ def get_exercises():
 
 
 @professional_bp.route("/professional/students/<uuid:student_id>/workout-plans", methods=["GET"])
-@professional_required
+@professional_scope_required("workout")
 def professional_workout_plans(student_id):
     student, _ = _student_context(student_id)
     plans = WorkoutPlan.query.filter_by(user_id=student.id).options(
@@ -395,14 +435,14 @@ def professional_workout_plans(student_id):
 
 
 @professional_bp.route("/professional/students/<uuid:student_id>/workout-plans/<int:plan_id>", methods=["GET"])
-@professional_required
+@professional_scope_required("workout")
 def professional_workout_plan_details(student_id, plan_id):
     student, _ = _student_context(student_id)
     return jsonify(_workout_plan_for(student, plan_id).to_dict_full()), 200
 
 
 @professional_bp.route("/professional/students/<uuid:student_id>/workout-plans", methods=["POST"])
-@professional_required
+@professional_scope_required("workout")
 def create_manual_workout(student_id):
     student, relationship = _student_context(student_id)
     data = json_body()
@@ -431,6 +471,7 @@ def create_manual_workout(student_id):
 
 @professional_bp.route("/professional/students/<uuid:student_id>/workout-plans/generate", methods=["POST"])
 @rate_limit("professional_ai", 8, 60)
+@professional_scope_required("workout")
 @professional_premium_required
 def generate_professional_workout(student_id):
     student, relationship = _student_context(student_id)
@@ -469,7 +510,7 @@ def generate_professional_workout(student_id):
 
 
 @professional_bp.route("/professional/students/<uuid:student_id>/workout-plans/<int:plan_id>", methods=["PUT"])
-@professional_required
+@professional_scope_required("workout")
 def update_professional_workout(student_id, plan_id):
     student, relationship = _student_context(student_id)
     plan = _workout_plan_for(student, plan_id, editable=True)
@@ -486,7 +527,7 @@ def update_professional_workout(student_id, plan_id):
 
 
 @professional_bp.route("/professional/students/<uuid:student_id>/workout-plans/<int:plan_id>/publish", methods=["POST"])
-@professional_required
+@professional_scope_required("workout")
 def publish_professional_workout(student_id, plan_id):
     student, relationship = _student_context(student_id, lock=True)
     plan = _workout_plan_for(student, plan_id, editable=True)
@@ -513,7 +554,7 @@ def publish_professional_workout(student_id, plan_id):
 
 
 @professional_bp.route("/professional/students/<uuid:student_id>/diet-plans", methods=["GET"])
-@professional_required
+@professional_scope_required("diet")
 def professional_diet_plans(student_id):
     student, _ = _student_context(student_id)
     plans = DietPlan.query.filter_by(user_id=student.id).options(selectinload(DietPlan.meals)).order_by(
@@ -526,7 +567,7 @@ def professional_diet_plans(student_id):
 
 
 @professional_bp.route("/professional/students/<uuid:student_id>/diet-plans/<int:plan_id>", methods=["GET"])
-@professional_required
+@professional_scope_required("diet")
 def professional_diet_plan_details(student_id, plan_id):
     student, _ = _student_context(student_id)
     return jsonify(_diet_plan_for(student, plan_id).to_dict_full()), 200
@@ -541,7 +582,7 @@ def _validated_diet_context(student, raw_questionnaire):
 
 
 @professional_bp.route("/professional/students/<uuid:student_id>/diet-plans", methods=["POST"])
-@professional_required
+@professional_scope_required("diet")
 def create_manual_diet(student_id):
     student, relationship = _student_context(student_id)
     data = json_body()
@@ -571,6 +612,7 @@ def create_manual_diet(student_id):
 
 @professional_bp.route("/professional/students/<uuid:student_id>/diet-plans/generate", methods=["POST"])
 @rate_limit("professional_ai", 8, 60)
+@professional_scope_required("diet")
 @professional_premium_required
 def generate_professional_diet(student_id):
     student, relationship = _student_context(student_id)
@@ -617,7 +659,7 @@ def generate_professional_diet(student_id):
 
 
 @professional_bp.route("/professional/students/<uuid:student_id>/diet-plans/<int:plan_id>", methods=["PUT"])
-@professional_required
+@professional_scope_required("diet")
 def update_professional_diet(student_id, plan_id):
     student, relationship = _student_context(student_id)
     plan = _diet_plan_for(student, plan_id, editable=True)
@@ -635,6 +677,7 @@ def update_professional_diet(student_id, plan_id):
 
 @professional_bp.route("/professional/students/<uuid:student_id>/diet-plans/<int:plan_id>/suggest", methods=["POST"])
 @rate_limit("professional_ai", 8, 60)
+@professional_scope_required("diet")
 @professional_premium_required
 def suggest_professional_diet_day(student_id, plan_id):
     student, _ = _student_context(student_id)
@@ -681,7 +724,7 @@ def suggest_professional_diet_day(student_id, plan_id):
 
 
 @professional_bp.route("/professional/students/<uuid:student_id>/diet-plans/<int:plan_id>/days/<int:day_index>", methods=["PUT"])
-@professional_required
+@professional_scope_required("diet")
 def replace_professional_diet_day(student_id, plan_id, day_index):
     student, relationship = _student_context(student_id)
     plan = _diet_plan_for(student, plan_id, editable=True)
@@ -720,7 +763,7 @@ def replace_professional_diet_day(student_id, plan_id, day_index):
 
 
 @professional_bp.route("/professional/students/<uuid:student_id>/diet-plans/<int:plan_id>/publish", methods=["POST"])
-@professional_required
+@professional_scope_required("diet")
 def publish_professional_diet(student_id, plan_id):
     student, relationship = _student_context(student_id, lock=True)
     plan = _diet_plan_for(student, plan_id, editable=True)

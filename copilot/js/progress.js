@@ -44,7 +44,7 @@
         const records = activity.personal_record_count
             ? `<span class="activity-pr"><i class="fas fa-trophy" aria-hidden="true"></i>${esc(activity.personal_record_count)} PR</span>`
             : "";
-        return `<article class="activity-history-card"><div class="activity-history-card__icon"><i class="fas fa-dumbbell" aria-hidden="true"></i></div><div><span>${utcDate(activity.completed_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span><h3>${esc(activity.workout_name)}</h3><p>${esc(durationLabel(activity.duration_seconds))} · ${esc(activity.exercises_performed)} exercícios · ${esc(activity.sets_performed)} séries</p>${records}</div><button type="button" data-activity-id="${esc(activity.id)}" aria-label="Abrir atividade ${esc(activity.workout_name)}"><i class="fas fa-chevron-right" aria-hidden="true"></i></button></article>`;
+        return `<article class="activity-history-card" data-activity-id="${esc(activity.id)}" role="button" tabindex="0" aria-label="Abrir atividade ${esc(activity.workout_name)}"><div class="activity-history-card__icon"><i class="fas fa-dumbbell" aria-hidden="true"></i></div><div><span>${utcDate(activity.completed_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span><h3>${esc(activity.workout_name)}</h3><p>${esc(durationLabel(activity.duration_seconds))} · ${esc(activity.exercises_performed)} exercícios · ${esc(activity.sets_performed)} séries</p>${records}</div><button type="button" class="activity-history-card__open" aria-label="Abrir atividade ${esc(activity.workout_name)}"><i class="fas fa-chevron-right" aria-hidden="true"></i></button></article>`;
     }
 
     function renderActivities(items) {
@@ -76,6 +76,19 @@
         } catch (error) {
             if (token !== progressRequestToken) return;
             container.innerHTML = `<p class="session-inline-error">${esc(error.message)}</p>`;
+        }
+    }
+
+    async function deleteActivity(activityId) {
+        if (!activityId || !window.confirm("Excluir esta atividade do histórico? Esta ação não pode ser desfeita.")) return;
+        try {
+            await api(`/activities/${encodeURIComponent(activityId)}`, { method: "DELETE" });
+            showToast("Atividade excluída.", "success");
+            window.closeAppModal?.(byId("viewWorkoutPlanModal"));
+            window.loadWorkoutActivities?.();
+            window.loadProgressOverview?.();
+        } catch (error) {
+            showToast(error.message, "error");
         }
     }
 
@@ -142,6 +155,11 @@
     }
 
     document.addEventListener("click", (event) => {
+        const deleteActivityButton = event.target.closest("[data-activity-delete-id]");
+        if (deleteActivityButton) {
+            deleteActivity(deleteActivityButton.dataset.activityDeleteId);
+            return;
+        }
         const activity = event.target.closest("[data-activity-id]");
         if (activity) window.openWorkoutActivity?.(activity.dataset.activityId);
         const action = event.target.closest("[data-progress-action]")?.dataset.progressAction;
@@ -159,6 +177,15 @@
 
     let progressRequestToken = 0;
 
+    document.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        const activity = event.target.closest?.("[data-activity-id]");
+        if (!activity || event.target.closest("[data-activity-delete-id]")) return;
+        if (event.target !== activity) return;
+        event.preventDefault();
+        window.openWorkoutActivity?.(activity.dataset.activityId);
+    });
+
     function clearWorkoutProgress() {
         progressRequestToken += 1;
         const overview = byId("workoutProgressOverview");
@@ -171,4 +198,5 @@
     window.loadProgressOverview = loadProgressOverview;
     window.openExerciseProgress = openExerciseProgress;
     window.clearWorkoutProgress = clearWorkoutProgress;
+    window.deleteWorkoutActivity = deleteActivity;
 })();

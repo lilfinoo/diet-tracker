@@ -19,3 +19,9 @@
 ## Repository Hygiene
 - `venv/` and `__pycache__/` are local environment/cache artifacts. Do not commit or modify them.
 - Deploy (Render): the `web` process applies `flask db upgrade` before starting gunicorn bound to `$PORT`. Healthcheck: `GET /api/health`.
+
+## AI Agent Behavior
+1. **Pensar antes de codificar** — Não assumir. Não esconder confusão. Apresentar tradeoffs. Antes de implementar: declarar suposições explicitamente. Se incerto, perguntar. Se múltiplas interpretações existirem, apresentar todas — não escolher silenciosamente. Se uma abordagem mais simples existir, dizer. Parar se algo estiver confuso e nomear o que é confuso.
+2. **Simplicidade primeiro** — Código mínimo que resolve o problema. Nada especulativo. Sem funcionalidades além do pedido. Sem abstrações para código de uso único. Sem "flexibilidade" ou "configurabilidade" não solicitada. Sem tratamento de erros para cenários impossíveis. Se escreveu 200 linhas e poderia ser 50, reescrever.
+3. **Mudanças cirúrgicas** — Mexer apenas no necessário. Não "melhorar" código adjacente, comentários ou formatação. Não refatorar o que não está quebrado. Manter estilo existente, mesmo que faria diferente. Quando as mudanças criam órfãos: remover imports/variáveis/funções que SUAS mudanças tornaram não utilizadas. Não remover código morto pré-existente sem ser pedido.
+4. **Execução orientada a objetivo** — Definir critérios de sucesso. Rodar até verificar. Transformar tarefas em metas verificáveis. Para tarefas multi-etapa, declarar plano breve: 1. [Etapa] → verificar: [check]. Critérios fortes permitem loop independente; critérios fracos exigem constante clarificação.

@@ -82,10 +82,11 @@ def test_admin_can_approve_and_serve_exercise_media(app, client, tmp_path, monke
 
     media_path = tmp_path / "agachamento_livre.gif"
     media_path.write_bytes(b"GIF89aapproved")
-    monkeypatch.setattr("src.routes.user_routes.get_exercise", lambda provider_id: {
+    monkeypatch.setattr("src.routes.admin_routes.get_exercise", lambda provider_id: {
         "id": provider_id, "name": "Barbell Squat", "equipment": "Barbell", "gifUrl": "https://example.test/gif",
     })
-    monkeypatch.setattr("src.routes.user_routes.get_cached_gif", lambda *args: media_path)
+    monkeypatch.setattr("src.routes.admin_routes.get_cached_gif", lambda *args: media_path)
+    monkeypatch.setattr("src.routes.profile_routes.get_cached_gif", lambda *args: media_path)
 
     response = client.put("/api/admin/exercise-media/agachamento_livre", json={"provider_id": "0201"})
     assert response.status_code == 200

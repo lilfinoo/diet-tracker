@@ -8,15 +8,25 @@ from werkzeug.security import generate_password_hash, check_password_hash
 db = SQLAlchemy()
 
 class User(db.Model):
+    __table_args__ = (
+        db.CheckConstraint(
+            "professional_scope IS NULL OR professional_scope IN ('diet', 'workout', 'both')",
+            name="ck_user_professional_scope",
+        ),
+        db.CheckConstraint("ai_trial_uses >= 0", name="ck_user_ai_trial_uses_nonnegative"),
+    )
+
     id = db.Column(UUIDType(binary=False), primary_key=True, default=uuid.uuid4)
     username = db.Column(db.String(80), unique=True, nullable=False)
-    password_hash = db.Column(db.String(255), nullable=False)
+    password_hash = db.Column(db.String(255), nullable=True)
     is_banned = db.Column(db.Boolean, default=False, nullable=False)
     banned_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_premium = db.Column(db.Boolean, default=False, nullable=False)
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
     is_professional = db.Column(db.Boolean, default=False, nullable=False)
+    ai_trial_uses = db.Column(db.Integer, default=0, nullable=False)
+    professional_scope = db.Column(db.String(16), nullable=True)
 
     # Relacionamentos
     diet_entries = db.relationship("DietEntry", backref="user", lazy=True, cascade="all, delete-orphan")
@@ -40,12 +50,63 @@ class User(db.Model):
         foreign_keys="DietPlan.user_id",
     )
     workout_sessions = db.relationship("WorkoutSession", backref="user", lazy=True, cascade="all, delete-orphan")
+    oauth_identities = db.relationship("OAuthIdentity", backref="user", lazy=True, cascade="all, delete-orphan")
+    subscriptions = db.relationship("Subscription", backref="user", lazy=True, cascade="all, delete-orphan")
+    professional_applications = db.relationship(
+        "ProfessionalApplication",
+        backref="user",
+        lazy=True,
+        cascade="all, delete-orphan",
+        foreign_keys="ProfessionalApplication.user_id",
+    )
+    badges = db.relationship(
+        "UserBadge",
+        back_populates="user",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="UserBadge.granted_at",
+    )
+    profile_highlights = db.relationship(
+        "ProfileHighlight",
+        back_populates="user",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="ProfileHighlight.position",
+    )
 
     def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
+        self.password_hash = generate_password_hash(password, method="pbkdf2:sha256")
 
     def check_password(self, password):
-        return check_password_hash(self.password_hash, password)
+        return bool(self.password_hash and password and check_password_hash(self.password_hash, password))
+
+    def active_subscription(self):
+        now = datetime.utcnow()
+        return next((
+            subscription for subscription in sorted(
+                self.subscriptions,
+                key=lambda item: item.created_at or datetime.min,
+                reverse=True,
+            )
+            if subscription.status in {"active", "trialing", "canceled"}
+            and (subscription.current_period_end is None or subscription.current_period_end > now)
+        ), None)
+
+    def effective_plan_code(self):
+        subscription = self.active_subscription()
+        if subscription:
+            return subscription.plan_code
+        return "premium_student" if self.is_premium else "free"
+
+    def has_entitlement(self, entitlement):
+        plan_code = self.effective_plan_code()
+        if entitlement == "premium":
+            return self.is_premium or plan_code != "free"
+        if entitlement == "professional":
+            return self.is_professional and plan_code in {"professional_single", "professional_complete"}
+        if entitlement in {"diet", "workout"}:
+            return self.has_entitlement("professional") and self.professional_scope in {entitlement, "both"}
+        return False
 
     def ban_user(self):
         self.is_banned = True
@@ -70,14 +131,145 @@ class User(db.Model):
             "banned_at": self.banned_at.isoformat() if self.banned_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "is_admin": self.is_admin,
-            "is_premium": self.is_premium,
+            "is_premium": self.has_entitlement("premium"),
             "is_professional": self.is_professional,
+            "plan_code": self.effective_plan_code(),
+            "professional_scope": self.professional_scope,
+            "ai_trial_uses": self.ai_trial_uses,
             "diet_entries_count": count("diet_entries", lambda: self.diet_entries),
             "measurements_count": count("measurements", lambda: self.measurements),
             "chat_messages_count": count("chat_messages", lambda: self.chat_messages),
             "has_profile": counts["has_profile"] if "has_profile" in counts else self.profile is not None,
             "workout_plans_count": count("workout_plans", lambda: self.workout_plans),
-            "diet_plans_count": count("diet_plans", lambda: self.diet_plans)
+            "diet_plans_count": count("diet_plans", lambda: self.diet_plans),
+            "badges": [badge.to_dict() for badge in self.badges],
+            "profile_highlights": [highlight.to_dict() for highlight in self.profile_highlights],
+        }
+
+
+class OAuthIdentity(db.Model):
+    __table_args__ = (
+        db.UniqueConstraint("provider", "issuer", "subject", name="uq_oauth_identity_provider_issuer_subject"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    provider = db.Column(db.String(32), nullable=False)
+    issuer = db.Column(db.String(255), nullable=False)
+    subject = db.Column(db.String(255), nullable=False)
+    email = db.Column(db.String(320), nullable=True)
+    email_verified = db.Column(db.Boolean, default=False, nullable=False)
+    display_name = db.Column(db.String(255), nullable=True)
+    avatar_url = db.Column(db.String(2048), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    last_login_at = db.Column(db.DateTime, nullable=True)
+
+
+class Subscription(db.Model):
+    __table_args__ = (
+        db.UniqueConstraint("provider", "external_subscription_id", name="uq_subscription_provider_external_id"),
+        db.CheckConstraint(
+            "plan_code IN ('free', 'premium_student', 'professional_single', 'professional_complete')",
+            name="ck_subscription_plan_code",
+        ),
+        db.Index("ix_subscription_user_status", "user_id", "status"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    provider = db.Column(db.String(32), nullable=False)
+    external_customer_id = db.Column(db.String(255), nullable=True)
+    external_subscription_id = db.Column(db.String(255), nullable=True)
+    status = db.Column(db.String(32), nullable=False)
+    plan_code = db.Column(db.String(32), nullable=False)
+    current_period_start = db.Column(db.DateTime, nullable=True)
+    current_period_end = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "provider": self.provider,
+            "external_customer_id": self.external_customer_id,
+            "external_subscription_id": self.external_subscription_id,
+            "status": self.status,
+            "plan_code": self.plan_code,
+            "current_period_start": self.current_period_start.isoformat() if self.current_period_start else None,
+            "current_period_end": self.current_period_end.isoformat() if self.current_period_end else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class BillingCheckout(db.Model):
+    __table_args__ = (
+        db.UniqueConstraint("provider", "external_checkout_id", name="uq_billing_checkout_provider_external_id"),
+        db.Index("ix_billing_checkout_user", "user_id"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    provider = db.Column(db.String(32), nullable=False)
+    external_checkout_id = db.Column(db.String(255), nullable=True)
+    plan_code = db.Column(db.String(32), nullable=False)
+    payment_method = db.Column(db.String(16), nullable=False)  # credit_card | pix
+    status = db.Column(db.String(32), default="created", nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class BillingEvent(db.Model):
+    __table_args__ = (
+        db.UniqueConstraint("provider", "provider_event_id", name="uq_billing_event_provider_event_id"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    provider = db.Column(db.String(32), nullable=False)
+    provider_event_id = db.Column(db.String(255), nullable=False)
+    event_type = db.Column(db.String(64), nullable=True)
+    received_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ProfessionalApplication(db.Model):
+    __table_args__ = (
+        db.CheckConstraint(
+            "profession IN ('personal_trainer', 'nutritionist')",
+            name="ck_professional_application_profession",
+        ),
+        db.CheckConstraint(
+            "status IN ('pending', 'approved', 'rejected')",
+            name="ck_professional_application_status",
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    plan_code = db.Column(db.String(32), nullable=False)
+    full_name = db.Column(db.String(120), nullable=False)
+    profession = db.Column(db.String(20), nullable=False)
+    registration_number = db.Column(db.String(40), nullable=False)
+    status = db.Column(db.String(16), default="pending", nullable=False)
+    admin_note = db.Column(db.String(500), nullable=True)
+    reviewed_by_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def to_dict(self):
+        reviewer = db.session.get(User, self.reviewed_by_user_id) if self.reviewed_by_user_id else None
+        return {
+            "id": self.id,
+            "user_id": str(self.user_id),
+            "username": self.user.username if self.user else None,
+            "plan_code": self.plan_code,
+            "full_name": self.full_name,
+            "profession": self.profession,
+            "registration_number": self.registration_number,
+            "status": self.status,
+            "admin_note": self.admin_note,
+            "reviewed_by": reviewer.username if reviewer else None,
+            "reviewed_at": self.reviewed_at.isoformat() if self.reviewed_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
 class UserProfile(db.Model):
@@ -91,8 +283,17 @@ class UserProfile(db.Model):
     weight = db.Column(db.Float, nullable=True)
     height = db.Column(db.Float, nullable=True)
     timezone = db.Column(db.String(64), nullable=True)
+    current_workout_plan_id = db.Column(db.Integer, db.ForeignKey("workout_plan.id"), nullable=True)
+    current_workout_schedule = db.Column(db.JSON, nullable=True)
+    pending_workout_plan_id = db.Column(db.Integer, db.ForeignKey("workout_plan.id"), nullable=True)
+    pending_workout_schedule = db.Column(db.JSON, nullable=True)
+    workout_schedule_effective_from = db.Column(db.Date, nullable=True)
+    workout_schedule_timezone = db.Column(db.String(64), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    current_workout_plan = db.relationship("WorkoutPlan", foreign_keys=[current_workout_plan_id])
+    pending_workout_plan = db.relationship("WorkoutPlan", foreign_keys=[pending_workout_plan_id])
 
     def to_dict(self):
         return {
@@ -106,6 +307,10 @@ class UserProfile(db.Model):
             "weight": self.weight,
             "height": self.height,
             "timezone": self.timezone,
+            "current_workout_plan_id": self.current_workout_plan_id,
+            "pending_workout_plan_id": self.pending_workout_plan_id,
+            "workout_schedule_effective_from": self.workout_schedule_effective_from.isoformat() if self.workout_schedule_effective_from else None,
+            "workout_schedule_timezone": self.workout_schedule_timezone,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }
@@ -607,6 +812,73 @@ class AchievementUnlock(db.Model):
         nullable=True,
     )
     is_backfilled = db.Column(db.Boolean, default=False, nullable=False)
+
+
+class UserBadge(db.Model):
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "badge_code", name="uq_user_badge_user_code"),
+        db.CheckConstraint(
+            "badge_code IN ('pioneiro', 'desde_sempre')",
+            name="ck_user_badge_code",
+        ),
+        db.CheckConstraint(
+            "(badge_code = 'pioneiro' AND badge_rank BETWEEN 1 AND 100) OR (badge_code = 'desde_sempre' AND badge_rank IS NULL)",
+            name="ck_user_badge_rank_rules",
+        ),
+        db.CheckConstraint("source IN ('signup', 'backfill', 'admin')", name="ck_user_badge_source"),
+        db.Index(
+            "uq_user_badge_pioneer_rank",
+            "badge_rank",
+            unique=True,
+            postgresql_where=db.text("badge_code = 'pioneiro'"),
+            sqlite_where=db.text("badge_code = 'pioneiro'"),
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    badge_code = db.Column(db.String(40), nullable=False)
+    badge_rank = db.Column(db.Integer, nullable=True)
+    source = db.Column(db.String(16), default="backfill", nullable=False)
+    granted_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    user = db.relationship("User", back_populates="badges")
+
+    def to_dict(self):
+        from src.services.badges import serialize_badge
+
+        return serialize_badge(self)
+
+
+class ProfileHighlight(db.Model):
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "position", name="uq_profile_highlight_user_position"),
+        db.UniqueConstraint("user_id", "achievement_unlock_id", name="uq_profile_highlight_user_achievement"),
+        db.UniqueConstraint("user_id", "user_badge_id", name="uq_profile_highlight_user_badge"),
+        db.CheckConstraint("position BETWEEN 1 AND 3", name="ck_profile_highlight_position"),
+        db.CheckConstraint(
+            "achievement_unlock_id IS NOT NULL OR user_badge_id IS NOT NULL",
+            name="ck_profile_highlight_target_present",
+        ),
+        db.CheckConstraint("target_kind IN ('achievement', 'badge')", name="ck_profile_highlight_target_kind"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    position = db.Column(db.Integer, nullable=False)
+    target_kind = db.Column(db.String(16), nullable=False)
+    achievement_unlock_id = db.Column(db.Integer, db.ForeignKey("achievement_unlock.id", ondelete="CASCADE"), nullable=True)
+    user_badge_id = db.Column(db.Integer, db.ForeignKey("user_badge.id", ondelete="CASCADE"), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    user = db.relationship("User", back_populates="profile_highlights")
+    achievement_unlock = db.relationship("AchievementUnlock")
+    user_badge = db.relationship("UserBadge")
+
+    def to_dict(self):
+        from src.services.badges import serialize_profile_highlight
+
+        return serialize_profile_highlight(self)
 
 
 class ExerciseMediaReview(db.Model):

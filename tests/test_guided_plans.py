@@ -399,7 +399,7 @@ def test_workout_validation_accepts_complementary_chest_angles():
 
 def test_guided_workout_creation_and_temporary_replacement(app, client, monkeypatch):
     register_premium(app, client)
-    monkeypatch.setattr("src.routes.user_routes.generate_workout_plan", lambda *args: generated_workout())
+    monkeypatch.setattr("src.routes.plan_routes.generate_workout_plan", lambda *args: generated_workout())
 
     response = client.post("/api/workout_plans/generate", json=workout_questionnaire())
 
@@ -482,7 +482,7 @@ def test_guided_workout_creation_and_temporary_replacement(app, client, monkeypa
 
 def test_finished_workout_summary_uses_performed_sets_and_is_idempotent(app, client, monkeypatch):
     register_premium(app, client)
-    monkeypatch.setattr("src.routes.user_routes.generate_workout_plan", lambda *args: generated_workout())
+    monkeypatch.setattr("src.routes.plan_routes.generate_workout_plan", lambda *args: generated_workout())
     plan = client.post("/api/workout_plans/generate", json=workout_questionnaire()).get_json()["plan"]
     day = plan["days"][0]
     exercises = day["exercises"][:2]
@@ -518,7 +518,7 @@ def test_finished_workout_summary_uses_performed_sets_and_is_idempotent(app, cli
         def utcnow(cls):
             return finished_at
 
-    monkeypatch.setattr("src.routes.user_routes.datetime", FixedDateTime)
+    monkeypatch.setattr("src.routes.session_routes.datetime", FixedDateTime)
     finish_response = client.post(f"/api/workout_sessions/{session['id']}/finish")
     assert finish_response.status_code == 200
     summary = finish_response.get_json()["summary"]
@@ -559,7 +559,7 @@ def test_finished_workout_summary_uses_performed_sets_and_is_idempotent(app, cli
 
 def test_workout_summary_omits_volume_when_a_performed_set_has_no_load(app, client, monkeypatch):
     register_premium(app, client)
-    monkeypatch.setattr("src.routes.user_routes.generate_workout_plan", lambda *args: generated_workout())
+    monkeypatch.setattr("src.routes.plan_routes.generate_workout_plan", lambda *args: generated_workout())
     plan = client.post("/api/workout_plans/generate", json=workout_questionnaire()).get_json()["plan"]
     day = plan["days"][0]
     exercise = day["exercises"][0]
@@ -580,7 +580,7 @@ def test_workout_summary_omits_volume_when_a_performed_set_has_no_load(app, clie
 
 def test_owner_can_add_replace_and_remove_plan_exercises(app, client, monkeypatch):
     register_premium(app, client)
-    monkeypatch.setattr("src.routes.user_routes.generate_workout_plan", lambda *args: generated_workout())
+    monkeypatch.setattr("src.routes.plan_routes.generate_workout_plan", lambda *args: generated_workout())
     plan = client.post("/api/workout_plans/generate", json=workout_questionnaire()).get_json()["plan"]
     day = plan["days"][0]
     original = next(item for item in day["exercises"] if item["catalog_key"] == "supino_maquina")
@@ -671,7 +671,7 @@ def test_guided_workout_retries_on_validation_error(app, client, monkeypatch):
             raise PlanValidationError({"days.1": "Para 45 minutos, cada treino deve ter entre 4 e 7 exercícios."})
         return generated_workout()
 
-    monkeypatch.setattr("src.routes.user_routes.generate_workout_plan", flaky_generate)
+    monkeypatch.setattr("src.routes.plan_routes.generate_workout_plan", flaky_generate)
 
     response = client.post("/api/workout_plans/generate", json=workout_questionnaire())
 
@@ -687,7 +687,7 @@ def test_guided_workout_returns_502_when_retries_exhausted(app, client, monkeypa
     def always_bad(*args):
         raise PlanValidationError({"days.1": "Para 45 minutos, cada treino deve ter entre 4 e 7 exercícios."})
 
-    monkeypatch.setattr("src.routes.user_routes.generate_workout_plan", always_bad)
+    monkeypatch.setattr("src.routes.plan_routes.generate_workout_plan", always_bad)
 
     response = client.post("/api/workout_plans/generate", json=workout_questionnaire())
 
@@ -698,7 +698,7 @@ def test_guided_workout_returns_502_when_retries_exhausted(app, client, monkeypa
 
 def test_guided_diet_creation(app, client, monkeypatch):
     register_premium(app, client)
-    monkeypatch.setattr("src.routes.user_routes.generate_diet_plan", lambda *args: generated_diet(args[2]))
+    monkeypatch.setattr("src.routes.plan_routes.generate_diet_plan", lambda *args: generated_diet(args[2]))
 
     response = client.post("/api/diet_plans/generate", json=diet_questionnaire())
 
@@ -718,7 +718,7 @@ def test_guided_diet_creation(app, client, monkeypatch):
 
 def test_guided_diet_persists_custom_targets_and_questionnaire(app, client, monkeypatch):
     register_premium(app, client)
-    monkeypatch.setattr("src.routes.user_routes.generate_diet_plan", lambda *args: generated_diet(args[2]))
+    monkeypatch.setattr("src.routes.plan_routes.generate_diet_plan", lambda *args: generated_diet(args[2]))
     questionnaire = diet_questionnaire(custom_targets={
         "calories": 2600,
         "protein": 170,
@@ -742,7 +742,7 @@ def test_guided_diet_requires_complete_adult_profile(app, client, monkeypatch):
         user.is_premium = True
         db.session.commit()
     called = {"value": False}
-    monkeypatch.setattr("src.routes.user_routes.generate_diet_plan", lambda *args: called.update(value=True))
+    monkeypatch.setattr("src.routes.plan_routes.generate_diet_plan", lambda *args: called.update(value=True))
 
     response = client.post("/api/diet_plans/generate", json=diet_questionnaire())
 
@@ -762,7 +762,7 @@ def test_guided_diet_retries_with_validation_feedback(app, client, monkeypatch):
             result["days"][0]["meals"][0]["calories"] = 0
         return result
 
-    monkeypatch.setattr("src.routes.user_routes.generate_diet_plan", generate)
+    monkeypatch.setattr("src.routes.plan_routes.generate_diet_plan", generate)
 
     response = client.post("/api/diet_plans/generate", json=diet_questionnaire())
 
@@ -786,7 +786,7 @@ def test_guided_diet_does_not_persist_after_invalid_attempts(app, client, monkey
         result["days"][0]["meals"][0]["calories"] = 0
         return result
 
-    monkeypatch.setattr("src.routes.user_routes.generate_diet_plan", generate)
+    monkeypatch.setattr("src.routes.plan_routes.generate_diet_plan", generate)
 
     response = client.post("/api/diet_plans/generate", json=diet_questionnaire())
 
@@ -796,15 +796,16 @@ def test_guided_diet_does_not_persist_after_invalid_attempts(app, client, monkey
         assert DietPlan.query.count() == 0
 
 
-def test_guided_generation_requires_premium(app, client, monkeypatch):
+def test_guided_generation_allows_free_ai_trial(app, client, monkeypatch):
     client.post("/api/register", json={"username": "free", "password": "strong-password"})
-    monkeypatch.setattr("src.routes.user_routes.generate_workout_plan", lambda *args: generated_workout())
+    monkeypatch.setattr("src.routes.plan_routes.generate_workout_plan", lambda *args: generated_workout())
 
     response = client.post("/api/workout_plans/generate", json=workout_questionnaire())
 
-    assert response.status_code == 403
+    assert response.status_code == 201
     with app.app_context():
-        assert WorkoutPlan.query.count() == 0
+        assert WorkoutPlan.query.count() == 1
+        assert User.query.filter_by(username="free").one().ai_trial_uses == 1
 
 
 def test_guided_workout_rejects_incompatible_split(app, client):
@@ -820,7 +821,7 @@ def test_guided_workout_rejects_incompatible_split(app, client):
 
 
 def _create_diet_plan(client, monkeypatch):
-    monkeypatch.setattr("src.routes.user_routes.generate_diet_plan", lambda *args: generated_diet(args[2]))
+    monkeypatch.setattr("src.routes.plan_routes.generate_diet_plan", lambda *args: generated_diet(args[2]))
     response = client.post("/api/diet_plans/generate", json=diet_questionnaire())
     return response.get_json()["plan"]
 
@@ -849,7 +850,7 @@ def test_diet_plan_meal_edit(app, client, monkeypatch):
 def test_diet_plan_day_suggest_and_replace(app, client, monkeypatch):
     register_premium(app, client)
     plan = _create_diet_plan(client, monkeypatch)
-    monkeypatch.setattr("src.routes.user_routes.generate_diet_day", lambda *args: _generated_day(args[4]))
+    monkeypatch.setattr("src.routes.plan_routes.generate_diet_day", lambda *args: _generated_day(args[4]))
 
     suggest = client.post(f"/api/diet_plans/{plan['id']}/suggest", json={"day": 1, "feedback": "mais proteína"})
     assert suggest.status_code == 200

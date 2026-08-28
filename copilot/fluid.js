@@ -36,15 +36,25 @@
         el.style.opacity = "" + Math.min(1, Math.max(0, c.opacity));
     }
 
+    function stepState(st, dt) {
+        for (const key of AXES) {
+            // Semi-implicit Euler with small fixed slices keeps the spring stable
+            // when a frame stalls or the browser briefly drops FPS.
+            const accel = -st.k * (st.cur[key] - st.target[key]) - st.c * st.vel[key];
+            st.vel[key] += accel * dt;
+            st.cur[key] += st.vel[key] * dt;
+        }
+    }
+
     function tick(now) {
         for (const [el, st] of active) {
-            const dt = Math.min((now - (st.last || now)) / 1000 || 0.016, 0.05);
+            const elapsed = ((now - (st.last || now)) / 1000) || 0.016;
             st.last = now;
-            for (const key of AXES) {
-                // semi-implicit Euler integration of a damped harmonic oscillator
-                const accel = -st.k * (st.cur[key] - st.target[key]) - st.c * st.vel[key];
-                st.vel[key] += accel * dt;
-                st.cur[key] += st.vel[key] * dt;
+            let remaining = Math.min(elapsed, 0.064);
+            while (remaining > 0) {
+                const dt = Math.min(remaining, 0.016);
+                stepState(st, dt);
+                remaining -= dt;
             }
             write(el, st.cur);
             const settled =
@@ -127,7 +137,8 @@
                 for (const key of AXES) if (next[key] !== undefined) st.target[key] = next[key];
             },
             stop() {
-                active.delete(st);
+                const entry = [...active.entries()].find(([, value]) => value === st);
+                if (entry) active.delete(entry[0]);
             }
         };
     }

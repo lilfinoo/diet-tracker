@@ -1,6 +1,7 @@
 import json
 import re
 import time
+from typing import Optional
 
 from flask import current_app
 from google import genai
@@ -131,8 +132,8 @@ def _completion(
 
 def calculate_nutrition(
     food_description: str,
-    image_bytes: bytes | None = None,
-    mime_type: str | None = None,
+    image_bytes: Optional[bytes] = None,
+    mime_type: Optional[str] = None,
 ) -> dict:
     has_image = bool(image_bytes and mime_type)
     is_vague = not re.search(
@@ -479,7 +480,7 @@ Se correction existir, corrija exatamente as diferenças informadas. Não prescr
     return _generate_diet_json(system_instruction, payload, schema)
 
 
-def classify_exercise_catalog_key(exercise_name: str) -> str | None:
+def classify_exercise_catalog_key(exercise_name: str) -> Optional[str]:
     catalog = [{"key": item["key"], "name": item["name"]} for item in catalog_by_key().values()]
     schema = {
         "type": "object",
