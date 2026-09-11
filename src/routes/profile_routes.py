@@ -1,23 +1,39 @@
+from src.services.body_progress import body_summary
 import base64
 from datetime import datetime, timedelta
 
 from flask import Blueprint, abort, current_app, g, jsonify, request, send_file
 
-from src.models.user import DietEntry, Measurement, UserProfile, db
-from src.routes.common import _csrf_protect_request, _require_lengths, coerce_numbers, json_body, login_required, page_query, premium_required
+from src.models.user import AnalyticsEvent, DietEntry, Measurement, UserProfile, db
+from src.routes.common import _local_date_for_timezone, _require_lengths, ai_consent_required, coerce_numbers, json_body, login_required, page_query, premium_required
 from src.services.badges import BADGE_CODES, available_profile_items, apply_profile_highlights, serialize_badges, serialize_profile_highlights
-from src.services.ai import AIQuotaExceededError, AIResponseError, AIServiceError, calculate_nutrition
+from src.services.ai import AIQuotaExceededError, AIResponseError, AIServiceError, AIServiceUnavailableError, calculate_nutrition
+from src.services.analytics import record_event
+from src.services.ai_queue import enqueue_ai_request
 from src.services.rate_limit import rate_limit
 from src.services.workoutx import WorkoutXServiceError, approved_media, get_cached_gif
-from src.services.workout_progress import backfill_session_weeks, validate_timezone
+from src.services.workout_progress import backfill_session_weeks, user_timezone, validate_timezone
 
 
 profile_bp = Blueprint("profile", __name__)
 
 
-@profile_bp.before_request
-def protect_profile_mutations():
-    return _csrf_protect_request()
+def _validate_measurement_values(data):
+    ranges = {
+        "weight": (0, 500),
+        "height": (0, 300),
+        "body_fat": (0, 100),
+        "muscle_mass": (0, 500),
+        "waist": (0, 500),
+        "chest": (0, 500),
+        "arm": (0, 500),
+        "thigh": (0, 500),
+    }
+    for field, (minimum, maximum) in ranges.items():
+        value = data.get(field)
+        if value is not None and not minimum < value <= maximum:
+            return jsonify({"error": "Medida fora do intervalo permitido."}), 400
+    return None
 
 
 @profile_bp.route("/profile", methods=["GET"])
@@ -75,7 +91,7 @@ def update_profile():
         "timezone": (64, "Timezone"),
     })
     age = data.get("age")
-    if age is not None and not (0 <= age <= 120):
+    if age is not None and (not age.is_integer() or not 0 <= age <= 120):
         return jsonify({"error": "Idade inválida"}), 400
     weight = data.get("weight")
     if weight is not None and not (0 < weight <= 500):
@@ -99,12 +115,38 @@ def update_profile():
     profile.goal = data.get("goal", profile.goal)
     profile.activity_level = data.get("activity_level", profile.activity_level)
     profile.dietary_restrictions = data.get("dietary_restrictions", profile.dietary_restrictions)
-    profile.weight = data.get("weight", profile.weight)
-    profile.height = data.get("height", profile.height)
+    body_changes = {}
+    for field in ("weight", "height"):
+        if field not in data:
+            continue
+        value = data[field]
+        has_measurement = Measurement.query.filter(
+            Measurement.user_id == user.id, getattr(Measurement, field).isnot(None),
+        ).first() is not None
+        if has_measurement:
+            if value is None:
+                return jsonify({"error": "Edite as medições para remover peso ou altura do histórico."}), 400
+            if value != getattr(profile, field):
+                body_changes[field] = value
+        else:
+            setattr(profile, field, value)
+    if body_changes:
+        db.session.add(Measurement(
+            user_id=user.id,
+            date=_local_date_for_timezone(data.get("timezone") or profile.timezone or "UTC"),
+            **body_changes,
+        ))
     profile.timezone = data.get("timezone", profile.timezone)
     if "timezone" in data and profile.timezone:
         backfill_session_weeks(user.id, profile.timezone)
 
+    if not AnalyticsEvent.query.filter_by(
+        event_name="profile_completed", subject_id=user.analytics_subject_id
+    ).first():
+        record_event(
+            "profile_completed",
+            user_id=user.id,
+        )
     db.session.commit()
     return jsonify({"message": "Perfil atualizado com sucesso", "profile": profile.to_dict()}), 200
 
@@ -132,6 +174,12 @@ def add_diet_entry():
     except ValueError:
         return jsonify({"error": "Formato de data inválido. Use YYYY-MM-DD"}), 400
 
+    for field in ("calories", "protein", "carbs", "fat"):
+        value = data.get(field)
+        maximum = 20_000 if field == "calories" else 5_000
+        if value is not None and not 0 <= value <= maximum:
+            return jsonify({"error": "Valores nutricionais devem ser finitos e não negativos."}), 400
+
     new_entry = DietEntry(
         user_id=user.id,
         date=entry_date,
@@ -142,8 +190,14 @@ def add_diet_entry():
         carbs=data.get("carbs"),
         fat=data.get("fat"),
         notes=data.get("notes"),
+        source="manual",
     )
     db.session.add(new_entry)
+    db.session.flush()
+    record_event(
+        "meal_logged",
+        user_id=user.id,
+    )
     db.session.commit()
     return jsonify({"message": "Registro de dieta adicionado", "entry": new_entry.to_dict()}), 201
 
@@ -185,13 +239,24 @@ def update_diet_entry(entry_id):
         "notes": (2000, "Observações"),
     })
     entry = DietEntry.query.filter_by(id=entry_id, user_id=user.id).first_or_404()
+    for field in ("calories", "protein", "carbs", "fat"):
+        value = data.get(field)
+        maximum = 20_000 if field == "calories" else 5_000
+        if value is not None and not 0 <= value <= maximum:
+            return jsonify({"error": "Valores nutricionais devem ser finitos e não negativos."}), 400
 
     date_str = data.get("date")
     if date_str:
         try:
-            entry.date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            updated_date = datetime.strptime(date_str, "%Y-%m-%d").date()
         except ValueError:
             return jsonify({"error": "Formato de data inválido"}), 400
+        if entry.daily_meal_state_id and updated_date != entry.date:
+            return jsonify({"error": "A data de uma refeição vinculada ao diário não pode ser alterada."}), 409
+        entry.date = updated_date
+
+    if entry.daily_meal_state_id and data.get("meal_type", entry.meal_type) != entry.meal_type:
+        return jsonify({"error": "O tipo de uma refeição vinculada ao diário não pode ser alterado."}), 409
 
     entry.meal_type = data.get("meal_type", entry.meal_type)
     entry.description = data.get("description", entry.description)
@@ -210,26 +275,43 @@ def update_diet_entry(entry_id):
 def delete_diet_entry(entry_id):
     user = g.user
     entry = DietEntry.query.filter_by(id=entry_id, user_id=user.id).first_or_404()
+    state = entry.daily_meal_state
     db.session.delete(entry)
+    if state is not None:
+        state.result = "pending"
+        state.planned_snapshot = None
     db.session.commit()
     return jsonify({"message": "Registro de dieta excluído"}), 200
 
 
 @profile_bp.route("/diet/ai_macros", methods=["POST"])
 @rate_limit("ai", 8, 60)
+@ai_consent_required
 @premium_required(allow_trial=True)
 def get_ai_macros():
     data = json_body()
-    description = str(data.get("description", "")).strip()
-    image = data.get("image") or {}
-    image_data = str(image.get("data", "")).strip()
-    mime_type = str(image.get("mime_type", "")).strip().lower()
+    raw_description = data.get("description", "")
+    if not isinstance(raw_description, str) or len(raw_description) > 2_000:
+        return jsonify({"error": "Descrição inválida ou muito longa."}), 400
+    description = raw_description.strip()
+    image = data.get("image")
+    if image is not None and not isinstance(image, dict):
+        return jsonify({"error": "Imagem inválida"}), 400
+    image = image or {}
+    image_data = image.get("data", "")
+    mime_type = image.get("mime_type", "")
+    if not isinstance(image_data, str) or not isinstance(mime_type, str):
+        return jsonify({"error": "Imagem inválida"}), 400
+    image_data = image_data.strip()
+    mime_type = mime_type.strip().lower()
 
     image_bytes = None
     if image_data:
         allowed_mime = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
         if mime_type not in allowed_mime:
             return jsonify({"error": "Formato de imagem não suportado"}), 400
+        if len(image_data) > 11 * 1024 * 1024:
+            return jsonify({"error": "Imagem muito grande. Envie uma foto menor."}), 413
         try:
             image_bytes = base64.b64decode(image_data, validate=True)
         except (ValueError, TypeError):
@@ -238,9 +320,22 @@ def get_ai_macros():
             return jsonify({"error": "Imagem inválida"}), 400
         if len(image_bytes) > 8 * 1024 * 1024:
             return jsonify({"error": "Imagem muito grande. Envie uma foto menor."}), 413
+        valid_magic = {
+            "image/jpeg": image_bytes.startswith(b"\xff\xd8\xff"),
+            "image/png": image_bytes.startswith(b"\x89PNG\r\n\x1a\n"),
+            "image/webp": image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP",
+            "image/heic": len(image_bytes) >= 12 and image_bytes[4:8] == b"ftyp" and image_bytes[8:12] in {b"heic", b"heix", b"hevc", b"hevx"},
+            "image/heif": len(image_bytes) >= 12 and image_bytes[4:8] == b"ftyp" and image_bytes[8:12] in {b"mif1", b"msf1", b"heif"},
+        }
+        if not valid_magic[mime_type]:
+            return jsonify({"error": "O conteúdo do arquivo não corresponde ao formato informado."}), 400
 
     if not description and not image_bytes:
         return jsonify({"error": "Descreva o alimento ou envie uma foto"}), 400
+
+    queued = enqueue_ai_request("nutrition_macros", data)
+    if queued is not None:
+        return queued
 
     try:
         return jsonify(calculate_nutrition(description, image_bytes, mime_type)), 200
@@ -248,6 +343,8 @@ def get_ai_macros():
         return jsonify({"error": "A IA retornou macros incompletos. Tente novamente."}), 422
     except AIQuotaExceededError as error:
         return jsonify({"error": str(error)}), 429
+    except AIServiceUnavailableError:
+        return jsonify({"error": "A análise está temporariamente indisponível. Tente novamente ou continue sem estimativa."}), 503
     except AIServiceError:
         current_app.logger.exception("Nutrition AI request failed")
         return jsonify({"error": "Não foi possível calcular macros no momento"}), 503
@@ -280,6 +377,9 @@ def add_measurement():
         measurement_date = datetime.strptime(date_str, "%Y-%m-%d").date()
     except ValueError:
         return jsonify({"error": "Formato de data inválido. Use YYYY-MM-DD"}), 400
+    validation_error = _validate_measurement_values(data)
+    if validation_error:
+        return validation_error
 
     new_measurement = Measurement(
         user_id=user.id,
@@ -295,6 +395,9 @@ def add_measurement():
         notes=data.get("notes"),
     )
     db.session.add(new_measurement)
+    if not UserProfile.query.filter_by(user_id=user.id).first():
+        db.session.add(UserProfile(user_id=user.id))
+    record_event("measurement_logged", user_id=user.id)
     db.session.commit()
     return jsonify({"message": "Medida adicionada", "measurement": new_measurement.to_dict()}), 201
 
@@ -321,8 +424,39 @@ def get_measurements():
         except ValueError:
             return jsonify({"error": "Formato de data final inválido"}), 400
 
-    measurements, _, _ = page_query(query.order_by(Measurement.date.desc(), Measurement.created_at.desc()))
+    if start_date_str and end_date_str and start_date > end_date:
+        return jsonify({"error": "A data inicial deve ser anterior ou igual à data final."}), 400
+
+    measurements, _, _ = page_query(query.order_by(Measurement.date.desc(), Measurement.created_at.desc(), Measurement.id.desc()))
     return jsonify([measurement.to_dict() for measurement in measurements.all()]), 200
+
+
+@profile_bp.route("/measurements/summary", methods=["GET"])
+@login_required
+def measurement_summary():
+    metric = request.args.get("metric")
+    if metric is not None:
+        if metric not in ("weight", "body_fat", "waist", "chest", "arm", "thigh", "muscle_mass"):
+            return jsonify({"error": "Métrica inválida"}), 400
+        try:
+            start = datetime.strptime(request.args["start_date"], "%Y-%m-%d").date() if request.args.get("start_date") else None
+            end = datetime.strptime(request.args["end_date"], "%Y-%m-%d").date() if request.args.get("end_date") else None
+        except ValueError:
+            return jsonify({"error": "Formato de data inválido"}), 400
+        if start and end and start > end:
+            return jsonify({"error": "A data inicial deve ser anterior ou igual à data final."}), 400
+        column = getattr(Measurement, metric)
+        series_query = Measurement.query.filter_by(user_id=g.user.id).filter(column.isnot(None)).order_by(
+            Measurement.date.desc(), Measurement.created_at.desc(), Measurement.id.desc()
+        )
+        latest_metric = series_query.first()
+        if start:
+            series_query = series_query.filter(Measurement.date >= start)
+        if end:
+            series_query = series_query.filter(Measurement.date <= end)
+        points = [{"date": item.date.isoformat(), "value": getattr(item, metric)} for item in reversed(series_query.all())]
+        return jsonify({"points": points, "latest_date": latest_metric.date.isoformat() if latest_metric else None}), 200
+    return jsonify(body_summary(g.user.id)), 200
 
 
 @profile_bp.route("/measurements/<int:measurement_id>", methods=["PUT"])
@@ -332,6 +466,9 @@ def update_measurement(measurement_id):
     data = coerce_numbers(json_body(), ("weight", "height", "body_fat", "muscle_mass", "waist", "chest", "arm", "thigh"))
     _require_lengths(data, {"notes": (2000, "Observações")})
     measurement = Measurement.query.filter_by(id=measurement_id, user_id=user.id).first_or_404()
+    validation_error = _validate_measurement_values(data)
+    if validation_error:
+        return validation_error
 
     date_str = data.get("date")
     if date_str:
@@ -367,10 +504,15 @@ def delete_measurement(measurement_id):
 @profile_bp.route("/stats", methods=["GET"])
 @login_required
 def get_stats():
-    latest_measurement = Measurement.query.filter_by(user_id=g.user.id).order_by(Measurement.date.desc()).first()
+    latest_measurement = Measurement.query.filter_by(user_id=g.user.id).order_by(
+        Measurement.date.desc(), Measurement.created_at.desc(), Measurement.id.desc()
+    ).first()
     total_diet_entries = DietEntry.query.filter_by(user_id=g.user.id).count()
-    seven_days_ago = datetime.utcnow().date() - timedelta(days=7)
-    recent_diet_entries = DietEntry.query.filter_by(user_id=g.user.id).filter(DietEntry.date >= seven_days_ago).count()
+    today = _local_date_for_timezone(user_timezone(g.user.id))
+    seven_days_start = today - timedelta(days=6)
+    recent_diet_entries = DietEntry.query.filter_by(user_id=g.user.id).filter(
+        DietEntry.date >= seven_days_start, DietEntry.date <= today
+    ).count()
 
     return jsonify({
         "latest_measurement": latest_measurement.to_dict() if latest_measurement else None,

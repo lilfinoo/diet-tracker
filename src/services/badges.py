@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from src.models.user import AchievementUnlock, User, UserBadge, ProfileHighlight, db
+from src.models.user import AchievementUnlock, PersonalRecordEvent, User, UserBadge, ProfileHighlight, db
 from src.services.achievements import ACHIEVEMENTS, serialize_unlock
 
 
@@ -68,6 +68,14 @@ def serialize_profile_highlight(highlight):
         item = serialize_unlock(highlight.achievement_unlock)
     elif highlight.target_kind == "badge" and highlight.user_badge:
         item = serialize_badge(highlight.user_badge)
+    elif highlight.target_kind == "personal_record" and highlight.personal_record_event:
+        from src.services.personal_records import serialize_personal_record
+
+        item = serialize_personal_record(highlight.personal_record_event)
+        item.update({
+            "code": str(highlight.personal_record_event.id),
+            "title": highlight.personal_record_event.exercise_name,
+        })
     else:
         item = None
     return {
@@ -76,6 +84,7 @@ def serialize_profile_highlight(highlight):
         "target_kind": highlight.target_kind,
         "achievement_unlock_id": highlight.achievement_unlock_id,
         "user_badge_id": highlight.user_badge_id,
+        "personal_record_event_id": highlight.personal_record_event_id,
         "item": item,
         "created_at": highlight.created_at.isoformat() if highlight.created_at else None,
     }
@@ -145,6 +154,8 @@ def backfill_historical_badges():
 
 
 def available_profile_items(user):
+    from src.services.personal_records import serialize_personal_record
+
     achievement_unlocks = {
         item.achievement_code: item
         for item in AchievementUnlock.query.filter_by(user_id=user.id).all()
@@ -160,7 +171,21 @@ def available_profile_items(user):
         for code, definition in BADGE_CODES.items()
         if badges.get(code)
     ]
-    return achievement_items + badge_items
+    records = PersonalRecordEvent.query.filter_by(
+        user_id=user.id,
+        is_highlighted=True,
+    ).order_by(PersonalRecordEvent.achieved_at.desc()).limit(100).all()
+    record_items = []
+    for item in records:
+        serialized = serialize_personal_record(item)
+        record_items.append({
+            "kind": "personal_record",
+            "code": str(item.id),
+            "title": item.exercise_name,
+            "description": f"{float(item.load_kg):g} kg × {item.repetitions} repetições",
+            "record": serialized,
+        })
+    return achievement_items + badge_items + record_items
 
 
 def apply_profile_highlights(user, selections):
@@ -169,7 +194,7 @@ def apply_profile_highlights(user, selections):
     for item in selections:
         kind = str(item.get("kind", "")).strip()
         code = str(item.get("code", "")).strip()
-        if kind not in {"achievement", "badge"} or not code:
+        if kind not in {"achievement", "badge", "personal_record"} or not code:
             continue
         token = (kind, code)
         if token in seen:
@@ -184,6 +209,10 @@ def apply_profile_highlights(user, selections):
         for item in AchievementUnlock.query.filter_by(user_id=user.id).all()
     }
     badges = {item.badge_code: item for item in UserBadge.query.filter_by(user_id=user.id).all()}
+    records = {
+        str(item.id): item
+        for item in PersonalRecordEvent.query.filter_by(user_id=user.id, is_highlighted=True).all()
+    }
 
     current = {highlight.position: highlight for highlight in ProfileHighlight.query.filter_by(user_id=user.id).all()}
     desired_items = []
@@ -192,12 +221,17 @@ def apply_profile_highlights(user, selections):
             target = achievement_unlocks.get(item["code"])
             if target is None:
                 raise ValueError("Você só pode fixar conquistas que já desbloqueou.")
-            desired_items.append((index, "achievement", target, None))
-        else:
+            desired_items.append((index, "achievement", target, None, None))
+        elif item["kind"] == "badge":
             target = badges.get(item["code"])
             if target is None:
                 raise ValueError("Você só pode fixar insígnias que já possui.")
-            desired_items.append((index, "badge", None, target))
+            desired_items.append((index, "badge", None, target, None))
+        else:
+            target = records.get(item["code"])
+            if target is None:
+                raise ValueError("Você só pode fixar recordes que já conquistou.")
+            desired_items.append((index, "personal_record", None, None, target))
 
     # Remove highlights not requested anymore.
     requested_positions = {position for position, *_ in desired_items}
@@ -206,7 +240,7 @@ def apply_profile_highlights(user, selections):
             db.session.delete(highlight)
 
     # Upsert requested highlights.
-    for position, kind, achievement, badge in desired_items:
+    for position, kind, achievement, badge, record in desired_items:
         highlight = current.get(position)
         if highlight is None:
             highlight = ProfileHighlight(user_id=user.id, position=position, target_kind=kind)
@@ -214,6 +248,7 @@ def apply_profile_highlights(user, selections):
         highlight.target_kind = kind
         highlight.achievement_unlock_id = achievement.id if achievement else None
         highlight.user_badge_id = badge.id if badge else None
+        highlight.personal_record_event_id = record.id if record else None
 
     db.session.flush()
     return ProfileHighlight.query.filter_by(user_id=user.id).order_by(ProfileHighlight.position.asc()).all()

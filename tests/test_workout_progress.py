@@ -12,6 +12,7 @@ from src.models.user import (
     WorkoutSession,
     WorkoutSessionExerciseCompletion,
     WorkoutSetPerformance,
+    WorkoutWeeklyGoal,
     db,
 )
 from src.services.achievements import evaluate_achievements
@@ -22,6 +23,7 @@ from src.services.personal_records import (
 from src.services.workout_progress import (
     create_weekly_goal,
     snapshot_session_week,
+    week_start_for,
     weekly_progress,
 )
 
@@ -164,7 +166,7 @@ def test_pr_engine_detects_strict_progress_epley_and_warmup(app):
         initial = process_session_personal_records(first)
         assert initial
         assert all(item.is_initial for item in initial)
-        assert not any(item.is_highlighted for item in initial)
+        assert sum(item.is_highlighted for item in initial) == 1
 
         lower = create_session(user, plan, day, base + timedelta(days=1), [(exercises[0], [
             {"load_kg": 75, "repetitions": 12},
@@ -251,13 +253,54 @@ def test_weekly_goal_and_streak_use_completed_qualifying_sessions(app):
         progress = weekly_progress(user.id, now=start + timedelta(weeks=3, days=4))
         assert progress["current"]["completed"] == 2
         assert progress["current"]["streak"] == 4
+        assert len(progress["history"]) == 8
+        assert [item["completed"] for item in progress["history"][-4:]] == [2, 2, 2, 2]
+        assert all(item["fulfilled"] for item in progress["history"][-4:])
 
         progress_next_week = weekly_progress(user.id, now=start + timedelta(weeks=4, days=4))
         assert progress_next_week["current"]["completed"] == 0
         assert progress_next_week["current"]["streak"] == 4
+        assert progress_next_week["history"][-1]["target"] == 2
+        assert progress_next_week["history"][-1]["fulfilled"] is False
 
         progress_after_failure = weekly_progress(user.id, now=start + timedelta(weeks=5, days=4))
         assert progress_after_failure["current"]["streak"] == 0
+
+
+def test_weekly_goal_route_schedules_only_subsequent_changes_for_next_week(app, client):
+    with app.app_context():
+        user = create_user("weekly-route-owner", "UTC")
+        db.session.add(ExerciseGoal(
+            user_id=user.id,
+            exercise_key="supino_reto_halteres",
+            exercise_name="Supino reto",
+            target_load_kg=100,
+        ))
+        db.session.commit()
+        current_week = week_start_for(None, "UTC")
+
+    login(client, "weekly-route-owner")
+    first = client.put(
+        "/api/progress/weekly",
+        json={"target_sessions": 2, "timezone": "UTC"},
+    )
+    second = client.put(
+        "/api/progress/weekly",
+        json={"target_sessions": 3, "timezone": "UTC"},
+    )
+    repeated = client.put(
+        "/api/progress/weekly",
+        json={"target_sessions": 4, "timezone": "UTC"},
+    )
+
+    assert first.status_code == 200
+    assert first.get_json()["goal"]["effective_week_start"] == current_week.isoformat()
+    assert second.get_json()["goal"]["effective_week_start"] == (current_week + timedelta(days=7)).isoformat()
+    assert repeated.get_json()["goal"]["target_sessions"] == 4
+    with app.app_context():
+        goals = WorkoutWeeklyGoal.query.order_by(WorkoutWeeklyGoal.effective_week_start).all()
+        assert len(goals) == 2
+        assert goals[1].target_sessions == 4
 
 
 def test_exercise_goal_and_achievements_are_idempotent(app, client):

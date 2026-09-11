@@ -192,14 +192,14 @@
       </div>
     </header>
 
-    <nav class="nav">
-      <button class="tab active" data-section="overview">Visão geral</button>
-      <button class="tab" data-section="users">Usuários</button>
-      <button class="tab" data-section="reviews">Revisões</button>
-      <button class="tab" data-section="reports">Relatórios</button>
+    <nav class="nav" role="tablist" aria-label="Seções administrativas">
+      <button class="tab active" id="adminTabOverview" role="tab" aria-selected="true" aria-controls="overview" data-section="overview">Visão geral</button>
+      <button class="tab" id="adminTabUsers" role="tab" aria-selected="false" aria-controls="users" tabindex="-1" data-section="users">Usuários</button>
+      <button class="tab" id="adminTabReviews" role="tab" aria-selected="false" aria-controls="reviews" tabindex="-1" data-section="reviews">Revisões</button>
+      <button class="tab" id="adminTabReports" role="tab" aria-selected="false" aria-controls="reports" tabindex="-1" data-section="reports">Relatórios</button>
     </nav>
 
-    <section class="section active" id="overview">
+    <section class="section active" id="overview" role="tabpanel" aria-labelledby="adminTabOverview">
       <div class="grid overview-grid" id="metricsGrid"></div>
       <div class="grid" style="margin-top:16px; grid-template-columns: repeat(12, 1fr);">
         <article class="card span-8">
@@ -250,7 +250,7 @@
       </div>
     </section>
 
-    <section class="section" id="users">
+    <section class="section" id="users" role="tabpanel" aria-labelledby="adminTabUsers" hidden>
       <article class="card">
         <div class="section-head">
           <div>
@@ -272,7 +272,7 @@
           <table>
             <thead>
               <tr>
-                <th>Usuário</th><th>Plano</th><th>Conta</th><th>Atividade</th><th>Ações</th>
+                <th>Conta</th><th>Contato</th><th>Plano</th><th>Status</th><th>Ações</th>
               </tr>
             </thead>
             <tbody id="usersTable"></tbody>
@@ -281,7 +281,7 @@
       </article>
     </section>
 
-    <section class="section" id="reviews">
+    <section class="section" id="reviews" role="tabpanel" aria-labelledby="adminTabReviews" hidden>
       <div class="grid" style="grid-template-columns: repeat(12, 1fr);">
         <article class="card span-6">
           <div class="section-head">
@@ -310,7 +310,7 @@
       </div>
     </section>
 
-    <section class="section" id="reports">
+    <section class="section" id="reports" role="tabpanel" aria-labelledby="adminTabReports" hidden>
       <div class="grid" style="grid-template-columns: repeat(12, 1fr);">
         <article class="card span-6">
           <div class="section-head">
@@ -336,6 +336,34 @@
     </section>
   </div>
 
+  <div class="modal" id="premiumModal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h3 style="margin:0;">Conceder Premium</h3>
+          <p class="muted" style="margin:4px 0 0;">Escolha por quanto tempo o acesso ficará ativo.</p>
+        </div>
+        <button class="action small" id="closePremiumModal">Fechar</button>
+      </div>
+      <div class="modal-body">
+        <label for="premiumDurationSelect">Duração da concessão</label>
+        <select id="premiumDurationSelect" required>
+          <option value="">Selecione a duração</option>
+          <option value="7">7 dias</option>
+          <option value="30">30 dias</option>
+          <option value="90">90 dias</option>
+          <option value="180">180 dias</option>
+          <option value="365">365 dias</option>
+          <option value="permanent">Sem prazo, até revogação</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="action" id="cancelPremium">Cancelar</button>
+        <button class="action primary" id="confirmPremium">Conceder acesso</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal" id="professionalModal">
     <div class="modal-card">
       <div class="modal-head">
@@ -346,10 +374,21 @@
         <button class="action small" id="closeProfessionalModal">Fechar</button>
       </div>
       <div class="modal-body">
+        <label for="professionalScopeSelect">Permissões profissionais</label>
         <select id="professionalScopeSelect">
           <option value="diet">Dietas</option>
           <option value="workout">Treinos</option>
           <option value="both">Dietas e treinos</option>
+        </select>
+        <label for="professionalDurationSelect">Duração da concessão</label>
+        <select id="professionalDurationSelect" required>
+          <option value="">Selecione a duração</option>
+          <option value="7">7 dias</option>
+          <option value="30">30 dias</option>
+          <option value="90">90 dias</option>
+          <option value="180">180 dias</option>
+          <option value="365">365 dias</option>
+          <option value="permanent">Sem prazo, até revogação</option>
         </select>
       </div>
       <div class="modal-actions">
@@ -378,7 +417,7 @@
     </div>
   </div>
 
-  <div class="toast" id="toast"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script>
     const API = '/api';
@@ -387,6 +426,7 @@
       users: [],
       applications: [],
       mediaQueue: [],
+      currentPremiumUser: null,
       currentProfessionalUser: null,
       currentReview: null,
       periodDays: 30,
@@ -411,8 +451,12 @@
       mediaQueue: document.getElementById('mediaQueue'),
       reportStats: document.getElementById('reportStats'),
       toast: document.getElementById('toast'),
+      premiumModal: document.getElementById('premiumModal'),
+      premiumDurationSelect: document.getElementById('premiumDurationSelect'),
+      confirmPremium: document.getElementById('confirmPremium'),
       professionalModal: document.getElementById('professionalModal'),
       professionalScopeSelect: document.getElementById('professionalScopeSelect'),
+      professionalDurationSelect: document.getElementById('professionalDurationSelect'),
       confirmProfessional: document.getElementById('confirmProfessional'),
       noteModal: document.getElementById('noteModal'),
       noteTitle: document.getElementById('noteTitle'),
@@ -564,7 +608,7 @@
         <div class="item">
           <div>
             <strong>${escapeHtml(item.type)}</strong>
-            <div class="meta">@${escapeHtml(item.username)}</div>
+            <div class="meta">Evento agregado, sem identificação da conta</div>
           </div>
           <div class="meta">${escapeHtml(fmt.format(new Date(item.created_at)))}</div>
         </div>
@@ -589,39 +633,68 @@
       return chips.join(' ');
     }
 
+    function adminGrant(user, type) {
+      const expectedPlan = type === 'premium' ? 'premium_student' : ['professional_single', 'professional_complete'];
+      return (user.admin_grants || []).find(grant => Array.isArray(expectedPlan)
+        ? expectedPlan.includes(grant.plan_code)
+        : grant.plan_code === expectedPlan);
+    }
+
+    function grantSummary(user) {
+      const grants = user.admin_grants || [];
+      if (!grants.length && !user.legacy_premium_grant) return '';
+      const labels = grants.map(grant => {
+        const access = grant.plan_code === 'premium_student' ? 'Premium' : 'Profissional';
+        const expiry = grant.current_period_end ? `até ${fmt.format(new Date(grant.current_period_end))}` : 'sem prazo';
+        return `${access} Admin ${expiry}`;
+      });
+      if (user.legacy_premium_grant) labels.push('Premium Admin legado sem prazo');
+      return `<div class="muted">${labels.map(escapeHtml).join(' · ')}</div>`;
+    }
+
+    function renderUserRow(user) {
+      const premiumGrant = adminGrant(user, 'premium');
+      const canGrantPremium = !user.is_premium;
+      const premiumLabel = premiumGrant || user.legacy_premium_grant ? 'Revogar Premium Admin' : (canGrantPremium ? 'Conceder Premium' : 'Premium pago');
+      const professionalActive = Boolean(user.professional_entitled);
+      return `
+        <tr>
+          <td>
+            <strong>${escapeHtml(user.name || user.username)}</strong><br>
+            <span class="muted">@${escapeHtml(user.username)}</span><br>
+            <span class="muted">ID ${escapeHtml(user.id)}</span><br>
+            <span class="muted">${escapeHtml(user.created_at ? fmt.format(new Date(user.created_at)) : 'sem data')}</span>
+          </td>
+          <td>
+            <div>${escapeHtml(user.email || 'E-mail não informado')}</div>
+            <div class="muted">${escapeHtml(user.account_type || 'standard')}</div>
+          </td>
+          <td>
+            <div>${escapeHtml(user.plan_code)}</div>
+            <div class="muted">Assinatura: ${escapeHtml(user.subscription_status || 'none')}</div>
+            ${grantSummary(user)}
+          </td>
+          <td>${userChips(user)}<div class="muted">${escapeHtml(user.account_status || 'active')}</div></td>
+          <td>
+            <div class="row-actions">
+              <button class="action small" data-action="${escapeHtml(user.is_banned ? 'unban' : 'ban')}" data-user="${escapeHtml(user.id)}">${escapeHtml(user.is_banned ? 'Desbanir' : 'Banir')}</button>
+              <button class="action small" data-action="premium" data-user="${escapeHtml(user.id)}" data-value="${escapeHtml(!(premiumGrant || user.legacy_premium_grant))}"${!canGrantPremium && !premiumGrant && !user.legacy_premium_grant ? ' disabled' : ''}>${escapeHtml(premiumLabel)}</button>
+              <button class="action small" data-action="professional" data-user="${escapeHtml(user.id)}" data-value="${escapeHtml(!professionalActive)}">${escapeHtml(professionalActive ? 'Revogar Prof.' : (user.is_professional ? 'Conceder acesso Prof.' : 'Conceder Prof.'))}</button>
+              <button class="action small" data-action="admin" data-user="${escapeHtml(user.id)}">${escapeHtml(user.is_admin ? 'Remover Admin' : 'Tornar Admin')}</button>
+            </div>
+          </td>
+        </tr>`;
+    }
+
     function renderUsers() {
       const q = els.userSearch.value.trim().toLowerCase();
       const role = els.userRoleFilter.value;
       const rows = state.users.filter(user => {
-        const matchText = !q || [user.username, user.plan_code, user.professional_scope].filter(Boolean).join(' ').toLowerCase().includes(q);
+        const matchText = !q || [user.name, user.email, user.username, user.id, user.plan_code, user.professional_scope].filter(Boolean).join(' ').toLowerCase().includes(q);
         const matchRole = role === 'all' || (role === 'admins' && user.is_admin) || (role === 'premium' && user.is_premium) || (role === 'professional' && user.is_professional) || (role === 'banned' && user.is_banned);
         return matchText && matchRole;
       });
-      els.usersTable.innerHTML = rows.length ? rows.map(user => `
-        <tr>
-          <td>
-            <strong>${escapeHtml(user.username)}</strong><br>
-            <span class="muted">${escapeHtml(user.created_at ? fmt.format(new Date(user.created_at)) : 'sem data')}</span>
-          </td>
-          <td>
-            <div>${escapeHtml(user.plan_code)}</div>
-            <div class="muted">IA: ${escapeHtml(user.ai_trial_uses)}</div>
-          </td>
-          <td>${userChips(user)}</td>
-          <td>
-            <div class="muted">Dietas ${escapeHtml(user.diet_entries_count)} · Medições ${escapeHtml(user.measurements_count)} · Chats ${escapeHtml(user.chat_messages_count)}</div>
-            <div class="muted">Treinos ${escapeHtml(user.workout_plans_count)} · Cardápios ${escapeHtml(user.diet_plans_count)}</div>
-          </td>
-          <td>
-            <div class="row-actions">
-              <button class="action small" data-action="${escapeHtml(user.is_banned ? 'unban' : 'ban')}" data-user="${escapeHtml(user.id)}">${escapeHtml(user.is_banned ? 'Desbanir' : 'Banir')}</button>
-              <button class="action small" data-action="premium" data-user="${escapeHtml(user.id)}" data-value="${escapeHtml(!user.is_premium)}">${escapeHtml(user.is_premium ? 'Remover Premium' : 'Dar Premium')}</button>
-              <button class="action small" data-action="professional" data-user="${escapeHtml(user.id)}" data-value="${escapeHtml(!user.is_professional)}">${escapeHtml(user.is_professional ? 'Revogar Prof.' : 'Conceder Prof.')}</button>
-              <button class="action small" data-action="admin" data-user="${escapeHtml(user.id)}">${escapeHtml(user.is_admin ? 'Remover Admin' : 'Tornar Admin')}</button>
-            </div>
-          </td>
-        </tr>
-      `).join('') : '<tr><td colspan="5" class="empty">Nenhum usuário encontrado.</td></tr>';
+      els.usersTable.innerHTML = rows.length ? rows.map(renderUserRow).join('') : '<tr><td colspan="5" class="empty">Nenhum usuário encontrado.</td></tr>';
     }
 
     function renderApplications() {
@@ -694,7 +767,32 @@
     }
 
     async function loadAll() {
-      await Promise.all([loadAnalytics(), loadUsers(), loadApplications(), loadMediaQueue()]);
+      const button = document.getElementById('refreshBtn');
+      if (button) button.disabled = true;
+      try {
+        await Promise.all([loadAnalytics(), loadUsers(), loadApplications(), loadMediaQueue()]);
+      } catch (error) {
+        showToast(error.message || 'Falha ao atualizar o painel');
+        throw error;
+      } finally {
+        if (button) button.disabled = false;
+      }
+    }
+
+    async function runAdminAction(button, action) {
+      if (button.disabled) return false;
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      try {
+        await action();
+        return true;
+      } catch (error) {
+        showToast(error.message || 'Não foi possível concluir a ação');
+        return false;
+      } finally {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+      }
     }
 
     async function doUserAction(userId, action, value) {
@@ -703,12 +801,19 @@
       if (action === 'ban' || action === 'unban' || action === 'admin') {
         path = action === 'admin' ? `/admin/users/${userId}/toggle_admin` : `/admin/users/${userId}/${action}`;
       } else if (action === 'premium') {
+        if (value === 'true') {
+          state.currentPremiumUser = userId;
+          els.premiumDurationSelect.value = '';
+          els.premiumModal.classList.add('show');
+          return;
+        }
         path = `/admin/users/${userId}/premium`;
-        options = { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_premium: value === 'true' }) };
+        options = { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_premium: false }) };
       } else if (action === 'professional') {
         if (value === 'true') {
           state.currentProfessionalUser = userId;
           els.professionalScopeSelect.value = 'diet';
+          els.professionalDurationSelect.value = '';
           els.professionalModal.classList.add('show');
           return;
         }
@@ -719,6 +824,18 @@
       showToast('Usuário atualizado');
       await loadUsers();
       await loadAnalytics();
+    }
+
+    function confirmDestructiveUserAction(userId, action, value) {
+      const user = state.users.find(item => String(item.id) === String(userId));
+      const messages = {
+        ban: 'Banir este usuário e bloquear seu acesso?',
+        premium: value === 'false' ? 'Remover o acesso Premium deste usuário?' : '',
+        professional: value === 'false' ? 'Revogar o perfil profissional e encerrar vínculos ativos ou pendentes?' : '',
+        admin: user?.is_admin ? 'Remover os privilégios administrativos deste usuário?' : '',
+      };
+      const message = messages[action];
+      return !message || window.confirm(message);
     }
 
     async function reviewApplication(applicationId, decision, note) {
@@ -746,10 +863,30 @@
     function wireTabs() {
       document.querySelectorAll('.tab').forEach(btn => {
         btn.addEventListener('click', () => {
-          document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-          document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+          document.querySelectorAll('.tab').forEach(t => {
+            t.classList.remove('active');
+            t.setAttribute('aria-selected', 'false');
+            t.tabIndex = -1;
+          });
+          document.querySelectorAll('.section').forEach(s => {
+            s.classList.remove('active');
+            s.hidden = true;
+          });
           btn.classList.add('active');
-          document.getElementById(btn.dataset.section).classList.add('active');
+          btn.setAttribute('aria-selected', 'true');
+          btn.tabIndex = 0;
+          const panel = document.getElementById(btn.dataset.section);
+          panel.hidden = false;
+          panel.classList.add('active');
+        });
+        btn.addEventListener('keydown', event => {
+          if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+          event.preventDefault();
+          const tabs = [...document.querySelectorAll('.tab')];
+          const offset = event.key === 'ArrowRight' ? 1 : -1;
+          const next = tabs[(tabs.indexOf(btn) + offset + tabs.length) % tabs.length];
+          next.focus();
+          next.click();
         });
       });
     }
@@ -771,15 +908,17 @@
       document.body.addEventListener('click', async (event) => {
         const btn = event.target.closest('[data-user]');
         if (btn) {
-          await doUserAction(btn.dataset.user, btn.dataset.action, btn.dataset.value);
+          if (!confirmDestructiveUserAction(btn.dataset.user, btn.dataset.action, btn.dataset.value)) return;
+          await runAdminAction(btn, () => doUserAction(btn.dataset.user, btn.dataset.action, btn.dataset.value));
           return;
         }
         const reviewBtn = event.target.closest('[data-review]');
         if (reviewBtn) {
           const applicationId = reviewBtn.dataset.application;
           const decision = reviewBtn.dataset.review;
+          if (decision === 'reject' && !window.confirm('Rejeitar esta solicitação profissional?')) return;
           const noteField = document.querySelector(`[data-note-for="${applicationId}"]`);
-          await reviewApplication(applicationId, decision, noteField ? noteField.value.trim() : '');
+          await runAdminAction(reviewBtn, () => reviewApplication(applicationId, decision, noteField ? noteField.value.trim() : ''));
           return;
         }
         const mediaSearchBtn = event.target.closest('[data-media-search-btn]');
@@ -787,7 +926,7 @@
           const key = mediaSearchBtn.dataset.mediaSearchBtn;
           const input = document.querySelector(`[data-media-search="${key}"]`);
           if (input && input.value.trim().length >= 2) {
-            await loadMediaCandidates(key, input.value.trim());
+            await runAdminAction(mediaSearchBtn, () => loadMediaCandidates(key, input.value.trim()));
           }
           return;
         }
@@ -806,23 +945,47 @@
             showToast('Selecione um candidato primeiro');
             return;
           }
-          await api(`/admin/exercise-media/${encodeURIComponent(mediaApprove.dataset.mediaApprove)}`, {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider_id: providerId })
+          await runAdminAction(mediaApprove, async () => {
+            await api(`/admin/exercise-media/${encodeURIComponent(mediaApprove.dataset.mediaApprove)}`, {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider_id: providerId })
+            });
+            showToast('GIF aprovado');
+            await loadMediaQueue();
           });
-          showToast('GIF aprovado');
-          await loadMediaQueue();
         }
       });
     }
 
     function wireModals() {
+      const selectedDuration = select => select.value === 'permanent' ? null : Number(select.value);
+      const closePremiumModal = () => els.premiumModal.classList.remove('show');
+      document.getElementById('closePremiumModal').addEventListener('click', closePremiumModal);
+      document.getElementById('cancelPremium').addEventListener('click', closePremiumModal);
+      els.confirmPremium.addEventListener('click', async () => {
+        if (!els.premiumDurationSelect.value) {
+          showToast('Escolha por quanto tempo o Premium ficará ativo');
+          return;
+        }
+        const saved = await runAdminAction(els.confirmPremium, () => api(`/admin/users/${state.currentPremiumUser}/premium`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_premium: true, duration_days: selectedDuration(els.premiumDurationSelect) })
+        }));
+        if (!saved) return;
+        closePremiumModal();
+        showToast('Premium concedido');
+        await Promise.all([loadUsers(), loadAnalytics()]);
+      });
       document.getElementById('closeProfessionalModal').addEventListener('click', () => els.professionalModal.classList.remove('show'));
       document.getElementById('cancelProfessional').addEventListener('click', () => els.professionalModal.classList.remove('show'));
       els.confirmProfessional.addEventListener('click', async () => {
+        if (!els.professionalDurationSelect.value) {
+          showToast('Escolha por quanto tempo o acesso profissional ficará ativo');
+          return;
+        }
         const scope = els.professionalScopeSelect.value;
-        await api(`/admin/users/${state.currentProfessionalUser}/professional`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_professional: true, professional_scope: scope })
-        });
+        const saved = await runAdminAction(els.confirmProfessional, () => api(`/admin/users/${state.currentProfessionalUser}/professional`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_professional: true, professional_scope: scope, duration_days: selectedDuration(els.professionalDurationSelect) })
+        }));
+        if (!saved) return;
         els.professionalModal.classList.remove('show');
         showToast('Profissional ativado');
         await Promise.all([loadUsers(), loadAnalytics()]);
@@ -831,6 +994,7 @@
       document.getElementById('cancelNote').addEventListener('click', () => els.noteModal.classList.remove('show'));
       els.confirmNote.addEventListener('click', () => els.noteModal.classList.remove('show'));
       els.noteModal.addEventListener('click', (event) => { if (event.target === els.noteModal) els.noteModal.classList.remove('show'); });
+      els.premiumModal.addEventListener('click', (event) => { if (event.target === els.premiumModal) closePremiumModal(); });
       els.professionalModal.addEventListener('click', (event) => { if (event.target === els.professionalModal) els.professionalModal.classList.remove('show'); });
     }
 

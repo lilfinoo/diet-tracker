@@ -1,0 +1,53 @@
+name: Monthly PostgreSQL Restore Check
+
+on:
+  schedule:
+    - cron: "43 4 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restore-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: restore_check
+          POSTGRES_USER: restore_check
+          POSTGRES_PASSWORD: restore_check
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U restore_check -d restore_check"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGPASSWORD: restore_check
+      AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.BACKUP_AWS_REGION }}
+      BACKUP_S3_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+      S3_ENDPOINT_URL: ${{ secrets.BACKUP_S3_ENDPOINT_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
+      - name: Download latest backup
+        run: |
+          set -euo pipefail
+          if [ -n "$S3_ENDPOINT_URL" ]; then
+            aws s3 cp "s3://$BACKUP_S3_BUCKET/postgres/latest.dump" latest.dump --endpoint-url "$S3_ENDPOINT_URL"
+          else
+            aws s3 cp "s3://$BACKUP_S3_BUCKET/postgres/latest.dump" latest.dump
+          fi
+          pg_restore --list latest.dump >/dev/null
+      - name: Restore into disposable PostgreSQL
+        run: |
+          pg_restore --exit-on-error --no-owner --no-acl --dbname="postgresql://restore_check@localhost:5432/restore_check" latest.dump
+          psql "postgresql://restore_check@localhost:5432/restore_check" --set=ON_ERROR_STOP=1 --command="SELECT version_num FROM alembic_version;"
+          psql "postgresql://restore_check@localhost:5432/restore_check" --set=ON_ERROR_STOP=1 --command='SELECT COUNT(*) FROM "user";'

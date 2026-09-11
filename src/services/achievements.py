@@ -117,7 +117,6 @@ def _highlighted_events(user_id):
         PersonalRecordEvent.query.filter(
             PersonalRecordEvent.user_id == user_id,
             PersonalRecordEvent.is_highlighted.is_(True),
-            PersonalRecordEvent.is_initial.is_(False),
         )
         .order_by(PersonalRecordEvent.achieved_at.asc(), PersonalRecordEvent.id.asc())
         .all()
@@ -362,3 +361,23 @@ def unlocks(user_id):
 
 def achievement_unlocks(user_id):
     return unlocks(user_id)
+
+
+def reconcile_achievements(user_id):
+    """Keep only milestones supported by the surviving history, preserving valid IDs."""
+    from src.models.user import ProfileHighlight
+
+    candidates = _candidates(user_id)
+    for unlock in AchievementUnlock.query.filter_by(user_id=user_id).all():
+        if unlock.achievement_code not in ACHIEVEMENTS:
+            continue
+        candidate = candidates.get(unlock.achievement_code)
+        if candidate is None:
+            ProfileHighlight.query.filter_by(achievement_unlock_id=unlock.id).delete(synchronize_session="fetch")
+            db.session.delete(unlock)
+        else:
+            unlock.unlocked_at = candidate.unlocked_at
+            unlock.workout_session_id = candidate.workout_session_id
+            unlock.exercise_goal_id = candidate.exercise_goal_id
+    db.session.flush()
+    evaluate_achievements(user_id, backfilled=True)

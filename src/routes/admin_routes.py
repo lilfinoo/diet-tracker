@@ -4,22 +4,15 @@ import csv
 import io
 
 from flask import Blueprint, abort, current_app, g, jsonify, request, send_file
-from sqlalchemy import func, or_
-from sqlalchemy.orm import joinedload
 
 from src.models.user import (
-    ChatMessage,
-    DietEntry,
-    DietPlan,
+    AdminActionAudit,
+    AnalyticsEvent,
     ExerciseMediaReview,
-    Measurement,
     ProfessionalApplication,
     ProfessionalStudentRelationship,
     Subscription,
     User,
-    UserProfile,
-    WorkoutPlan,
-    WorkoutSession,
     db,
 )
 from src.routes.common import admin_required, json_body, page_query
@@ -28,6 +21,76 @@ from src.services.workoutx import REVIEW_QUEUE, REVIEW_SEARCH_QUERIES, WorkoutXS
 
 
 admin_bp = Blueprint("admin", __name__)
+ADMIN_GRANT_DURATIONS = {7, 30, 90, 180, 365}
+
+
+def _admin_grant_end(data):
+    if "duration_days" not in data:
+        raise ValueError("Escolha por quanto tempo o acesso ficará ativo.")
+    duration_days = data["duration_days"]
+    if duration_days is None:
+        return None
+    if isinstance(duration_days, bool) or duration_days not in ADMIN_GRANT_DURATIONS:
+        raise ValueError("Escolha uma duração válida para o acesso.")
+    return datetime.utcnow() + timedelta(days=duration_days)
+
+
+def _upsert_admin_grant(user, grant_type, plan_code, current_period_end):
+    external_id = f"grant-{grant_type}-{user.id}"
+    subscription = Subscription.query.filter_by(
+        provider="admin", external_subscription_id=external_id
+    ).first()
+    if subscription is None:
+        subscription = Subscription(
+            user=user,
+            provider="admin",
+            external_subscription_id=external_id,
+            status="active",
+            plan_code=plan_code,
+        )
+        db.session.add(subscription)
+    subscription.status = "active"
+    subscription.plan_code = plan_code
+    subscription.current_period_start = datetime.utcnow()
+    subscription.current_period_end = current_period_end
+    return subscription
+
+
+def _revoke_admin_grants(user, grant_type):
+    external_id = f"grant-{grant_type}-{user.id}"
+    now = datetime.utcnow()
+    for subscription in Subscription.query.filter_by(
+        user_id=user.id, provider="admin", external_subscription_id=external_id
+    ):
+        subscription.status = "canceled"
+        subscription.current_period_end = now
+
+
+def _active_admin_grants(user):
+    now = datetime.utcnow()
+    return [
+        {
+            "plan_code": subscription.plan_code,
+            "status": subscription.status,
+            "current_period_start": subscription.current_period_start.isoformat() if subscription.current_period_start else None,
+            "current_period_end": subscription.current_period_end.isoformat() if subscription.current_period_end else None,
+        }
+        for subscription in user.subscriptions
+        if subscription.provider == "admin"
+        and subscription.status == "active"
+        and (subscription.current_period_end is None or subscription.current_period_end > now)
+    ]
+
+
+def _audit_admin(action, subject=None, details=None, resource_type="user", resource_id=None):
+    db.session.add(AdminActionAudit(
+        actor_user_id=g.user.id,
+        subject_user_id=subject.id if subject else None,
+        action=action,
+        resource_type=resource_type,
+        resource_id=str(resource_id or subject.id) if (resource_id or subject) else None,
+        details=details or None,
+    ))
 
 
 @admin_bp.route("/admin/dashboard", methods=["GET"])
@@ -37,9 +100,9 @@ def admin_dashboard():
         "total_users": User.query.count(),
         "total_admins": User.query.filter_by(is_admin=True).count(),
         "total_banned": User.query.filter_by(is_banned=True).count(),
-        "total_diet_entries": DietEntry.query.count(),
-        "total_measurements": Measurement.query.count(),
-        "total_chat_messages": ChatMessage.query.count(),
+        "total_meals_logged": AnalyticsEvent.query.filter_by(event_name="meal_logged").count(),
+        "total_measurements_logged": AnalyticsEvent.query.filter_by(event_name="measurement_logged").count(),
+        "total_ai_chats": AnalyticsEvent.query.filter_by(event_name="ai_chat_completed").count(),
     }
     return jsonify(stats), 200
 
@@ -49,31 +112,13 @@ def admin_dashboard():
 def list_users():
     users, _, _ = page_query(User.query.order_by(User.created_at.desc()))
     users = users.all()
-    user_ids = [user.id for user in users]
-    if not user_ids:
-        return jsonify([]), 200
-
-    def grouped_counts(model):
-        return dict(db.session.query(model.user_id, func.count(model.id)).filter(model.user_id.in_(user_ids)).group_by(model.user_id))
-
-    counts = {
-        "diet_entries": grouped_counts(DietEntry),
-        "measurements": grouped_counts(Measurement),
-        "chat_messages": grouped_counts(ChatMessage),
-        "workout_plans": grouped_counts(WorkoutPlan),
-        "diet_plans": grouped_counts(DietPlan),
-        "profiles": set(value for value, in db.session.query(UserProfile.user_id).filter(UserProfile.user_id.in_(user_ids))),
-    }
-    return jsonify([
-        user.to_dict({
-            "diet_entries": counts["diet_entries"].get(user.id, 0),
-            "measurements": counts["measurements"].get(user.id, 0),
-            "chat_messages": counts["chat_messages"].get(user.id, 0),
-            "workout_plans": counts["workout_plans"].get(user.id, 0),
-            "diet_plans": counts["diet_plans"].get(user.id, 0),
-            "has_profile": user.id in counts["profiles"],
-        }) for user in users
-    ]), 200
+    serialized_users = []
+    for user in users:
+        serialized = user.admin_dict()
+        serialized["admin_grants"] = _active_admin_grants(user)
+        serialized["legacy_premium_grant"] = user.is_premium
+        serialized_users.append(serialized)
+    return jsonify(serialized_users), 200
 
 
 @admin_bp.route("/admin/exercise-media/review", methods=["GET"])
@@ -150,6 +195,12 @@ def approve_exercise_media(catalog_key):
     review.provider_equipment = str(provider.get("equipment", ""))[:100] or None
     review.status = "approved"
     review.reviewed_at = datetime.utcnow()
+    _audit_admin(
+        "exercise_media.approved",
+        resource_type="exercise_media",
+        resource_id=catalog_key,
+        details={"provider_id": provider_id},
+    )
     db.session.commit()
     return jsonify({"message": "GIF aprovado.", "review": {
         "provider_id": review.provider_id,
@@ -166,6 +217,7 @@ def ban_user(user_id):
     if user_to_ban.is_admin:
         return jsonify({"error": "Não é possível banir um administrador."}), 403
     user_to_ban.ban_user()
+    _audit_admin("user.banned", user_to_ban)
     db.session.commit()
     return jsonify({"message": f"Usuário {user_to_ban.username} banido com sucesso."}), 200
 
@@ -175,6 +227,7 @@ def ban_user(user_id):
 def unban_user(user_id):
     user_to_unban = db.get_or_404(User, user_id)
     user_to_unban.unban_user()
+    _audit_admin("user.unbanned", user_to_unban)
     db.session.commit()
     return jsonify({"message": f"Usuário {user_to_unban.username} desbanido com sucesso."}), 200
 
@@ -188,12 +241,29 @@ def update_premium_status(user_id):
         return jsonify({"error": "is_premium deve ser verdadeiro ou falso"}), 400
 
     user_to_update = db.get_or_404(User, user_id)
-    user_to_update.is_premium = is_premium
+    previous = user_to_update.admin_dict()
+    if is_premium:
+        try:
+            current_period_end = _admin_grant_end(data)
+        except ValueError as error:
+            return jsonify({"error": str(error)}), 400
+        user_to_update.is_premium = False
+        _upsert_admin_grant(
+            user_to_update, "premium", "premium_student", current_period_end
+        )
+    else:
+        user_to_update.is_premium = False
+        _revoke_admin_grants(user_to_update, "premium")
+    _audit_admin("premium.granted" if is_premium else "premium.revoked", user_to_update, {
+        "previous_plan": previous["plan_code"],
+        "new_plan": user_to_update.effective_plan_code(),
+        "duration_days": data.get("duration_days"),
+    })
     db.session.commit()
     action = "concedido" if is_premium else "revogado"
     return jsonify({
         "message": f"Acesso Premium {action} para {user_to_update.username}.",
-        "user": user_to_update.to_dict(),
+        "user": user_to_update.admin_dict(),
     }), 200
 
 
@@ -206,19 +276,28 @@ def update_professional_status(user_id):
         return jsonify({"error": "is_professional deve ser verdadeiro ou falso"}), 400
 
     user_to_update = db.get_or_404(User, user_id)
+    previous = user_to_update.admin_dict()
     professional_scope = data.get("professional_scope")
     if is_professional:
-        plan_code = user_to_update.effective_plan_code()
-        allowed_scopes = {"diet", "workout"} if plan_code == "professional_single" else {"both"}
-        if plan_code not in {"professional_single", "professional_complete"}:
-            allowed_scopes = {"diet", "workout", "both"}
-        if professional_scope is None and "both" in allowed_scopes:
+        try:
+            current_period_end = _admin_grant_end(data)
+        except ValueError as error:
+            return jsonify({"error": str(error)}), 400
+        allowed_scopes = {"diet", "workout", "both"}
+        if professional_scope is None:
             professional_scope = "both"
         if professional_scope not in allowed_scopes:
             return jsonify({"error": "Escolha uma especialidade compatível com o plano profissional."}), 400
         user_to_update.professional_scope = professional_scope
+        _upsert_admin_grant(
+            user_to_update,
+            "professional",
+            "professional_complete" if professional_scope == "both" else "professional_single",
+            current_period_end,
+        )
     user_to_update.is_professional = is_professional
     if not is_professional:
+        _revoke_admin_grants(user_to_update, "professional")
         user_to_update.professional_scope = None
         now = datetime.utcnow()
         relationships = ProfessionalStudentRelationship.query.filter(
@@ -229,11 +308,16 @@ def update_professional_status(user_id):
             relationship.status = "revoked"
             relationship.revoked_at = now
             relationship.revoked_by_user_id = g.user.id
+    _audit_admin("professional.granted" if is_professional else "professional.revoked", user_to_update, {
+        "previous_scope": previous["professional_scope"],
+        "new_scope": user_to_update.professional_scope,
+        "duration_days": data.get("duration_days"),
+    })
     db.session.commit()
     action = "concedido" if is_professional else "revogado"
     return jsonify({
         "message": f"Perfil profissional {action} para {user_to_update.username}.",
-        "user": user_to_update.to_dict(),
+        "user": user_to_update.admin_dict(),
     }), 200
 
 
@@ -251,6 +335,10 @@ def toggle_admin_status(user_id):
         return jsonify({"error": "Não é possível remover o último administrador."}), 403
 
     user_to_toggle.is_admin = not user_to_toggle.is_admin
+    _audit_admin(
+        "admin.granted" if user_to_toggle.is_admin else "admin.revoked",
+        user_to_toggle,
+    )
     db.session.commit()
     status = "promovido a" if user_to_toggle.is_admin else "rebaixado de"
     return jsonify({"message": f"Usuário {user_to_toggle.username} {status} administrador."}), 200
@@ -259,24 +347,11 @@ def toggle_admin_status(user_id):
 @admin_bp.route("/admin/recent_activity", methods=["GET"])
 @admin_required
 def get_recent_activity():
-    limit = 10
-    recent_diet = DietEntry.query.order_by(DietEntry.created_at.desc()).options(joinedload(DietEntry.user)).limit(limit).all()
-    recent_measurements = Measurement.query.order_by(Measurement.created_at.desc()).options(joinedload(Measurement.user)).limit(limit).all()
-    recent_chats = ChatMessage.query.order_by(ChatMessage.created_at.desc()).options(joinedload(ChatMessage.user)).limit(limit).all()
-    recent_users = User.query.order_by(User.created_at.desc()).limit(limit).all()
-
-    activities = []
-    for d in recent_diet:
-        activities.append({"type": "diet", "username": d.user.username, "created_at": d.created_at.isoformat()})
-    for m in recent_measurements:
-        activities.append({"type": "measurement", "username": m.user.username, "created_at": m.created_at.isoformat()})
-    for c in recent_chats:
-        activities.append({"type": "chat", "username": c.user.username, "created_at": c.created_at.isoformat()})
-    for u in recent_users:
-        activities.append({"type": "user", "username": u.username, "created_at": u.created_at.isoformat()})
-
-    activities.sort(key=lambda x: x["created_at"], reverse=True)
-    return jsonify(activities[:20]), 200
+    events = AnalyticsEvent.query.order_by(AnalyticsEvent.created_at.desc()).limit(20).all()
+    return jsonify([
+        {"type": event.event_name, "created_at": event.created_at.isoformat()}
+        for event in events
+    ]), 200
 
 
 def _parse_admin_period():
@@ -326,13 +401,13 @@ def _date_series(start_date, end_date, bucket):
 
 
 def _admin_summary_counts(users, from_date, to_date):
-    user_ids = [user.id for user in users]
     period_start = datetime.combine(from_date, datetime.min.time())
     period_end = datetime.combine(to_date, datetime.max.time())
     total_users = User.query.count()
     active_subscriptions = Subscription.query.filter(
+        Subscription.provider != "admin",
         Subscription.status.in_(("active", "trialing")),
-        or_(Subscription.current_period_end.is_(None), Subscription.current_period_end > datetime.utcnow()),
+        Subscription.current_period_end > datetime.utcnow(),
     ).all()
     user_plan_counts = {"premium_student": 0, "professional_single": 0, "professional_complete": 0}
     for subscription in active_subscriptions:
@@ -342,27 +417,13 @@ def _admin_summary_counts(users, from_date, to_date):
     professional_users = 0
     banned_users = 0
     admin_users = 0
-    active_users_ids = set()
-    if user_ids:
-        recent_diet = DietEntry.query.with_entities(DietEntry.user_id, DietEntry.created_at).filter(
-            DietEntry.created_at >= period_start,
-            DietEntry.created_at <= period_end,
-        ).all()
-        recent_measurements = Measurement.query.with_entities(Measurement.user_id, Measurement.created_at).filter(
-            Measurement.created_at >= period_start,
-            Measurement.created_at <= period_end,
-        ).all()
-        recent_chats = ChatMessage.query.with_entities(ChatMessage.user_id, ChatMessage.created_at).filter(
-            ChatMessage.created_at >= period_start,
-            ChatMessage.created_at <= period_end,
-        ).all()
-        recent_sessions = WorkoutSession.query.with_entities(WorkoutSession.user_id, WorkoutSession.completed_at).filter(
-            WorkoutSession.completed_at.isnot(None),
-            WorkoutSession.completed_at >= period_start,
-            WorkoutSession.completed_at <= period_end,
-        ).all()
-        for item in recent_diet + recent_measurements + recent_chats + recent_sessions:
-            active_users_ids.add(item.user_id)
+    active_users_ids = {
+        subject_id for subject_id, in db.session.query(AnalyticsEvent.subject_id).filter(
+            AnalyticsEvent.subject_id.isnot(None),
+            AnalyticsEvent.created_at >= period_start,
+            AnalyticsEvent.created_at <= period_end,
+        ).distinct()
+    }
 
     for user in users:
         if user.is_admin:
@@ -403,31 +464,28 @@ def _build_admin_analytics_payload(from_date, to_date, bucket):
         if from_date <= key <= to_date:
             user_new_by_bucket[key] += 1
 
-    for model, metric_key, date_field in [
-        (DietEntry, "diet_entries", DietEntry.created_at),
-        (Measurement, "measurements", Measurement.created_at),
-        (ChatMessage, "chat_messages", ChatMessage.created_at),
-    ]:
-        for user_id, created_at in db.session.query(model.user_id, date_field).filter(
-            date_field >= datetime.combine(from_date, datetime.min.time()),
-            date_field <= datetime.combine(to_date, datetime.max.time()),
-        ).all():
-            key = _bucket_key(created_at, bucket)
+    event_metrics = {
+        "meal_logged": "diet_entries",
+        "measurement_logged": "measurements",
+        "ai_chat_completed": "chat_messages",
+        "workout_finished": "workout_sessions",
+    }
+    events = AnalyticsEvent.query.filter(
+        AnalyticsEvent.created_at >= datetime.combine(from_date, datetime.min.time()),
+        AnalyticsEvent.created_at <= datetime.combine(to_date, datetime.max.time()),
+    ).all()
+    for event in events:
+        key = _bucket_key(event.created_at, bucket)
+        metric_key = event_metrics.get(event.event_name)
+        if metric_key:
             activity_by_bucket[key][metric_key] += 1
-            activity_by_bucket[key]["active_users"].add(user_id)
-
-    for user_id, completed_at in db.session.query(WorkoutSession.user_id, WorkoutSession.completed_at).filter(
-        WorkoutSession.completed_at.isnot(None),
-        WorkoutSession.completed_at >= datetime.combine(from_date, datetime.min.time()),
-        WorkoutSession.completed_at <= datetime.combine(to_date, datetime.max.time()),
-    ).all():
-        key = _bucket_key(completed_at, bucket)
-        activity_by_bucket[key]["workout_sessions"] += 1
-        activity_by_bucket[key]["active_users"].add(user_id)
+        if event.subject_id:
+            activity_by_bucket[key]["active_users"].add(event.subject_id)
 
     active_subscriptions = Subscription.query.filter(
+        Subscription.provider != "admin",
         Subscription.status.in_(("active", "trialing")),
-        or_(Subscription.current_period_end.is_(None), Subscription.current_period_end > datetime.utcnow()),
+        Subscription.current_period_end > datetime.utcnow(),
     ).all()
     for subscription in active_subscriptions:
         key = _bucket_key(subscription.created_at or datetime.utcnow(), bucket)

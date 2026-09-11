@@ -1,18 +1,30 @@
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 from src.models.user import (
+    AITask,
     DelegatedActionAudit,
     DietPlan,
     ProfessionalStudentRelationship,
+    Subscription,
     User,
     UserProfile,
     WorkoutPlan,
     db,
 )
+from src.services.ai_queue import execute_ai_job
+from tests.helpers import registration_payload
+from src.legal import PROFESSIONAL_SHARING_VERSION
+
+
+SHARING_CONSENT = {
+    "data_sharing_consent": True,
+    "data_sharing_consent_version": PROFESSIONAL_SHARING_VERSION,
+}
 
 
 def register(client, username):
-    return client.post("/api/register", json={"username": username, "password": "strong-password"})
+    return client.post("/api/register", json=registration_payload(username))
 
 
 def enable_professional(app, username, premium=False):
@@ -20,6 +32,15 @@ def enable_professional(app, username, premium=False):
         user = User.query.filter_by(username=username).one()
         user.is_professional = True
         user.is_premium = premium
+        user.professional_scope = "both"
+        db.session.add(Subscription(
+            user_id=user.id,
+            provider="asaas",
+            external_subscription_id=f"sub-{username}",
+            status="active",
+            plan_code="professional_complete",
+            current_period_end=datetime.utcnow() + timedelta(days=30),
+        ))
         db.session.commit()
 
 
@@ -28,7 +49,7 @@ def link_student(app, professional_client, student_client, professional_name="tr
     enable_professional(app, professional_name)
     invitation = professional_client.post("/api/professional/invitations", json={}).get_json()
     register(student_client, student_name)
-    accepted = student_client.post(f"/api/invitations/{invitation['token']}/accept", json={})
+    accepted = student_client.post(f"/api/invitations/{invitation['token']}/accept", json=SHARING_CONSENT)
     assert accepted.status_code == 200
     with app.app_context():
         return User.query.filter_by(username=student_name).one().id
@@ -53,6 +74,10 @@ def generated_workout():
         ["leg_press_45", "supino_maquina", "remada_maquina", "prancha_frontal"],
         ["agachamento_goblet", "supino_reto_halteres", "remada_unilateral_halter", "bird_dog"],
     ]
+    day_slot_ids = [
+        ["FB_1_coverage_1", "FB_1_coverage_2", "FB_1_coverage_3", "FB_1_complement_4"],
+        ["FB_2_coverage_1", "FB_2_coverage_2", "FB_2_coverage_3", "FB_2_complement_4"],
+    ]
     return {
         "type": "workout_plan",
         "title": "Treino do aluno",
@@ -60,6 +85,7 @@ def generated_workout():
         "days": [{
             "focus": "Corpo inteiro",
             "exercises": [{
+                "slot_id": day_slot_ids[day_index][exercise_index],
                 "catalog_key": key,
                 "sets": 3,
                 "reps": "8-12",
@@ -67,8 +93,8 @@ def generated_workout():
                 "rest_seconds": 60,
                 "effort_guidance": "2 repetições em reserva",
                 "notes": "Execução controlada",
-            } for key in keys],
-        } for keys in day_keys],
+            } for exercise_index, key in enumerate(keys)],
+        } for day_index, keys in enumerate(day_keys)],
     }
 
 
@@ -132,10 +158,90 @@ def test_only_admin_can_enable_professional(app, client):
         User.query.filter_by(username="admin").one().is_admin = True
         db.session.commit()
     response = admin_client.patch(
-        f"/api/admin/users/{target_id}/professional", json={"is_professional": True}
+        f"/api/admin/users/{target_id}/professional",
+        json={
+            "is_professional": True,
+            "professional_scope": "both",
+            "duration_days": 90,
+        },
     )
     assert response.status_code == 200
     assert response.get_json()["user"]["is_professional"] is True
+    assert response.get_json()["user"]["professional_entitled"] is True
+    with app.app_context():
+        grant = Subscription.query.filter_by(user_id=target_id, provider="admin").one()
+        assert grant.plan_code == "professional_complete"
+        assert 89 <= (grant.current_period_end - datetime.utcnow()).days <= 90
+
+
+def test_admin_professional_grant_expires_without_affecting_approval(app):
+    admin_client = app.test_client()
+    register(admin_client, "grant-admin")
+    with app.app_context():
+        admin = User.query.filter_by(username="grant-admin").one()
+        admin.is_admin = True
+        target = User(username="temporary-professional")
+        target.set_password("strong-password")
+        db.session.add(target)
+        db.session.commit()
+        target_id = target.id
+
+    granted = admin_client.patch(
+        f"/api/admin/users/{target_id}/professional",
+        json={
+            "is_professional": True,
+            "professional_scope": "workout",
+            "duration_days": 7,
+        },
+    )
+    assert granted.status_code == 200
+
+    with app.app_context():
+        grant = Subscription.query.filter_by(user_id=target_id, provider="admin").one()
+        grant.current_period_end = datetime.utcnow() - timedelta(seconds=1)
+        db.session.commit()
+        target = db.session.get(User, target_id)
+        assert target.is_professional is True
+        assert target.has_entitlement("professional") is False
+
+
+def test_professional_grant_takes_priority_then_paid_premium_resumes(app):
+    now = datetime.utcnow()
+    with app.app_context():
+        user = User(
+            username="overlapping-grants",
+            is_professional=True,
+            professional_scope="both",
+        )
+        db.session.add(user)
+        db.session.flush()
+        paid = Subscription(
+            user=user,
+            provider="asaas",
+            external_subscription_id="paid-premium-overlap",
+            status="active",
+            plan_code="premium_student",
+            current_period_end=now + timedelta(days=30),
+        )
+        grant = Subscription(
+            user=user,
+            provider="admin",
+            external_subscription_id="admin-professional-overlap",
+            status="active",
+            plan_code="professional_complete",
+            current_period_end=now + timedelta(days=7),
+        )
+        db.session.add_all((paid, grant))
+        db.session.commit()
+
+        assert user.effective_plan_code() == "professional_complete"
+        assert user.has_entitlement("professional") is True
+
+        grant.current_period_end = now - timedelta(seconds=1)
+        db.session.commit()
+        assert user.effective_plan_code() == "premium_student"
+        assert user.has_entitlement("premium") is True
+        assert user.has_entitlement("professional") is False
 
 
 def test_admin_revoking_professional_releases_students(app):
@@ -178,6 +284,39 @@ def test_professional_scope_limits_plan_type(app):
     ).status_code == 404
 
 
+def test_active_professional_subscription_drives_entitlements(app):
+    with app.app_context():
+        trainer = User(
+            username="subscribed-trainer",
+            is_professional=True,
+            professional_scope="workout",
+        )
+        db.session.add(trainer)
+        db.session.flush()
+        db.session.add(Subscription(
+            user_id=trainer.id,
+            provider="asaas",
+            external_subscription_id="sub_professional_scope",
+            status="active",
+            plan_code="professional_single",
+            current_period_end=datetime.utcnow() + timedelta(days=30),
+        ))
+        db.session.commit()
+
+        assert trainer.has_entitlement("premium") is True
+        assert trainer.has_entitlement("professional") is True
+        assert trainer.has_entitlement("workout") is True
+        assert trainer.has_entitlement("diet") is False
+        serialized = trainer.to_dict()
+        assert serialized["professional_entitled"] is True
+        assert serialized["professional_scope"] == "workout"
+
+        trainer.professional_scope = None
+        assert trainer.has_entitlement("professional") is True
+        assert trainer.has_entitlement("workout") is False
+        assert trainer.has_entitlement("diet") is False
+
+
 def test_professional_plan_limits_student_slots(app):
     trainer_client = app.test_client()
     register(trainer_client, "limited-trainer")
@@ -188,6 +327,26 @@ def test_professional_plan_limits_student_slots(app):
     response = trainer_client.post("/api/professional/invitations", json={})
     assert response.status_code == 409
     assert "5 alunos" in response.get_json()["error"]
+
+
+def test_invitation_requires_and_records_data_sharing_consent(app):
+    trainer_client = app.test_client()
+    student_client = app.test_client()
+    register(trainer_client, "sharing-trainer")
+    enable_professional(app, "sharing-trainer")
+    token = trainer_client.post("/api/professional/invitations", json={}).get_json()["token"]
+    register(student_client, "sharing-student")
+
+    missing = student_client.post(f"/api/invitations/{token}/accept", json={})
+    assert missing.status_code == 400
+    assert missing.get_json()["code"] == "data_sharing_consent_required"
+    assert student_client.post(
+        f"/api/invitations/{token}/accept", json=SHARING_CONSENT
+    ).status_code == 200
+    with app.app_context():
+        relationship = ProfessionalStudentRelationship.query.filter_by(status="active").one()
+        assert relationship.data_sharing_consent_version == PROFESSIONAL_SHARING_VERSION
+        assert relationship.data_sharing_consented_at is not None
 
 
 def test_admin_revoking_professional_invalidates_pending_invites(app):
@@ -209,7 +368,7 @@ def test_admin_revoking_professional_invalidates_pending_invites(app):
         f"/api/admin/users/{trainer_id}/professional",
         json={"is_professional": False},
     ).status_code == 200
-    assert student_client.post(f"/api/invitations/{token}/accept", json={}).status_code == 404
+    assert student_client.post(f"/api/invitations/{token}/accept", json=SHARING_CONSENT).status_code == 404
 
 
 def test_invitation_links_existing_account_and_only_one_professional(app):
@@ -224,7 +383,7 @@ def test_invitation_links_existing_account_and_only_one_professional(app):
     register(second_client, "second-trainer")
     enable_professional(app, "second-trainer")
     token = second_client.post("/api/professional/invitations", json={}).get_json()["token"]
-    assert student_client.post(f"/api/invitations/{token}/accept", json={}).status_code == 409
+    assert student_client.post(f"/api/invitations/{token}/accept", json=SHARING_CONSENT).status_code == 409
     with app.app_context():
         assert ProfessionalStudentRelationship.query.filter_by(status="active").count() == 1
 
@@ -265,8 +424,8 @@ def test_professional_ai_uses_student_and_draft_is_hidden(app, monkeypatch):
 
     captured = {}
 
-    def generate(questionnaire, profile):
-        captured["profile_user_id"] = profile.user_id
+    def generate(*args):
+        captured["profile_user_id"] = args[1].user_id
         return generated_workout()
 
     monkeypatch.setattr("src.routes.professional_routes.generate_workout_plan", generate)
@@ -291,28 +450,91 @@ def test_professional_ai_uses_student_and_draft_is_hidden(app, monkeypatch):
         assert DelegatedActionAudit.query.filter_by(action="workout_plan.published").count() == 1
 
 
-def test_free_professional_can_create_manual_but_not_generate(app):
+def test_async_professional_workout_keeps_student_as_plan_owner(app, monkeypatch):
     trainer_client = app.test_client()
     student_client = app.test_client()
     student_id = link_student(app, trainer_client, student_client)
+    with app.app_context():
+        trainer = User.query.filter_by(username="trainer").one()
+        trainer_id = trainer.id
+        db.session.add(UserProfile(
+            user_id=student_id,
+            age=31,
+            gender="masculino",
+            activity_level="moderado",
+            weight=81,
+            height=181,
+        ))
+        db.session.commit()
 
-    assert trainer_client.post(
+    app.config["AI_ASYNC_ENABLED"] = True
+    monkeypatch.setattr(execute_ai_job, "apply_async", lambda **_kwargs: None)
+    captured = {}
+
+    def generate(*args):
+        captured["profile_user_id"] = args[1].user_id
+        return generated_workout()
+
+    monkeypatch.setattr("src.routes.professional_routes.generate_workout_plan", generate)
+    queued = trainer_client.post(
         f"/api/professional/students/{student_id}/workout-plans/generate",
         json=workout_questionnaire(),
-    ).status_code == 403
-
-    manual = generated_workout()
-    manual["days"] = [{
-        "code": chr(65 + index),
-        "title": f"Treino {chr(65 + index)}",
-        **day,
-    } for index, day in enumerate(manual["days"])]
-    response = trainer_client.post(
-        f"/api/professional/students/{student_id}/workout-plans",
-        json={"questionnaire": workout_questionnaire(), "plan": manual},
     )
-    assert response.status_code == 201
-    assert response.get_json()["plan"]["source"] == "manual"
+
+    assert queued.status_code == 202
+    task_id = queued.get_json()["job_id"]
+    with app.app_context():
+        task = db.session.get(AITask, task_id)
+        assert task.user_id == trainer_id
+        assert task.route_params["student_id"] == str(student_id)
+
+    execute_ai_job.run(task_id)
+
+    with app.app_context():
+        task = db.session.get(AITask, task_id)
+        plan = WorkoutPlan.query.filter_by(ai_task_id=task.id).one()
+        assert task.status == "succeeded"
+        assert captured["profile_user_id"] == student_id
+        assert plan.user_id == student_id
+        assert plan.author_user_id == trainer_id
+
+
+def test_async_professional_job_rechecks_specialty_scope(app, monkeypatch):
+    trainer_client = app.test_client()
+    student_client = app.test_client()
+    student_id = link_student(app, trainer_client, student_client)
+    app.config["AI_ASYNC_ENABLED"] = True
+    monkeypatch.setattr(execute_ai_job, "apply_async", lambda **_kwargs: None)
+    queued = trainer_client.post(
+        f"/api/professional/students/{student_id}/workout-plans/generate",
+        json=workout_questionnaire(),
+    )
+    task_id = queued.get_json()["job_id"]
+    with app.app_context():
+        User.query.filter_by(username="trainer").one().professional_scope = "diet"
+        db.session.commit()
+
+    execute_ai_job.run(task_id)
+
+    with app.app_context():
+        task = db.session.get(AITask, task_id)
+        assert task.status == "failed"
+        assert task.http_status == 403
+        assert WorkoutPlan.query.count() == 0
+
+
+def test_approved_professional_without_subscription_cannot_use_workspace(app):
+    trainer_client = app.test_client()
+    register(trainer_client, "approved-only")
+    with app.app_context():
+        trainer = User.query.filter_by(username="approved-only").one()
+        trainer.is_professional = True
+        trainer.professional_scope = "workout"
+        db.session.commit()
+
+    assert trainer_client.post(
+        "/api/professional/invitations", json={}
+    ).status_code == 403
 
 
 def test_professional_errors_are_json(app):
@@ -375,6 +597,52 @@ def test_diet_generation_and_suggestion_stay_in_draft(app, monkeypatch):
     assert applied.status_code == 200
     with app.app_context():
         assert db.session.get(DietPlan, plan["id"]).status == "draft"
+
+
+def test_professional_diet_generation_reports_incomplete_student_profile(app, monkeypatch):
+    trainer_client = app.test_client()
+    student_client = app.test_client()
+    student_id = link_student(app, trainer_client, student_client)
+    called = {"value": False}
+    monkeypatch.setattr(
+        "src.routes.professional_routes.generate_diet_plan",
+        lambda *args: called.update(value=True),
+    )
+
+    response = trainer_client.post(
+        f"/api/professional/students/{student_id}/diet-plans/generate",
+        json=diet_questionnaire(),
+    )
+
+    assert response.status_code == 400
+    assert "profile.age" in response.get_json()["fields"]
+    assert called["value"] is False
+
+
+def test_professional_workout_generation_reports_missing_preferences(app, monkeypatch):
+    trainer_client = app.test_client()
+    student_client = app.test_client()
+    student_id = link_student(app, trainer_client, student_client)
+    called = {"value": False}
+    monkeypatch.setattr(
+        "src.routes.professional_routes.generate_workout_plan",
+        lambda *args: called.update(value=True),
+    )
+
+    response = trainer_client.post(
+        f"/api/professional/students/{student_id}/workout-plans/generate",
+        json={},
+    )
+
+    assert response.status_code == 400
+    assert {
+        "goal",
+        "experience_level",
+        "days_per_week",
+        "session_duration",
+        "equipment",
+    } <= response.get_json()["fields"].keys()
+    assert called["value"] is False
 
 
 def test_revoked_relationship_blocks_access_but_keeps_published_plan(app, monkeypatch):

@@ -325,6 +325,10 @@ def weekly_progress(user_id, now=None):
     )
 
     current_goal = _goal_for_week(goals, current_week_start)
+    scheduled_goal = WorkoutWeeklyGoal.query.filter(
+        WorkoutWeeklyGoal.user_id == user_id,
+        WorkoutWeeklyGoal.effective_week_start > current_week_start,
+    ).order_by(WorkoutWeeklyGoal.effective_week_start, WorkoutWeeklyGoal.id.desc()).first()
     completed = int(counts.get(current_week_start, 0))
     target = current_goal.target_sessions if current_goal else None
     fulfilled = target is not None and completed >= target
@@ -340,6 +344,23 @@ def weekly_progress(user_id, now=None):
         week -= timedelta(days=7)
 
     suggested_target = suggested_days_per_week(user_id)
+    history = []
+    for weeks_ago in range(7, -1, -1):
+        history_week = current_week_start - timedelta(weeks=weeks_ago)
+        history_goal = _goal_for_week(goals, history_week)
+        history_completed = int(counts.get(history_week, 0))
+        history_target = history_goal.target_sessions if history_goal else None
+        history.append({
+            "week_start": history_week.isoformat(),
+            "completed": history_completed,
+            "target": history_target,
+            "fulfilled": history_target is not None and history_completed >= history_target,
+            "status": (
+                "no_goal" if history_target is None else
+                "fulfilled" if history_completed >= history_target else
+                "in_progress" if history_week == current_week_start else "unfulfilled"
+            ),
+        })
     return {
         "timezone": timezone_name,
         "current": {
@@ -351,6 +372,8 @@ def weekly_progress(user_id, now=None):
             "streak": streak,
         },
         "goal": serialize_weekly_goal(current_goal),
+        "scheduled_goal": serialize_weekly_goal(scheduled_goal),
+        "history": history,
         "suggestion": (
             {
                 "days_per_week": suggested_target,
@@ -441,3 +464,36 @@ def complete_exercise_goal(session):
     goal.achieved_at = event.achieved_at or session.completed_at
     goal.achieved_session_id = session.id
     return goal
+
+
+def reconcile_exercise_goals(user_id):
+    """An achieved goal needs a surviving working set performed after its creation."""
+    from src.models.user import WorkoutSessionExerciseCompletion, WorkoutSetPerformance
+
+    goals = ExerciseGoal.query.filter_by(user_id=user_id).order_by(
+        ExerciseGoal.created_at.desc(), ExerciseGoal.id.desc()
+    ).all()
+    invalidated = []
+    for goal in goals:
+        if goal.status != "achieved":
+            continue
+        session = WorkoutSession.query.join(WorkoutSessionExerciseCompletion).join(WorkoutSetPerformance).filter(
+            WorkoutSession.user_id == user_id,
+            WorkoutSession.completed_at >= goal.created_at,
+            WorkoutSessionExerciseCompletion.exercise_catalog_key == goal.exercise_key,
+            WorkoutSetPerformance.is_warmup.is_(False),
+            WorkoutSetPerformance.repetitions > 0,
+            WorkoutSetPerformance.load_kg >= goal.target_load_kg,
+        ).order_by(WorkoutSession.completed_at, WorkoutSession.id).first()
+        if session:
+            goal.achieved_at = session.completed_at
+            goal.achieved_session_id = session.id
+        else:
+            goal.status = "cancelled"
+            goal.achieved_at = None
+            goal.achieved_session_id = None
+            invalidated.append(goal)
+    # Never displace another active goal or resurrect an older superseded goal.
+    if goals and invalidated and goals[0] in invalidated and not any(goal.status == "active" for goal in goals):
+        goals[0].status = "active"
+    db.session.flush()

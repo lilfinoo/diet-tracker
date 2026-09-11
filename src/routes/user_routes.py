@@ -28,8 +28,8 @@ import math
 
 from datetime import datetime, timedelta, timezone as datetime_timezone
 from functools import wraps
-import hmac
 import secrets
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import selectinload
 import unicodedata
 from zoneinfo import ZoneInfo
@@ -173,36 +173,6 @@ def _csrf_token():
     return token
 
 
-def _csrf_exempt():
-    return request.endpoint in {
-        "user.auth_config",
-        "user.check_session",
-        "user.login",
-        "user.register",
-        "user.google_auth",
-        "user.asaas_webhook",
-    }
-
-
-def _csrf_protect_request():
-    if not current_app.config.get("CSRF_PROTECTION", True):
-        return None
-    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
-        return None
-    if _csrf_exempt() or not session.get("user_id"):
-        return None
-    expected = session.get("csrf_token")
-    received = request.headers.get("X-CSRF-Token", "")
-    if not expected or not received or not hmac.compare_digest(str(expected), str(received)):
-        return jsonify({"error": "Token CSRF inválido."}), 403
-    return None
-
-
-@user_bp.before_request
-def protect_session_mutations():
-    return _csrf_protect_request()
-
-
 def _google_identity_claims(payload):
     issuer = payload.get("iss")
     subject = payload.get("sub")
@@ -230,7 +200,7 @@ def _login_oauth_identity(identity, claims):
     identity.last_login_at = datetime.utcnow()
     db.session.commit()
     _start_session(identity.user)
-    return jsonify({"message": "Login bem-sucedido", "user": identity.user.to_dict(), "csrf_token": _csrf_token()}), 200
+    return jsonify({"message": "Login bem-sucedido", "user": identity.user.session_dict(), "csrf_token": _csrf_token()}), 200
 
 
 def json_body():
@@ -416,11 +386,24 @@ def _workout_today_payload(user):
         base["state"] = "rest"
         return base
 
+    local_start = datetime.combine(local_date, datetime.min.time(), tzinfo=ZoneInfo(timezone_name))
+    utc_start = local_start.astimezone(datetime_timezone.utc).replace(tzinfo=None)
+    utc_end = (local_start + timedelta(days=1)).astimezone(datetime_timezone.utc).replace(tzinfo=None)
     completed_session = WorkoutSession.query.filter_by(
         user_id=user.id,
         workout_plan_id=current_plan.id,
         workout_day_id=current_day.id,
-    ).filter(WorkoutSession.completed_at.isnot(None)).order_by(WorkoutSession.completed_at.desc(), WorkoutSession.id.desc()).first()
+    ).filter(
+        WorkoutSession.completed_at.isnot(None),
+        or_(
+            WorkoutSession.completed_local_date == local_date,
+            and_(
+                WorkoutSession.completed_local_date.is_(None),
+                WorkoutSession.completed_at >= utc_start,
+                WorkoutSession.completed_at < utc_end,
+            ),
+        ),
+    ).order_by(WorkoutSession.completed_at.desc(), WorkoutSession.id.desc()).first()
     if completed_session:
         completed_sets = len(completed_session.completions)
         total_sets = len(current_day.exercises)
@@ -496,6 +479,26 @@ def _version_workout_plan_for_edit(plan):
             db.session.add(new_exercise)
             db.session.flush()
             exercise_map[old_exercise.id] = new_exercise
+    profile = UserProfile.query.filter_by(user_id=plan.user_id).first()
+    if profile:
+        def remap_schedule(schedule):
+            return [
+                {
+                    **item,
+                    "day_id": day_map[item["day_id"]].id,
+                    "day_title": day_map[item["day_id"]].title,
+                    "day_code": day_map[item["day_id"]].code,
+                }
+                for item in (schedule or [])
+                if item.get("day_id") in day_map
+            ]
+
+        if profile.current_workout_plan_id == plan.id:
+            profile.current_workout_plan_id = replacement.id
+            profile.current_workout_schedule = remap_schedule(profile.current_workout_schedule)
+        if profile.pending_workout_plan_id == plan.id:
+            profile.pending_workout_plan_id = replacement.id
+            profile.pending_workout_schedule = remap_schedule(profile.pending_workout_schedule)
     plan.status = "archived"
     return replacement, day_map, exercise_map
 

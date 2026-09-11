@@ -3,19 +3,70 @@
 // Global variables
 let currentUser = null;
 let currentTab = 'diet';
+let lastPrimaryTab = 'diet';
 let dietEntries = [];
 let dietEntriesLoadPromise = null;
 let dietEntriesLoadRange = { startDate: null, endDate: null };
 let measurements = [];
 let measurementHasMore = false;
 let measurementRequestToken = 0;
+let measurementSummaryToken = 0;
+let measurementAccountVersion = 0;
+let measurementLoading = false;
+let measurementRange = null;
 let pendingAuthIntent = null;
 let pendingPostProfileResume = null;
+let pendingProfileRequiredFields = [];
 let googleSignupToken = null;
-let profileAchievementsState = { selected: [], achievements: [], badges: [], limit: 3, filter: 'all', savingToken: null };
+let legalVersions = null;
+let authMessageTimer = null;
+let billingReturnHandled = false;
+let profileAchievementsState = { selected: [], achievements: [], badges: [], records: [], limit: 3, filter: 'all', savingToken: null };
 
 // API Base URL
 const API_BASE = '/api';
+const PRIMARY_VIEWS = new Set(['diet', 'diet_plans', 'workout_plans', 'progress', 'stats']);
+const VIEW_LABELS = {
+    diet: 'Hoje', diet_plans: 'Dieta', workout_plans: 'Treino', progress: 'Progresso',
+    measurements: 'Medidas', activities: 'Atividades', personalRecords: 'Recordes pessoais', achievements: 'Conquistas',
+    stats: 'Perfil', chat: 'Assistente IA', professional: 'Área profissional'
+};
+const VIEW_PATHS = Object.freeze({
+    diet: '/app/hoje',
+    diet_plans: '/app/dieta',
+    workout_plans: '/app/treino',
+    progress: '/app/progresso',
+    stats: '/app/perfil',
+    measurements: '/app/progresso/medidas',
+    activities: '/app/progresso/atividades',
+    personalRecords: '/app/progresso/prs',
+    achievements: '/app/progresso/conquistas',
+    chat: '/app/assistente',
+    professional: '/app/profissional'
+});
+const PATH_VIEWS = Object.freeze(Object.fromEntries(
+    Object.entries(VIEW_PATHS).map(([view, path]) => [path, view])
+));
+
+function viewForPath(pathname = window.location.pathname) {
+    if (pathname === '/' || pathname === '/app' || pathname === '/app/') return 'diet';
+    return PATH_VIEWS[pathname.replace(/\/$/, '')] || null;
+}
+
+function pathForView(view) {
+    return VIEW_PATHS[view] || VIEW_PATHS.diet;
+}
+
+function syncViewPath(view, mode = 'push') {
+    if (mode === 'none') return;
+    const url = new URL(window.location.href);
+    const nextPath = pathForView(view);
+    const nextUrl = `${nextPath}${url.search}${url.hash}`;
+    const currentUrl = `${url.pathname}${url.search}${url.hash}`;
+    if (nextUrl === currentUrl) return;
+    const method = mode === 'replace' ? 'replaceState' : 'pushState';
+    window.history[method]({ view }, '', nextUrl);
+}
 
 // Utilitário para buscar elementos DOM
 function getElement(id) {
@@ -64,10 +115,12 @@ function showAuthMessage(message, type = 'info') {
     messageEl.setAttribute("role", type === "error" ? "alert" : "status");
     messageEl.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
     messageEl.style.display = "block";
-    setTimeout(() => {
+    if (authMessageTimer) clearTimeout(authMessageTimer);
+    authMessageTimer = setTimeout(() => {
         messageEl.textContent = "";
         messageEl.className = "message";
         messageEl.style.display = "none";
+        authMessageTimer = null;
     }, 5000);
 }
 
@@ -141,7 +194,6 @@ async function downscaleImageFile(file, maxSize = 1024) {
 }
 
 // Foto selecionada para gerar macros por imagem (base64 já reduzido).
-let dietPhoto = null;
 
 // --- CONTROLES VISUAIS (cards de escolha, steppers, chips de data, revelar senha) ---
 function bindChoiceCardGrid(gridId, targetId) {
@@ -224,34 +276,6 @@ function bindStepper(stepperEl) {
     if (plus) plus.addEventListener("click", () => adjust(1));
 }
 
-function syncDietDateChips() {
-    const chips = getElement("dietDateChips");
-    const dateInput = getElement("dietDate");
-    if (!chips || !dateInput) return;
-    const current = dateInput.value || "";
-    chips.querySelectorAll(".chip-btn").forEach(btn => {
-        const offset = parseInt(btn.dataset.dayOffset || "0", 10);
-        const targetDate = localDateInputValue(new Date(Date.now() + offset * 24 * 60 * 60 * 1000));
-        btn.classList.toggle("is-active", current === targetDate);
-    });
-}
-
-function bindDietDateChips() {
-    const chips = getElement("dietDateChips");
-    const dateInput = getElement("dietDate");
-    if (!chips || !dateInput) return;
-    chips.querySelectorAll(".chip-btn").forEach(btn => {
-        btn.addEventListener("click", function() {
-            const offset = parseInt(btn.dataset.dayOffset || "0", 10);
-            const targetDate = new Date(Date.now() + offset * 24 * 60 * 60 * 1000);
-            dateInput.value = localDateInputValue(targetDate);
-            chips.querySelectorAll(".chip-btn").forEach(c => c.classList.toggle("is-active", c === btn));
-            dateInput.dispatchEvent(new Event("change", { bubbles: true }));
-        });
-    });
-    dateInput.addEventListener("change", syncDietDateChips);
-}
-
 function bindFieldReveal() {
     document.querySelectorAll(".field-reveal").forEach(button => {
         button.addEventListener("click", function() {
@@ -269,9 +293,7 @@ function setupAppStyleControls() {
     bindChoiceCardGrid("genderCards", "profileGender");
     bindChoiceCardGrid("goalCards", "profileGoal");
     bindChoiceCardGrid("activityCards", "profileActivity");
-    bindChoiceCardGrid("mealTypeCards", "dietMeal");
     document.querySelectorAll(".stepper").forEach(bindStepper);
-    bindDietDateChips();
     bindFieldReveal();
 }
 
@@ -279,7 +301,6 @@ function syncChoiceCards() {
     syncChoiceCardGrid("genderCards", "profileGender");
     syncChoiceCardGrid("goalCards", "profileGoal");
     syncChoiceCardGrid("activityCards", "profileActivity");
-    syncChoiceCardGrid("mealTypeCards", "dietMeal");
 }
 
 // Adiciona listeners ao carregar a página
@@ -288,54 +309,19 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeAudioFeatures();
     checkAuthStatus();
     setupAppStyleControls();
+    bindTodayMacroControls();
     syncChoiceCards();
     initializeAchievementControls();
     initializeGoogleAuth();
     addEventListenerSafe('googleUsernameForm', 'submit', finishGoogleSignup);
 
-    // Autocomplete local para descrição dos alimentos
-    const dietDescription = getElement("dietDescription");
-    if (dietDescription) {
-        let alimentosList = [];
-        let alimentosData = [];
-        // Verifique o caminho correto para seu arquivo JSON
-        fetch("minha-pasta/alimentos.json") 
-            .then(res => res.json())
-            .then(data => {
-                alimentosData = data.filter(item => item.descricao);
-                alimentosList = alimentosData.map(item => item.descricao);
-            })
-            .catch(error => console.error("Erro ao carregar alimentos.json:", error));
-
-        const awesomplete = window.Awesomplete ? new Awesomplete(dietDescription, {
-            minChars: 2,
-            maxItems: 10,
-            autoFirst: true
-        }) : null;
-
-        dietDescription.addEventListener("input", function() {
-            const query = dietDescription.value.trim().toLowerCase();
-            if (query.length < 2) return;
-            if (!awesomplete) return;
-            awesomplete.list = alimentosList.filter(desc =>
-                desc.toLowerCase().includes(query)
-            );
-        });
-
-        dietDescription.addEventListener("awesomplete-selectcomplete", function() {
-            const selected = alimentosData.find(item => item.descricao === dietDescription.value);
-            if (selected) {
-                getElement("dietCalories").value = selected.calorias ?? "";
-                getElement("dietProtein").value = selected.proteina ?? "";
-                getElement("dietCarbs").value = selected.carboidrato ?? "";
-                getElement("dietFat").value = selected.gordura ?? "";
-            }
-        });
-    }
-
     // Formulário de dieta
     const dietForm = document.getElementById("dietForm");
     if (dietForm) {
+        dietForm.addEventListener('invalid', event => {
+            const details = event.target.closest('details');
+            if (details) details.open = true;
+        }, true);
         dietForm.addEventListener("submit", async function(e) {
             e.preventDefault();
             await handleDietFormSubmit();
@@ -392,93 +378,22 @@ document.addEventListener('DOMContentLoaded', function() {
     
     setupPlanViewModals();
 
-    addEventListenerSafe("dietPhotoBtn", "click", function() {
-        getElement("dietPhotoInput")?.click();
-    });
 
-    addEventListenerSafe("dietPhotoInput", "change", async function(e) {
-        const file = e.target.files && e.target.files[0];
-        if (!file) return;
-        try {
-            const result = await downscaleImageFile(file, 1024);
-            dietPhoto = { data: result.base64, mime_type: file.type || "image/jpeg" };
-            const preview = getElement("dietPhotoPreview");
-            if (preview) preview.classList.remove("hidden");
-            const img = getElement("dietPhotoPreviewImg");
-            if (img) img.src = result.dataUrl;
-        } catch (error) {
-            dietPhoto = null;
-            showDietMessage("Não foi possível carregar a foto.", "error");
-        }
-    });
-
-    addEventListenerSafe("dietPhotoRemove", "click", function() {
-        dietPhoto = null;
-        const input = getElement("dietPhotoInput");
-        if (input) input.value = "";
-        const preview = getElement("dietPhotoPreview");
-        if (preview) preview.classList.add("hidden");
-        const img = getElement("dietPhotoPreviewImg");
-        if (img) img.removeAttribute("src");
-    });
-
-    addEventListenerSafe("generateMacrosBtn", "click", async function() {
-        const btnText = getElement("generateMacrosBtnText");
-        const btnLoading = getElement("generateMacrosLoading");
-        if (btnText) btnText.classList.add("hidden");
-        if (btnLoading) btnLoading.classList.remove("hidden");
-        const description = getElement("dietDescription")?.value.trim();
-        if (!description && !dietPhoto) {
-            showDietMessage("Descreva o alimento ou envie uma foto para gerar macros.", "error");
-            if (btnText) btnText.classList.remove("hidden");
-            if (btnLoading) btnLoading.classList.add("hidden");
-            return;
-        }
-        try {
-            const body = { description: description || null };
-            if (dietPhoto) body.image = dietPhoto;
-            const response = await fetch(`${API_BASE}/diet/ai_macros`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                credentials: "include",
-                body: JSON.stringify(body)
-            });
-            const data = await response.json();
-            if (response.ok) {
-                getElement("dietCalories").value = data.calories || 0;
-                getElement("dietProtein").value = data.protein || 0;
-                getElement("dietCarbs").value = data.carbs || 0;
-                getElement("dietFat").value = data.fat || 0;
-                const badge = getElement('precisionBadge');
-                if (badge) {
-                    badge.textContent = data.precision === "alta" ? "Alta precisão"
-                        : data.precision === "moderada" ? "Precisão moderada"
-                        : "Baixa precisão";
-                    badge.className = data.precision === "alta" ? "precision-high"
-                        : data.precision === "moderada" ? "precision-moderate"
-                        : "precision-low";
-                }
-                if (data.precision === "baixa") {
-                    showDietMessage("Descrição vaga! Os valores são estimados. Edite se necessário.", "info");
-                }
-            } else {
-                showDietMessage(data.error || "Erro ao gerar macros", "error");
-            }
-        } catch (error) {
-            showDietMessage("Erro ao gerar macros", "error");
-        }
-        if (btnText) btnText.classList.remove("hidden");
-        if (btnLoading) btnLoading.classList.add("hidden");
-    });
 });
 
 // --- FUNÇÕES PRINCIPAIS ---
 
 async function handleDietFormSubmit() {
+    if (window.DietEntryFlow && !window.DietEntryFlow.canSave()) return;
+    const owner = currentUser?.id;
+    const flowRevision = window.DietEntryFlow?.revision();
+    const ownsDraft = () => owner === currentUser?.id && flowRevision === window.DietEntryFlow?.revision();
     const btn = document.getElementById("dietSaveBtn");
+    if (btn.disabled) return;
     const loading = document.getElementById("dietSaveLoading");
     btn.disabled = true;
     loading.classList.remove("hidden");
+    window.DietEntryFlow?.lockSaving(true);
 
     // Coleta os dados do formulário
     const dietIdRaw = document.getElementById("dietId").value;
@@ -502,36 +417,50 @@ async function handleDietFormSubmit() {
         notes: document.getElementById("dietNotes").value
     };
 
-    const url = isEdit ? `/api/diet/${dietId}` : "/api/diet";
-    const method = isEdit ? "PUT" : "POST";
+    const dailyContext = !isEdit ? pendingDietDailyContext : null;
+    const url = dailyContext
+        ? `${API_BASE}/diet/days/${encodeURIComponent(payload.date)}/slots/${encodeURIComponent(dailyContext.slotKey)}/outcome`
+        : (isEdit ? `/api/diet/${dietId}` : "/api/diet");
+    const method = dailyContext || isEdit ? "PUT" : "POST";
+    const requestPayload = dailyContext ? {
+        result: "consumed_different",
+        diet_plan_meal_id: dailyContext.mealId,
+        entry: payload
+    } : payload;
 
     try {
         const response = await fetch(url, {
             method,
             headers: { "Content-Type": "application/json" },
             credentials: "include",
-            body: JSON.stringify(payload)
+            body: JSON.stringify(requestPayload)
         });
 
+        if (!ownsDraft()) return;
         if (response.ok) {
-            showToast("Dieta salva com sucesso!", "success");
+            window.DietEntryFlow?.saved();
+            showToast("Refeição registrada", "success");
             closeDietModal();
-            loadDietEntries({ showLoading: false });
-            loadTodayCardapio();
+            if (currentTab === 'diet_plans') await refreshDietDailySurfaces();
+            else await Promise.all([loadDietEntries({ showLoading: false }), loadTodayCardapio()]);
         } else {
             const errorData = await response.json();
-            showToast(errorData.error || "Erro ao salvar dieta!", "error");
+            if (ownsDraft()) showDietMessage(errorData.error || "Não foi possível salvar. Tente novamente.", "error");
         }
     } catch (e) {
-        showToast("Erro de conexão!", "error");
+        if (ownsDraft()) showDietMessage("Erro de conexão. Seu preenchimento foi mantido. Tente salvar novamente.", "error");
     } finally {
-        btn.disabled = false;
-        loading.classList.add("hidden");
+        if (ownsDraft()) {
+            btn.disabled = false;
+            loading.classList.add("hidden");
+            window.DietEntryFlow?.lockSaving(false);
+        }
     }
 }
 
-// Atualiza o peso do perfil ao salvar uma nova medida
+// Salva a medição; os valores atuais são derivados pelo servidor.
 async function handleMeasurementFormSubmit() {
+    const accountVersion = measurementAccountVersion;
     const btn = document.getElementById("measurementSaveBtn");
     const loading = document.getElementById("measurementSaveLoading");
     btn.disabled = true;
@@ -569,21 +498,13 @@ async function handleMeasurementFormSubmit() {
             body: JSON.stringify(payload)
         });
 
+        if (accountVersion !== measurementAccountVersion) return;
         if (response.ok) {
             closeMeasurementModal();
-            loadMeasurements();
+            await Promise.all([loadMeasurements(), loadMeasurementSummary()]);
+            if (accountVersion !== measurementAccountVersion) return;
             showToast(isEdit ? "Medidas atualizadas!" : "Medidas adicionadas!", "success");
-            const profileUpdate = {};
-            if (payload.weight != null) profileUpdate.weight = payload.weight;
-            if (payload.height != null) profileUpdate.height = payload.height;
-            if (Object.keys(profileUpdate).length) {
-                await fetch(`${API_BASE}/profile`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    credentials: "include",
-                    body: JSON.stringify(profileUpdate)
-                });
-            }
+
         } else {
             const data = await response.json();
             showToast(data.error || "Erro ao salvar", "error");
@@ -605,8 +526,7 @@ function setupModalEvents() {
     const modals = [
         { id: "dietModal", closeFunc: closeDietModal },
         { id: "measurementModal", closeFunc: closeMeasurementModal },
-        { id: "profileModal", closeFunc: closeProfileModal },
-        { id: "exerciseCreditsModal", closeFunc: closeExerciseCredits }
+        { id: "profileModal", closeFunc: closeProfileModal }
     ];
 
     modals.forEach(modal => {
@@ -674,11 +594,12 @@ async function checkAuthStatus() {
             const data = await response.json();
             if (data.logged_in) {
                 if (data.csrf_token) setCsrfToken(data.csrf_token);
-                currentUser = data.user;
+                setCurrentUser(data.user);
+                window.analytics?.trackReturns(currentUser);
                 showMainScreen();
             } else {
                 setCsrfToken(null);
-                currentUser = null;
+                setCurrentUser(null);
                 showMainScreen();
             }
         } else {
@@ -690,6 +611,30 @@ async function checkAuthStatus() {
         setCsrfToken(null);
         showMainScreen();
     }
+    handleBillingReturn();
+}
+
+function removeQueryParameter(name) {
+    const url = new URL(window.location.href);
+    url.searchParams.delete(name);
+    const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+    window.history.replaceState(window.history.state, '', nextUrl);
+}
+
+function handleBillingReturn() {
+    if (billingReturnHandled) return;
+    const status = new URLSearchParams(window.location.search).get('billing');
+    if (!['success', 'cancel', 'expired'].includes(status)) return;
+    billingReturnHandled = true;
+    const messages = {
+        success: currentUser?.is_premium
+            ? 'Pagamento confirmado. Seu plano já está ativo.'
+            : 'Pagamento enviado. A confirmação pode levar alguns instantes.',
+        cancel: 'Pagamento cancelado. Nenhuma nova assinatura foi ativada.',
+        expired: 'A sessão de pagamento expirou. Inicie uma nova assinatura para continuar.'
+    };
+    showToast(messages[status], status === 'success' ? 'success' : 'info');
+    removeQueryParameter('billing');
 }
 
 // Screen management
@@ -706,12 +651,14 @@ function openAuthModal(reason = 'Entre para salvar seus dados e acompanhar sua e
 function closeAuthModal() {
     pendingAuthIntent = null;
     closeAppModal(getElement('loginScreen'));
+    if (viewForPath() !== currentTab) syncViewPath(currentTab, 'replace');
 }
 
 function requireAuth(reason, options = {}) {
     if (currentUser) {
         if (options.premium && !hasAiAccess()) {
             showToast('Este recurso utiliza IA e está disponível no plano Premium.', 'info');
+            openPlansModal();
             return false;
         }
         return true;
@@ -734,6 +681,7 @@ async function initializeGoogleAuth() {
     try {
         const response = await fetch(`${API_BASE}/auth/config`);
         const config = response.ok ? await response.json() : {};
+        legalVersions = config.legal || null;
         if (!config.google_client_id) return;
         getElement('googleAuthSection')?.classList.remove('hidden');
         getElement('googleHeaderButton')?.classList.remove('hidden');
@@ -750,10 +698,22 @@ async function initializeGoogleAuth() {
                 theme: 'outline', size: 'large', width: 320, text: 'continue_with'
             });
         };
+        script.onerror = () => showAuthMessage('Não foi possível carregar o login do Google. Use e-mail e senha ou tente novamente.', 'error');
         document.head.appendChild(script);
     } catch (error) {
         console.error('Google auth configuration failed:', error);
     }
+}
+
+function setGoogleAuthPending(pending, message = '') {
+    const section = getElement('googleAuthSection');
+    const submit = getElement('googleSignupSubmit');
+    section?.setAttribute('aria-busy', String(pending));
+    if (submit) {
+        submit.disabled = pending;
+        submit.textContent = pending ? 'Concluindo...' : 'Concluir cadastro';
+    }
+    if (pending && message) showAuthMessage(message, 'info');
 }
 
 function openAuthWithGoogle() {
@@ -764,6 +724,7 @@ function openAuthWithGoogle() {
 }
 
 async function handleGoogleCredential(result) {
+    setGoogleAuthPending(true, 'Entrando com Google...');
     try {
         const response = await fetch(`${API_BASE}/auth/google`, {
             method: 'POST',
@@ -773,6 +734,7 @@ async function handleGoogleCredential(result) {
         });
         const data = await response.json().catch(() => ({}));
         if (response.status === 409 && data.code === 'username_required') {
+            window.analytics?.track('signup_started', { surface: 'google_auth' });
             googleSignupToken = data.signup_token;
             getElement('googleUsernameForm')?.classList.remove('hidden');
             getElement('googleUsername')?.focus();
@@ -783,6 +745,8 @@ async function handleGoogleCredential(result) {
         completeAuthentication(data.user, data.csrf_token);
     } catch (error) {
         showAuthMessage(error.message, 'error');
+    } finally {
+        setGoogleAuthPending(false);
     }
 }
 
@@ -790,12 +754,27 @@ async function finishGoogleSignup(event) {
     event.preventDefault();
     const username = getElement('googleUsername')?.value.trim();
     if (!googleSignupToken || !username) return;
+    if (!getElement('googleTerms')?.checked || !getElement('googlePrivacy')?.checked || !legalVersions) {
+        showAuthMessage('Aceite os Termos e a Política de Privacidade vigentes.', 'error');
+        return;
+    }
+    setGoogleAuthPending(true, 'Concluindo cadastro...');
     try {
         const response = await fetch(`${API_BASE}/auth/google`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({ signup_token: googleSignupToken, username })
+            body: JSON.stringify({
+                signup_token: googleSignupToken,
+                username,
+                terms_accepted: true,
+                terms_version: legalVersions.terms.version,
+                privacy_accepted: true,
+                privacy_version: legalVersions.privacy.version,
+                ai_consent: Boolean(getElement('googleAiConsent')?.checked),
+                ai_consent_version: legalVersions.ai.version,
+                analytics: window.analytics?.context()
+            })
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || 'Não foi possível concluir o cadastro.');
@@ -804,15 +783,21 @@ async function finishGoogleSignup(event) {
         completeAuthentication(data.user, data.csrf_token);
     } catch (error) {
         showAuthMessage(error.message, 'error');
+    } finally {
+        setGoogleAuthPending(false);
     }
 }
 
 function completeAuthentication(user, csrfToken = null) {
-    currentUser = user;
+    setCurrentUser(user);
     setCsrfToken(csrfToken);
     closeAppModal(getElement('loginScreen'));
-    showMainScreen({ skipProfile: true });
-    checkUserProfile();
+    const intent = pendingAuthIntent;
+    const destination = intent?.tab || viewForPath() || currentTab;
+    pendingAuthIntent = null;
+    showMainScreen({ tab: destination, skipProfile: Boolean(intent?.resume) });
+    if (intent?.resume) resumeAfterAuthentication(intent.resume, intent.requiresProfile);
+    else checkUserProfile();
     showToast('Você entrou com sucesso.', 'success');
 }
 
@@ -824,10 +809,21 @@ window.requireAuth = requireAuth;
 function showMainScreen(options = {}) {
     const loginScreen = getElement('loginScreen');
     const mainScreen = getElement('mainScreen');
+    getElement('dietTab')?.classList.toggle('today-authenticated', Boolean(currentUser));
     
     if (loginScreen?.classList.contains('show')) closeAppModal(loginScreen);
     if (mainScreen) mainScreen.classList.remove('hidden');
     
+    const homeDate = getElement('homeDate');
+    if (homeDate) {
+        const formatted = new Intl.DateTimeFormat('pt-BR', {
+            weekday: 'long',
+            day: '2-digit',
+            month: 'long'
+        }).format(new Date());
+        homeDate.textContent = formatted.charAt(0).toUpperCase() + formatted.slice(1);
+    }
+
     if (currentUser) {
         const username = currentUser.username || 'Usuário';
         const initial = username.trim().charAt(0).toUpperCase() || 'U';
@@ -842,26 +838,21 @@ function showMainScreen(options = {}) {
         const profileMembership = getElement('profileMembership');
         if (profileMembership) profileMembership.textContent = currentUser.is_premium ? 'Membro Premium' : 'Plano gratuito';
         renderProfileBadges(currentUser);
+        window.applyCurrentUserAvatar?.(currentUser.avatar_url);
+        window.loadNetworkInbox?.();
         const aiAccessLabel = getElement('homeAiAccessLabel');
         if (aiAccessLabel) {
             const remaining = Math.max(0, 3 - Number(currentUser.ai_trial_uses || 0));
             aiAccessLabel.textContent = currentUser.is_premium ? 'Premium' : `${remaining} ${remaining === 1 ? 'uso grátis' : 'usos grátis'}`;
         }
-        const homeDate = getElement('homeDate');
-        if (homeDate) {
-            const formatted = new Intl.DateTimeFormat('pt-BR', {
-                weekday: 'long',
-                day: '2-digit',
-                month: 'long'
-            }).format(new Date());
-            homeDate.textContent = formatted.charAt(0).toUpperCase() + formatted.slice(1);
-        }
+
 
         const isAdmin = Boolean(currentUser.is_admin);
-        const isProfessional = Boolean(currentUser.is_professional);
+        const isProfessional = Boolean(currentUser.professional_entitled);
         getElement('adminPanelBtn')?.classList.toggle('hidden', !isAdmin);
         getElement('profileAdminLink')?.classList.toggle('hidden', !isAdmin);
         getElement('professionalPanelBtn')?.classList.toggle('hidden', !isProfessional);
+        getElement('networkHeaderButton')?.classList.remove('hidden');
     } else {
         const welcomeUser = getElement('welcomeUser');
         if (welcomeUser) welcomeUser.textContent = 'Explore o Fit-Tracker.AI';
@@ -869,6 +860,7 @@ function showMainScreen(options = {}) {
             const element = getElement(id);
             if (element) element.textContent = 'F';
         });
+        getElement('networkHeaderButton')?.classList.add('hidden');
         const profileUserName = getElement('profileUserName');
         if (profileUserName) profileUserName.textContent = 'Conheça seu espaço';
         const profileMembership = getElement('profileMembership');
@@ -885,14 +877,15 @@ function showMainScreen(options = {}) {
 
     getElement('guestAuthActions')?.classList.toggle('hidden', Boolean(currentUser));
     getElement('userHeaderButton')?.classList.toggle('hidden', !currentUser);
-    const showHeaderPill = currentUser?.is_premium !== true;
+    const showHeaderPill = !currentUser;
     getElement('premiumHeaderPill')?.classList.toggle('hidden', !showHeaderPill);
-    getElement('profileUpgradePill')?.classList.toggle('hidden', !(currentUser && !currentUser.is_premium));
     getElement('profileLoginAction')?.classList.toggle('hidden', Boolean(currentUser));
     getElement('profileLogoutAction')?.classList.toggle('hidden', !currentUser);
     getElement('editProfileBtn')?.classList.toggle('hidden', !currentUser);
     getElement('profileGuestPanel')?.classList.toggle('hidden', Boolean(currentUser));
     getElement('profileAuthenticatedContent')?.classList.toggle('hidden', !currentUser);
+    getElement('progressGuestPanel')?.classList.toggle('hidden', Boolean(currentUser));
+    getElement('progressAuthenticatedContent')?.classList.toggle('hidden', !currentUser);
 
     const chatNavBtn = document.querySelector(`.nav-btn[onclick="showTab('chat')"]`);
     if (chatNavBtn) {
@@ -901,7 +894,8 @@ function showMainScreen(options = {}) {
         chatNavBtn.setAttribute('aria-label', hasAiAccess() ? 'Assistente IA' : 'Assistente IA, recurso Premium');
     }
 
-    showTab(options.tab || 'diet');
+    const initialView = options.tab || viewForPath() || 'diet';
+    showTab(initialView, { history: 'replace' });
     if (currentUser) {
         if (!options.skipProfile) checkUserProfile();
         window.loadWorkoutTodayCard?.();
@@ -946,7 +940,7 @@ function availableToken(item) {
 }
 
 function selectionLabel(selection) {
-    const item = [...profileAchievementsState.achievements, ...profileAchievementsState.badges].find(entry => availableToken(entry) === selectionToken(selection));
+    const item = [...profileAchievementsState.achievements, ...profileAchievementsState.badges, ...profileAchievementsState.records].find(entry => availableToken(entry) === selectionToken(selection));
     if (item) return formatProfileHighlightLabel(item);
     return selection.kind === 'badge' ? selection.code : selection.code;
 }
@@ -970,6 +964,7 @@ async function loadAchievementsTab() {
             selected: data.selected.map(item => ({ kind: item.target_kind, code: item.item?.code })),
             achievements: data.items.map(item => ({ kind: 'achievement', ...item })),
             badges: data.badges.map(item => ({ kind: 'badge', ...item })),
+            records: (data.personal_records || []).map(item => ({ kind: 'personal_record', code: String(item.id), title: item.exercise_name, ...item })),
             limit: Number(data.highlight_limit) || 3,
             filter: profileAchievementsState.filter || 'all',
             savingToken: null,
@@ -1129,7 +1124,7 @@ function closeProfileHighlights() {
 
 async function toggleProfileHighlight(kind, code) {
     if (profileAchievementsState.savingToken) return;
-    const target = [...profileAchievementsState.achievements, ...profileAchievementsState.badges]
+    const target = [...profileAchievementsState.achievements, ...profileAchievementsState.badges, ...profileAchievementsState.records]
         .find(item => item.kind === kind && item.code === code);
     if (!target || (kind === 'achievement' && !target.unlocked)) return;
     const token = `${kind}:${code}`;
@@ -1174,6 +1169,7 @@ async function saveProfileHighlights(options = {}) {
             : [],
         achievements: profileAchievementsState.achievements,
         badges: profileAchievementsState.badges,
+        records: profileAchievementsState.records,
         limit: Number(data.limit) || 3,
         filter: profileAchievementsState.filter,
         savingToken: null,
@@ -1202,8 +1198,26 @@ async function resumeAfterAuthentication(resume, requiresProfile) {
         console.error('Profile check after authentication failed:', error);
     }
     pendingPostProfileResume = resume;
+    pendingProfileRequiredFields = [];
     fillProfileForm(null);
     openAppModal(getElement('profileModal'));
+}
+
+async function requestProfileCompletion(resume, fields = {}) {
+    pendingPostProfileResume = resume;
+    pendingProfileRequiredFields = Object.keys(fields)
+        .filter(field => field.startsWith('profile.'))
+        .map(field => field.slice('profile.'.length));
+    try {
+        const response = await fetch(`${API_BASE}/profile`, { credentials: 'include' });
+        const data = response.ok ? await response.json() : {};
+        fillProfileForm(data.profile || null);
+    } catch (error) {
+        console.error('Profile load before resume failed:', error);
+    }
+    openAppModal(getElement('profileModal'));
+    const message = Object.values(fields).filter(Boolean).join(' ');
+    showToast(message || 'Complete seu perfil para continuar.', 'info');
 }
 
 function renderGuestPresentation(tabName) {
@@ -1223,18 +1237,12 @@ function renderGuestPresentation(tabName) {
         getElement('guestDailySummary')?.classList.remove('hidden');
         getElement('dailyMacroGrid')?.classList.add('hidden');
         const cardapio = getElement('todayCardapioBody');
-        if (cardapio) cardapio.innerHTML = '<div class="guest-presentation"><i class="fas fa-calendar-day"></i><div><strong>Seu cardápio diário organizado</strong><p>Crie uma conta para gerar planos e acompanhar as refeições de cada dia.</p></div></div>';
+        if (cardapio) cardapio.innerHTML = '<p class="today-muted">Entre para salvar suas refeições.</p><button type="button" class="today-food-primary" onclick="showAddDietModal()">Registrar refeição</button>';
     }
-    if (tabName === 'stats') {
-        const latest = getElement('latestMeasurement');
-        if (latest) latest.innerHTML = '<strong>Seu histórico em um só lugar</strong><span>Entre para acompanhar medidas, treinos, metas e conquistas.</span>';
-        const total = getElement('totalDietEntries');
-        const recent = getElement('recentDietEntries');
-        if (total) total.textContent = '—';
-        if (recent) recent.textContent = '—';
-        const recentActivities = getElement('profileRecentActivities');
-        if (recentActivities) recentActivities.innerHTML = '<div class="guest-presentation"><i class="fas fa-person-running"></i><div><strong>Atividades recentes</strong><p>Entre para ver seus treinos e progresso.</p></div></div>';
-    }
+    if (tabName === 'diet_plans') renderDietCurrentPlanHub(null, null);
+    if (tabName === 'diet_plans') document.querySelector('.fab--diet-plans')?.classList.add('hidden');
+    if (tabName === 'workout_plans') document.querySelector('.fab--workout-plans')?.classList.add('hidden');
+
 }
 
 /**
@@ -1246,12 +1254,25 @@ function renderGuestPresentation(tabName) {
 let isRecording = false;
 let recognition = null;
 let lastAIResponse = '';
+let isSendingChat = false;
+
+function setChatPending(pending) {
+    isSendingChat = pending;
+    const button = getElement('chatSendButton');
+    if (!button) return;
+    button.disabled = pending;
+    button.setAttribute('aria-busy', pending ? 'true' : 'false');
+    button.innerHTML = pending
+        ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i>'
+        : '<i class="fas fa-arrow-up" aria-hidden="true"></i>';
+}
 
 /**
  * Envia mensagem no chat
  */
 async function sendChatMessage() {
     if (!requireAuth('Entre para conversar com o Assistente IA.', { premium: true })) return;
+    if (isSendingChat) return;
     const input = getElement("chatInput");
     if (!input) return;
 
@@ -1261,6 +1282,7 @@ async function sendChatMessage() {
     // Adiciona mensagem do usuário
     addMessageToChat(message, "user");
     input.value = "";
+    setChatPending(true);
     
     // Mostra indicador de digitação
     showTypingIndicator();
@@ -1276,7 +1298,8 @@ async function sendChatMessage() {
         });
         
         if (response.ok) {
-            const data = await response.json();
+            let data = await response.json();
+            if (response.status === 202 && data.job_id) data = await window.waitForAIJob(data);
             hideTypingIndicator();
             lastAIResponse = data.response; // Salva para reprodução de áudio
             addMessageToChat(data.response, "bot");
@@ -1290,6 +1313,8 @@ async function sendChatMessage() {
         console.error("Chat error:", error);
         hideTypingIndicator();
         addMessageToChat("Erro de conexão. Verifique sua internet.", "bot");
+    } finally {
+        setChatPending(false);
     }
 }
 
@@ -1297,9 +1322,11 @@ async function sendChatMessage() {
  * Envia mensagem para a IA com o perfil do usuário (usado pelos botões rápidos)
  */
 async function sendChatMessageWithProfile(message, intent) {
+    if (isSendingChat) return;
     const chatMessages = getElement("chatMessages");
     if (!chatMessages) return;
     addMessageToChat(message, "user");
+    setChatPending(true);
     showTypingIndicator();
     
     try {
@@ -1309,17 +1336,22 @@ async function sendChatMessageWithProfile(message, intent) {
             credentials: "include",
             body: JSON.stringify({ message, intent })
         });
-        const data = await response.json();
+        let data = await response.json();
+        if (response.status === 202 && data.job_id) data = await window.waitForAIJob(data);
         hideTypingIndicator();
         if (response.ok && data.response) {
             addMessageToChat(data.response, "bot");
             lastAIResponse = data.response;
             if (window.handlePlanChatAction) window.handlePlanChatAction(data.action);
+        } else {
+            addMessageToChat(data.error || "Não foi possível concluir esta solicitação.", "bot");
         }
     } catch (error) {
         console.error("Chat error:", error);
         hideTypingIndicator();
         addMessageToChat("Erro de conexão com a IA.", "bot");
+    } finally {
+        setChatPending(false);
     }
 }
 
@@ -1524,6 +1556,16 @@ function getMealTypeLabel(mealType) {
 }
 
 // Authentication functions
+async function readAuthResponse(response) {
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) return response.json();
+    return {
+        error: response.status >= 500
+            ? `O servidor não conseguiu concluir a solicitação (erro ${response.status}).`
+            : `Resposta inválida do servidor (erro ${response.status}).`
+    };
+}
+
 async function handleLogin(e) {
     e.preventDefault();
     const username = getElement("loginUsername").value.trim();
@@ -1544,9 +1586,9 @@ async function handleLogin(e) {
             body: JSON.stringify({ username, password })
         });
 
-        const data = await response.json();
-        if (response.ok) {
-            currentUser = data.user;
+        const data = await readAuthResponse(response);
+        if (response.ok && data.user) {
+            setCurrentUser(data.user);
             if (data.csrf_token) setCsrfToken(data.csrf_token);
             const intent = pendingAuthIntent;
             const destination = intent?.tab || currentTab;
@@ -1555,7 +1597,7 @@ async function handleLogin(e) {
             showToast(data.message, "success");
             if (intent?.resume) resumeAfterAuthentication(intent.resume, intent.requiresProfile);
         } else {
-            showAuthMessage(data.error, "error");
+            showAuthMessage(data.error || "Não foi possível entrar.", "error");
         }
     } catch (error) {
         console.error("Login error:", error);
@@ -1565,11 +1607,13 @@ async function handleLogin(e) {
 
 async function handleRegister(e) {
     e.preventDefault();
+    const name = getElement("registerName").value.trim();
+    const email = getElement("registerEmail").value.trim();
     const username = getElement("registerUsername").value.trim();
     const password = getElement("registerPassword").value.trim();
     const confirmPassword = getElement("confirmPassword").value.trim();
 
-    if (!username || !password || !confirmPassword) {
+    if (!name || !email || !username || !password || !confirmPassword) {
         showAuthMessage("Preencha todos os campos", "error");
         return;
     }
@@ -1583,6 +1627,10 @@ async function handleRegister(e) {
         showAuthMessage("A senha deve ter pelo menos 8 caracteres", "error");
         return;
     }
+    if (!getElement('registerTerms')?.checked || !getElement('registerPrivacy')?.checked || !legalVersions) {
+        showAuthMessage('Aceite os Termos e a Política de Privacidade vigentes.', 'error');
+        return;
+    }
 
     try {
         const response = await fetch(`${API_BASE}/register`, {
@@ -1591,12 +1639,24 @@ async function handleRegister(e) {
                 "Content-Type": "application/json"
             },
             credentials: "include",
-            body: JSON.stringify({ username, password })
+            body: JSON.stringify({
+                username,
+                name,
+                email,
+                password,
+                terms_accepted: true,
+                terms_version: legalVersions.terms.version,
+                privacy_accepted: true,
+                privacy_version: legalVersions.privacy.version,
+                ai_consent: Boolean(getElement('registerAiConsent')?.checked),
+                ai_consent_version: legalVersions.ai.version,
+                analytics: window.analytics?.context()
+            })
         });
 
-        const data = await response.json();
-        if (response.ok) {
-            currentUser = data.user;
+        const data = await readAuthResponse(response);
+        if (response.ok && data.user) {
+            setCurrentUser(data.user);
             if (data.csrf_token) setCsrfToken(data.csrf_token);
             const intent = pendingAuthIntent;
             const destination = intent?.tab || currentTab;
@@ -1605,11 +1665,91 @@ async function handleRegister(e) {
             showToast(data.message, "success");
             if (intent?.resume) resumeAfterAuthentication(intent.resume, intent.requiresProfile);
         } else {
-            showAuthMessage(data.error, "error");
+            showAuthMessage(data.error || "Não foi possível criar a conta.", "error");
         }
     } catch (error) {
         console.error("Register error:", error);
         showAuthMessage("Erro de conexão. Tente novamente.", "error");
+    }
+}
+
+async function openPrivacySettings() {
+    if (!currentUser) return;
+    try {
+        const response = await fetch(`${API_BASE}/account/consents`, { credentials: 'include' });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Não foi possível carregar os consentimentos.');
+        legalVersions = data.versions;
+        getElement('accountTerms').checked = Boolean(data.terms.accepted);
+        getElement('accountPrivacy').checked = Boolean(data.privacy.accepted);
+        getElement('accountAiConsent').checked = Boolean(data.ai.accepted);
+        getElement('consentStatus').textContent = `Termos: ${data.terms.version || 'pendente'} | Privacidade: ${data.privacy.version || 'pendente'} | IA: ${data.ai.accepted ? data.ai.version : 'não autorizada'}`;
+        openAppModal(getElement('privacySettingsModal'));
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function savePrivacySettings() {
+    if (!legalVersions) return;
+    try {
+        const response = await fetch(`${API_BASE}/account/consents`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+                terms_accepted: Boolean(getElement('accountTerms')?.checked),
+                privacy_accepted: Boolean(getElement('accountPrivacy')?.checked),
+                ai_consent: Boolean(getElement('accountAiConsent')?.checked),
+            }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Não foi possível salvar as escolhas.');
+        closeAppModal(getElement('privacySettingsModal'));
+        showToast(data.message, 'success');
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+function openDeleteAccount() {
+    if (!currentUser) return;
+    getElement('deleteAccountUsername').value = '';
+    getElement('deleteAccountPassword').value = '';
+    getElement('deleteAccountConfirm').checked = false;
+    getElement('deleteAccountPasswordGroup')?.classList.toggle('hidden', !currentUser.has_password);
+    getElement('deleteGoogleNotice')?.classList.toggle('hidden', Boolean(currentUser.has_password));
+    openAppModal(getElement('deleteAccountModal'));
+}
+
+async function deleteAccount() {
+    if (!currentUser) return;
+    if (!getElement('deleteAccountConfirm')?.checked) {
+        showToast('Confirme que entendeu a exclusão definitiva.', 'error');
+        return;
+    }
+    try {
+        const response = await fetch(`${API_BASE}/account`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+                username: getElement('deleteAccountUsername')?.value,
+                password: getElement('deleteAccountPassword')?.value,
+                confirm_delete: true,
+            }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Não foi possível excluir a conta.');
+        setCurrentUser(null);
+        setCsrfToken(null);
+        window.analytics?.clearAttribution();
+        closeAppModal(getElement('deleteAccountModal'));
+        window.clearWorkoutProgress?.();
+        showMainScreen({ tab: 'diet' });
+        showToast(data.message, 'success');
+    } catch (error) {
+        showToast(error.message, 'error');
     }
 }
 
@@ -1619,14 +1759,14 @@ async function logout() {
             method: "POST",
             credentials: "include"
         });
-        currentUser = null;
+        setCurrentUser(null);
         setCsrfToken(null);
         window.clearWorkoutProgress?.();
         showMainScreen({ tab: 'diet' });
         showToast("Logout realizado com sucesso", "success");
     } catch (error) {
         console.error("Logout error:", error);
-        currentUser = null;
+        setCurrentUser(null);
         setCsrfToken(null);
         window.clearWorkoutProgress?.();
         showMainScreen({ tab: 'diet' });
@@ -1635,26 +1775,27 @@ async function logout() {
 
 // Interface functions
 // Interface functions
-function showTab(tabName) {
-    if (tabName === 'activities' && !currentUser) {
+function showTab(tabName, options = {}) {
+    if (['activities', 'personalRecords'].includes(tabName) && !currentUser) {
         openAuthModal('Entre para acessar seu histórico de atividades.', 'login', { tab: 'activities' });
-        return;
+        return false;
     }
     if (tabName === 'achievements' && !currentUser) {
         openAuthModal('Entre para acessar suas conquistas.', 'login', { tab: 'achievements' });
-        return;
+        return false;
     }
     if (tabName === 'chat' && !hasAiAccess()) {
         if (!currentUser) {
             openAuthModal('Entre para conhecer o Assistente IA. Este é um recurso Premium.', 'register', { tab: 'chat', premium: true });
-            return;
+            return false;
         }
         showToast('O Assistente IA está disponível no plano Premium.', 'info');
-        return;
+        openPlansModal();
+        return false;
     }
-    if (tabName === 'professional' && !currentUser?.is_professional) {
-        showToast('A área profissional precisa ser habilitada por um administrador.', 'info');
-        return;
+    if (tabName === 'professional' && !currentUser?.professional_entitled) {
+        showToast('A área profissional exige aprovação e assinatura profissional ativa.', 'info');
+        return false;
     }
 
     // Remove active class from all nav buttons
@@ -1676,25 +1817,30 @@ function showTab(tabName) {
 
     // Show selected tab
     const selectedTab = document.getElementById(`${tabName}Tab`);
-    if (selectedTab) {
-        selectedTab.classList.remove('hidden');
-    }
+    if (!selectedTab) return false;
+    selectedTab.classList.remove('hidden');
     
     // Add active class to clicked button
-    const navTabName = ['measurements', 'activities', 'achievements'].includes(tabName) ? 'stats' : tabName;
-    const activeBtn = document.querySelector(`.nav-btn[onclick="showTab('${navTabName}')"]`);
+    const navTabName = tabName === 'chat'
+        ? lastPrimaryTab
+        : (['measurements', 'activities', 'personalRecords', 'achievements'].includes(tabName) ? 'progress' : tabName);
+    const activeBtn = document.querySelector(`.nav-btn[data-app-view="${navTabName}"]`);
     if (activeBtn) {
         activeBtn.classList.add('active');
         activeBtn.setAttribute('aria-current', 'page');
     }
     
     currentTab = tabName;
+    if (PRIMARY_VIEWS.has(tabName)) lastPrimaryTab = tabName;
     document.body.dataset.activeTab = tabName;
+    const routeStatus = getElement('routeStatus');
+    if (routeStatus) routeStatus.textContent = `${VIEW_LABELS[tabName] || 'Seção'} aberta`;
+    syncViewPath(tabName, options.history || 'push');
     window.scrollTo({ top: 0, behavior: 'instant' });
     
     if (!currentUser) {
         renderGuestPresentation(tabName);
-        return;
+        return true;
     }
 
     getElement('guestDailySummary')?.classList.add('hidden');
@@ -1704,25 +1850,36 @@ function showTab(tabName) {
         loadTodayCardapio();
     } else if (tabName === 'measurements') {
         loadMeasurements();
-    } else if (tabName === 'stats') {
-        loadStats();
         loadMeasurementSummary();
+    } else if (tabName === 'progress') {
         window.loadProgressOverview?.();
-        loadRecentActivities();
     } else if (tabName === 'activities') {
-        window.loadWorkoutActivities?.();
+        if (!options.exerciseProgress) window.loadWorkoutActivities?.();
+    } else if (tabName === 'personalRecords') {
+        window.loadPersonalRecords?.();
     } else if (tabName === 'achievements') {
         loadAchievementsTab();
-    } else if (tabName === 'diet_plans') { // Carrega planos de dieta
-        loadDietPlans();
+    } else if (tabName === 'diet_plans') {
+        loadDietDailyScreen();
     } else if (tabName === 'workout_plans') { // Carrega planos de treino
         loadWorkoutPlans();
     } else if (tabName === 'professional') {
         window.loadProfessionalDashboard?.();
     }
+    return true;
 }
 
+function returnFromAssistant() {
+    showTab(lastPrimaryTab || 'diet');
+}
+
+window.addEventListener('popstate', () => {
+    const view = viewForPath();
+    if (view) showTab(view, { history: 'none' });
+});
+
 async function openPlansModal() {
+    window.analytics?.track('paywall_viewed', { surface: 'plans_modal' });
     openAppModal(getElement('plansModal'));
     const grid = getElement('plansGrid');
     try {
@@ -1744,7 +1901,7 @@ async function openPlansModal() {
                 action = '';
             } else if (plan.code === 'premium_student') {
                 action = data.provider_configured
-                    ? `<button type="button" class="btn-primary" onclick="startBillingCheckout('${plan.code}', this)">Assinar por R$ ${Number(plan.price_brl).toFixed(0)}/mês</button>`
+                    ? `<button type="button" class="btn-primary" onclick="startBillingCheckout('${plan.code}', this)">Escolher pagamento · R$ ${Number(plan.price_brl).toFixed(0)}</button>`
                     : '<button type="button" class="btn-primary" disabled>Pagamento em breve</button>';
             } else {
                 action = professionalPlanAction(plan, data.provider_configured);
@@ -1759,7 +1916,9 @@ async function openPlansModal() {
         }).join('');
         renderSubscriptionManagement(data.provider_configured);
         getElement('billingNotice').textContent = data.provider_configured
-            ? 'Cartão renova automaticamente. No PIX, uma nova cobrança é gerada todo mês.'
+            ? (data.provider_environment === 'sandbox'
+                ? 'Ambiente de testes (Sandbox): nenhum valor real será movimentado.'
+                : 'Cartão renova automaticamente. PIX libera 30 dias e não possui renovação automática.')
             : 'O pagamento será habilitado após a configuração do provedor.';
     } catch (error) {
         grid.innerHTML = `<p class="empty-state">${escapeHtml(error.message)}</p>`;
@@ -1776,7 +1935,7 @@ function professionalPlanAction(plan, providerConfigured) {
         return `<p class="pricing-status">Análise em andamento${application.plan_code !== plan.code ? ` (plano: ${escapeHtml(application.plan_code)})` : ''}.</p>`;
     }
     if (!providerConfigured) return '<button type="button" class="btn-primary" disabled>Pagamento em breve</button>';
-    return `<button type="button" class="btn-primary" onclick="startBillingCheckout('${plan.code}', this)">Assinar por R$ ${Number(plan.price_brl).toFixed(0)}/mês</button>`;
+    return `<button type="button" class="btn-primary" onclick="startBillingCheckout('${plan.code}', this)">Escolher pagamento · R$ ${Number(plan.price_brl).toFixed(0)}</button>`;
 }
 
 function showProfessionalRequestForm(planCode) {
@@ -1819,27 +1978,39 @@ async function submitProfessionalApplication(event) {
     }
 }
 
-async function startBillingCheckout(planCode, button) {
+let pendingBillingCheckout = null;
+
+function startBillingCheckout(planCode, button) {
     if (!requireAuth('Crie sua conta para assinar e desbloquear o plano Premium.', { mode: 'register' })) return;
+    pendingBillingCheckout = { planCode, button };
+    openAppModal(getElement('billingPaymentModal'));
+}
+
+function closeBillingPaymentModal() {
+    closeAppModal(getElement('billingPaymentModal'));
+    pendingBillingCheckout = null;
+}
+
+async function confirmBillingCheckout(paymentMethod) {
+    if (!pendingBillingCheckout) return;
+    const { planCode, button } = pendingBillingCheckout;
     if (button) button.disabled = true;
+    document.querySelectorAll('#billingPaymentModal .billing-payment-options button').forEach(option => { option.disabled = true; });
     try {
         const response = await fetch(`${API_BASE}/billing/checkout`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({ plan_code: planCode, payment_method: choosePaymentMethod() })
+            body: JSON.stringify({ plan_code: planCode, payment_method: paymentMethod })
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Não foi possível iniciar o pagamento.');
         window.location.href = data.checkout_url;
     } catch (error) {
         if (button) button.disabled = false;
+        document.querySelectorAll('#billingPaymentModal .billing-payment-options button').forEach(option => { option.disabled = false; });
         showToast(error.message, 'error');
     }
-}
-
-function choosePaymentMethod() {
-    return window.confirm('Usar cartão de crédito (renovação automática)?\n\nOK = Cartão\nCancelar = PIX mensal') ? 'credit_card' : 'pix';
 }
 
 function renderSubscriptionManagement(providerConfigured) {
@@ -1853,10 +2024,15 @@ function renderSubscriptionManagement(providerConfigured) {
             const subscription = data.subscription;
             if (!subscription || subscription.status !== 'active') return;
             const until = subscription.current_period_end ? new Date(subscription.current_period_end).toLocaleDateString('pt-BR') : null;
+            const isPix = subscription.provider === 'asaas_pix';
+            const renewalAvailable = data.pix_renewal_available_at && new Date(data.pix_renewal_available_at) <= new Date();
+            const managementAction = isPix
+                ? (renewalAvailable ? `<button type="button" class="btn-secondary" onclick="startBillingCheckout('${escapeHtml(subscription.plan_code)}', this)">Renovar por PIX</button>` : '')
+                : (subscription.provider === 'asaas' && providerConfigured ? '<button type="button" class="btn-secondary" onclick="cancelMySubscription()">Cancelar assinatura</button>' : '');
             container.innerHTML = `
                 <section class="subscription-manage">
-                    <div><strong>${escapeHtml(subscription.plan_code)}</strong>${until ? `<small>Ativo até ${escapeHtml(until)}</small>` : ''}</div>
-                    ${providerConfigured ? '<button type="button" class="btn-secondary" onclick="cancelMySubscription()">Cancelar assinatura</button>' : ''}
+                    <div><strong>${isPix ? 'Acesso PIX' : escapeHtml(subscription.plan_code)}</strong>${until ? `<small>Ativo até ${escapeHtml(until)}</small>` : ''}${isPix && !renewalAvailable ? '<small>A renovação abre nos últimos 7 dias.</small>' : ''}</div>
+                    ${managementAction}
                 </section>`;
         })
         .catch(() => {});
@@ -1893,6 +2069,7 @@ function showLogin() {
 }
 
 function showRegister() {
+    window.analytics?.track('signup_started', { surface: 'auth_modal' });
     const loginForm = getElement("loginForm");
     const registerForm = getElement("registerForm");
     const loginTab = document.querySelector('.tab-btn:first-child');
@@ -1927,11 +2104,15 @@ function getModalFocusable(modal) {
 }
 
 function updateModalBackground(modal) {
+    document.querySelectorAll(".modal.modal--active").forEach(element => {
+        element.classList.remove("modal--active");
+    });
     document.querySelectorAll("[data-modal-background-inert]").forEach(element => {
         element.inert = false;
         delete element.dataset.modalBackgroundInert;
     });
     if (!modal) return;
+    modal.classList.add("modal--active");
 
     const background = modal.parentElement === document.body
         ? [getElement("mainScreen")]
@@ -2004,7 +2185,13 @@ function finalizeModalClose(modal) {
     }
     modal.style.opacity = "";
     modal.classList.remove("show");
+    modal.classList.remove("modal--active");
     modal.setAttribute("aria-hidden", "true");
+    document.querySelectorAll(".modal.show").forEach(otherModal => {
+        if (otherModal._previousActiveModal === modal) {
+            otherModal._previousActiveModal = modal._previousActiveModal;
+        }
+    });
     if (activeModal === modal) {
         const previousModal = modal._previousActiveModal?.classList.contains("show") ? modal._previousActiveModal : null;
         activeModal = previousModal;
@@ -2020,6 +2207,7 @@ function finalizeModalClose(modal) {
 
 function closeAppModal(modal) {
     if (!modal) return;
+    if (modal.id === "dietModal" && window.DietEntryFlow?.canClose() === false) return false;
     if (modal.id === 'loginScreen' && !currentUser) pendingAuthIntent = null;
     const fluid = typeof Fluid !== "undefined" ? Fluid : null;
     const content = modal.querySelector(".modal-content");
@@ -2075,33 +2263,31 @@ document.addEventListener("keydown", function(event) {
 
 function showAddDietModal() {
     if (!requireAuth('Entre para registrar suas refeições.', { resume: showAddDietModal })) return;
+    pendingDietDailyContext = null;
     const modal = getElement("dietModal");
     const title = getElement("dietModalTitle");
     const form = getElement("dietForm");
     
-    if (title) title.textContent = "Adicionar Registro de Dieta";
+    if (title) title.textContent = "Registrar refeição";
     if (form) form.reset();
-    dietPhoto = null;
-    const photoInput = getElement("dietPhotoInput");
-    if (photoInput) photoInput.value = "";
-    const photoPreview = getElement("dietPhotoPreview");
-    if (photoPreview) photoPreview.classList.add("hidden");
-    const photoImg = getElement("dietPhotoPreviewImg");
-    if (photoImg) photoImg.removeAttribute("src");
-    
+    modal?.querySelectorAll('details').forEach(detail => { detail.open = false; });
+    if (getElement('precisionBadge')) getElement('precisionBadge').textContent = '';
+    if (getElement('dietDate')) getElement('dietDate').disabled = false;
+    if (getElement('dietMeal')) getElement('dietMeal').disabled = false;
     // Set today's date
     const dietDate = getElement("dietDate");
     if (dietDate) {
         dietDate.value = localDateInputValue();
     }
-    syncDietDateChips();
     syncChoiceCards();
+    window.DietEntryFlow?.begin();
     openAppModal(modal);
 }
 
 function closeDietModal() {
     const modal = getElement("dietModal");
-    closeAppModal(modal);
+    if (closeAppModal(modal) === false) return;
+    pendingDietDailyContext = null;
     clearForms();
 }
 
@@ -2130,6 +2316,7 @@ function closeMeasurementModal() {
 
 function closeProfileModal() {
     pendingPostProfileResume = null;
+    pendingProfileRequiredFields = [];
     const modal = getElement("profileModal");
     closeAppModal(modal);
 }
@@ -2169,52 +2356,6 @@ async function openProfileEditor() {
     }
 }
 
-function safeExternalUrl(value) {
-    try {
-        const url = new URL(String(value || ""));
-        return ["http:", "https:"].includes(url.protocol) ? url.href : "#";
-    } catch (error) {
-        return "#";
-    }
-}
-
-function openExerciseCredits() {
-    const container = getElement('exerciseCreditsList');
-    const entries = Object.values(window.EXERCISE_MEDIA || {});
-    if (!container) return;
-
-    const grouped = new Map();
-    entries.forEach(entry => {
-        const group = grouped.get(entry.image) || { ...entry, names: [] };
-        group.names.push(entry.name);
-        grouped.set(entry.image, group);
-    });
-    const credits = Array.from(grouped.values()).sort((left, right) => left.names[0].localeCompare(right.names[0], 'pt-BR'));
-    container.innerHTML = credits.length ? credits.map(entry => {
-        const authorUrl = safeExternalUrl(entry.author_url);
-        const sourceUrl = safeExternalUrl(entry.object_url || entry.derivative_source_url || entry.source_url);
-        const author = escapeHtml(entry.author || 'wger community');
-        return `
-            <article class="exercise-credit-card">
-                <img src="${escapeHtml(entry.image)}" alt="" loading="lazy">
-                <div class="exercise-credit-card__body">
-                    <h4>${entry.names.map(escapeHtml).join(', ')}</h4>
-                    <p>Imagem por ${authorUrl === '#' ? `<strong>${author}</strong>` : `<a href="${escapeHtml(authorUrl)}" target="_blank" rel="noopener noreferrer">${author}</a>`}${entry.license_title ? ` · ${escapeHtml(entry.license_title)}` : ''}</p>
-                    <div class="exercise-credit-card__links">
-                        <a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Fonte da imagem <i class="fas fa-arrow-up-right-from-square"></i></a>
-                        <a href="${escapeHtml(safeExternalUrl(entry.license_url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(entry.license || 'Creative Commons')}</a>
-                        ${entry.is_ai_generated ? '<span><i class="fas fa-wand-magic-sparkles"></i> Gerada por IA</span>' : ''}
-                    </div>
-                </div>
-            </article>`;
-    }).join('') : '<div class="empty-state"><strong>Nenhuma mídia externa importada.</strong></div>';
-    openAppModal(getElement('exerciseCreditsModal'));
-}
-
-function closeExerciseCredits() {
-    closeAppModal(getElement('exerciseCreditsModal'));
-}
-
 function closeViewDietPlanModal() {
     const modal = getElement("viewDietPlanModal");
     closeAppModal(modal);
@@ -2233,8 +2374,9 @@ async function loadDietEntries(options = {}) {
         return;
     }
     if (options.showLoading !== false) showGlobalLoading();
-    const startDate = getElement("dietStartDate")?.value;
-    const endDate = getElement("dietEndDate")?.value;
+    const todayOnly = currentTab === 'diet';
+    const startDate = options.startDate || (todayOnly ? localDateInputValue() : getElement("dietStartDate")?.value);
+    const endDate = options.endDate || (todayOnly ? localDateInputValue() : getElement("dietEndDate")?.value);
     const requestRange = { startDate: startDate || null, endDate: endDate || null };
     dietEntriesLoadRange = requestRange;
     
@@ -2262,6 +2404,7 @@ async function loadDietEntries(options = {}) {
         if (entries) {
             dietEntries = entries;
             renderDietTable();
+            renderTodayRecentMeals();
         }
     } catch (error) {
         console.error('Error loading diet entries:', error);
@@ -2273,47 +2416,87 @@ async function loadDietEntries(options = {}) {
     }
 }
 
-async function loadMeasurements() {
+function setCurrentUser(user) {
+    if (currentUser?.id !== user?.id) {
+        clearMeasurements();
+        window.DietEntryFlow?.reset();
+        if (getElement("dietModal")?.classList.contains("show")) closeDietModal();
+    }
+    currentUser = user;
+}
+
+function clearMeasurements() {
+    measurementAccountVersion += 1;
+    measurementRequestToken += 1;
+    measurementSummaryToken += 1;
+    if (measurementLoading) hideGlobalLoading();
+    measurementLoading = false;
+    measurements = [];
+    measurementHasMore = false;
+    measurementRange = null;
+    ['measurementTableBody', 'measurementSummary'].forEach(id => {
+        const element = getElement(id);
+        if (element) element.innerHTML = '';
+    });
+    ['measurementStartDate', 'measurementEndDate'].forEach(id => {
+        const element = getElement(id);
+        if (element) element.value = '';
+    });
+    if (getElement('bodyMetric')) getElement('bodyMetric').value = 'weight';
+    if (getElement('bodyPeriod')) getElement('bodyPeriod').value = 'all';
+    getElement('measurementForm')?.reset();
+    const modal = getElement('measurementModal');
+    if (modal?.classList.contains('show')) closeAppModal(modal);
+}
+
+async function loadMeasurements(loadMore = false) {
     if (!currentUser) {
+        clearMeasurements();
         renderGuestPresentation('measurements');
         return;
     }
-    showGlobalLoading();
-    const startDate = getElement("measurementStartDate")?.value;
-    const endDate = getElement("measurementEndDate")?.value;
+    const startDate = getElement("measurementStartDate")?.value || '';
+    const endDate = getElement("measurementEndDate")?.value || '';
+    const range = `${startDate}/${endDate}`;
+    const append = loadMore === true && range === measurementRange;
+    if (append && (measurementLoading || !measurementHasMore)) return;
     const token = ++measurementRequestToken;
-    
+    const accountVersion = measurementAccountVersion;
+    if (!append) {
+        measurements = [];
+        measurementHasMore = false;
+        measurementRange = range;
+        getElement('measurementTableBody').innerHTML = '';
+    }
+    measurementLoading = true;
+    showGlobalLoading();
     try {
-        let url = `${API_BASE}/measurements`;
-        const params = new URLSearchParams();
-        if (startDate) params.append('start_date', startDate);
-        if (endDate) params.append('end_date', endDate);
-        params.append('limit', '20');
-        if (measurements.length && !startDate && !endDate) params.append('offset', String(measurements.length));
-        if (params.toString()) url += '?' + params.toString();
-        
-        const response = await fetch(url, {
-            credentials: 'include'
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            const items = Array.isArray(data) ? data : (data.items || []);
-            if (token !== measurementRequestToken) return;
-            if (params.has('offset') && measurements.length) {
-                measurements = [...measurements, ...items];
-            } else {
-                measurements = items;
-            }
-            measurementHasMore = items.length >= 20;
-            renderMeasurementTable();
-        } else {
-            console.error('Failed to load measurements');
+        if (startDate && endDate && startDate > endDate) {
+            throw new Error('A data inicial deve ser anterior ou igual à data final.');
         }
+        const params = new URLSearchParams({ limit: '20' });
+        if (startDate) params.set('start_date', startDate);
+        if (endDate) params.set('end_date', endDate);
+        if (append) params.set('offset', String(measurements.length));
+        const response = await fetch(`${API_BASE}/measurements?${params}`, { credentials: 'include' });
+        const data = await response.json();
+        if (token !== measurementRequestToken || accountVersion !== measurementAccountVersion) return;
+        if (!response.ok) throw new Error(data.error || 'Não foi possível carregar suas medidas.');
+        const items = Array.isArray(data) ? data : (data.items || []);
+        measurements = append ? [...measurements, ...items] : items;
+        measurementHasMore = items.length >= 20;
+        renderMeasurementTable();
     } catch (error) {
-        console.error('Error loading measurements:', error);
+        if (token === measurementRequestToken && accountVersion === measurementAccountVersion) {
+            showToast(error.message || 'Não foi possível carregar suas medidas.', 'error');
+            const list = getElement('measurementTableBody');
+            list?.insertAdjacentHTML('beforeend', `<div class="progress-feedback" role="alert"><p>${escapeHtml(error.message)}</p><button type="button" onclick="this.parentElement.remove(); loadMeasurements(${append});">Tentar novamente</button></div>`);
+        }
     } finally {
-        if (token === measurementRequestToken) hideGlobalLoading();
+        if (token === measurementRequestToken) {
+            measurementLoading = false;
+            hideGlobalLoading();
+        }
     }
 }
 
@@ -2323,104 +2506,23 @@ async function loadMeasurementSummary() {
         if (summary) summary.innerHTML = '';
         return;
     }
+    summary.innerHTML = '<p role="status">Carregando evolução...</p>';
+    const token = ++measurementSummaryToken;
+    const accountVersion = measurementAccountVersion;
     try {
-        const response = await fetch(`${API_BASE}/measurements?limit=2`, { credentials: 'include' });
-        if (!response.ok) { summary.innerHTML = ''; return; }
+        const response = await fetch(`${API_BASE}/measurements/summary?${new URLSearchParams({
+            metric: getElement('bodyMetric')?.value || 'weight',
+            start_date: getElement('measurementStartDate')?.value || '',
+            end_date: getElement('measurementEndDate')?.value || '',
+        })}`, { credentials: 'include' });
         const data = await response.json();
-        const items = Array.isArray(data) ? data : (data.items || []);
-        if (!items.length) {
-            summary.innerHTML = '<div class="measurement-summary__empty"><i class="fas fa-ruler-combined"></i><div><strong>Nenhuma medição ainda</strong><p>Registre a primeira para acompanhar sua evolução.</p></div><button type="button" onclick="showAddMeasurementModal()">Adicionar medição</button></div>';
-            return;
-        }
-        const latest = items[0];
-        const previous = items[1];
-        const weightDiff = latest.weight != null && previous?.weight != null ? (latest.weight - previous.weight).toFixed(1) : null;
-        summary.innerHTML = `
-            <div class="measurement-summary__hero">
-                <div><small>Peso atual</small><strong>${escapeHtml(latest.weight)} kg</strong></div>
-                ${weightDiff ? `<div class="measurement-summary__delta ${Number(weightDiff) > 0 ? 'measurement-summary__delta--up' : 'measurement-summary__delta--down'}"><i class="fas fa-${Number(weightDiff) > 0 ? 'arrow-up' : 'arrow-down'}"></i> ${weightDiff.replace('-', '−')} kg</div>` : ''}
-            </div>
-            <div class="measurement-summary__meta">
-                ${latest.body_fat != null ? `<span>${escapeHtml(latest.body_fat)}% gordura</span>` : ''}
-                ${latest.muscle_mass != null ? `<span>${escapeHtml(latest.muscle_mass)} kg massa</span>` : ''}
-                <span>${formatDate(latest.date)}</span>
-            </div>
-        `;
+        if (token !== measurementSummaryToken || accountVersion !== measurementAccountVersion) return;
+        if (!response.ok) throw new Error(data.error || 'Não foi possível carregar o resumo.');
+        summary.innerHTML = renderBodyEvolution(data, getElement('bodyMetric')?.value || 'weight');
     } catch (error) {
-        summary.innerHTML = '';
-    }
-}
-
-async function loadRecentActivities() {
-    const container = getElement('profileRecentActivities');
-    if (!container || !currentUser) {
-        if (container) container.innerHTML = '';
-        return;
-    }
-    container.innerHTML = '<div class="plans-loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Carregando atividades...</span></div>';
-    try {
-        const response = await fetch(`${API_BASE}/activities?limit=3`, { credentials: 'include' });
-        if (!response.ok) { container.innerHTML = ''; return; }
-        const data = await response.json();
-        const items = Array.isArray(data) ? data : (data.items || []);
-        if (!items.length) {
-            container.innerHTML = '<div class="profile-recent-activities__empty"><i class="fas fa-person-running"></i><p>Nenhuma atividade registrada ainda.</p></div>';
-            return;
+        if (token === measurementSummaryToken && accountVersion === measurementAccountVersion) {
+            summary.innerHTML = `<div role="alert"><p class="session-inline-error">${escapeHtml(error.message)}</p><button type="button" onclick="loadMeasurementSummary()">Tentar novamente</button></div>`;
         }
-        container.innerHTML = items.map(activity => {
-            const completedAt = new Date(activity.completed_at);
-            const time = completedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-            const duration = Math.round(Number(activity.duration_seconds || 0) / 60);
-            return `<article class="profile-recent-card" onclick="showTab('activities')" role="button" tabindex="0">
-                <div class="profile-recent-card__icon"><i class="fas fa-dumbbell"></i></div>
-                <div><strong>${escapeHtml(activity.workout_name)}</strong><p>${time} · ${duration}min · ${activity.exercises_performed || 0} exercícios</p></div>
-                <i class="fas fa-chevron-right" aria-hidden="true"></i>
-            </article>`;
-        }).join('');
-    } catch (error) {
-        container.innerHTML = '';
-    }
-}
-
-async function loadStats() {
-    if (!currentUser) {
-        renderGuestPresentation('stats');
-        return;
-    }
-    try {
-        const response = await fetch(`${API_BASE}/stats`, {
-            credentials: 'include'
-        });
-        
-        if (response.ok) {
-            const stats = await response.json();
-            
-            const latestMeasurement = getElement("latestMeasurement");
-            const totalDietEntries = getElement("totalDietEntries");
-            const recentDietEntries = getElement("recentDietEntries");
-            
-            if (latestMeasurement) {
-                if (stats.latest_measurement) {
-                    const m = stats.latest_measurement;
-                    latestMeasurement.innerHTML = `
-                        <strong>${m.weight != null ? `${escapeHtml(m.weight)} kg` : 'Sem peso'}</strong>
-                        <span>${m.body_fat != null ? `${escapeHtml(m.body_fat)}% de gordura` : 'Composição não informada'} · ${formatDate(m.date)}</span>
-                    `;
-                } else {
-                    latestMeasurement.textContent = "Nenhuma medição registrada";
-                }
-            }
-            
-            if (totalDietEntries) {
-                totalDietEntries.textContent = stats.total_diet_entries || 0;
-            }
-            
-            if (recentDietEntries) {
-                recentDietEntries.textContent = stats.recent_diet_entries || 0;
-            }
-        }
-    } catch (error) {
-        console.error('Error loading stats:', error);
     }
 }
 
@@ -2447,7 +2549,8 @@ function exerciseImagePath(_exerciseName, catalogKey) {
 }
 
 function exerciseFallbackImagePath(catalogKey) {
-    return window.EXERCISE_MEDIA?.[String(catalogKey || "")]?.image || "";
+    const path = window.EXERCISE_MEDIA?.[String(catalogKey || "")]?.image || "";
+    return path && !path.startsWith("/") ? `/${path}` : path;
 }
 
 function exerciseImageMarkup(exercise, escapedName) {
@@ -2502,24 +2605,116 @@ function mealIconClass(mealType) {
     if (normalized.includes('almoço')) return 'fa-sun';
     if (normalized.includes('jantar') || normalized.includes('ceia')) return 'fa-moon';
     if (normalized.includes('lanche')) return 'fa-apple-whole';
-    return 'fa-bowl-food';
+    return 'fa-utensils';
+}
+
+function mealIconName(mealType) {
+    const normalized = String(mealType || '').toLowerCase();
+    if (normalized.includes('café') || normalized.includes('manha')) return 'coffee';
+    if (normalized.includes('almoço')) return 'sun';
+    if (normalized.includes('jantar') || normalized.includes('ceia')) return 'moon';
+    if (normalized.includes('lanche')) return 'apple';
+    return 'utensils';
+}
+
+let expandedTodayMacro = null;
+
+function renderTodayMacroDetails() {
+    const panel = getElement('todayMacroDetails');
+    const section = getElement('todayNutrition');
+    if (!panel || !section) return;
+    const button = expandedTodayMacro
+        ? section.querySelector(`[data-today-macro="${expandedTodayMacro}"]`)
+        : null;
+    section.querySelectorAll('[data-today-macro]').forEach(item => {
+        const selected = item === button;
+        item.classList.toggle('is-expanded', selected);
+        item.setAttribute('aria-expanded', String(selected));
+    });
+    section.classList.toggle('has-expanded-macro', Boolean(button));
+    panel.setAttribute('aria-hidden', String(!button));
+    if (!button) return;
+
+    const consumed = Number(button.dataset.consumed) || 0;
+    const target = Number(button.dataset.target);
+    const hasTarget = Number.isFinite(target) && target > 0;
+    const unit = button.dataset.unit || '';
+    const percentage = hasTarget ? Math.round((consumed / target) * 100) : null;
+    const balance = hasTarget ? target - consumed : null;
+    const balanceLabel = balance == null
+        ? 'Meta não definida'
+        : balance >= 0
+            ? `Faltam ${Math.round(balance).toLocaleString('pt-BR')} ${unit}`
+            : `Excedeu ${Math.round(Math.abs(balance)).toLocaleString('pt-BR')} ${unit}`;
+    panel.className = `today-macro-details today-macro-details--${expandedTodayMacro}`;
+    panel.querySelector('.today-macro-details__inner').innerHTML = `
+        <span><small>Consumido</small><strong>${Math.round(consumed).toLocaleString('pt-BR')} ${unit}</strong></span>
+        <span><small>Meta</small><strong>${hasTarget ? `${Math.round(target).toLocaleString('pt-BR')} ${unit}` : '—'}</strong></span>
+        <span><small>Progresso</small><strong>${percentage == null ? '—' : `${percentage}%`}</strong></span>
+        <span><small>Saldo</small><strong>${balanceLabel}</strong></span>`;
+}
+
+function bindTodayMacroControls() {
+    const grid = document.querySelector('#todayNutrition .today-macro-grid');
+    if (!grid) return;
+    grid.addEventListener('click', event => {
+        const button = event.target.closest('[data-today-macro]');
+        if (!button) return;
+        const macro = button.dataset.todayMacro;
+        expandedTodayMacro = expandedTodayMacro === macro ? null : macro;
+        renderTodayMacroDetails();
+    });
 }
 
 function updateDailySummary() {
     const today = localDateInputValue();
-    const totals = dietEntries.filter(entry => entry.date === today).reduce((sum, entry) => ({
+    const hasDailyView = todayDietDay?.date === today;
+    const entries = hasDailyView
+        ? [
+            ...(todayDietDay.manual_entries || []),
+            ...(todayDietDay.slots || []).map(slot => slot.entry).filter(Boolean)
+        ]
+        : dietEntries.filter(entry => entry.date === today);
+    const totals = hasDailyView ? todayDietDay.totals : entries.reduce((sum, entry) => ({
         calories: sum.calories + (Number(entry.calories) || 0),
         protein: sum.protein + (Number(entry.protein) || 0),
         carbs: sum.carbs + (Number(entry.carbs) || 0),
         fat: sum.fat + (Number(entry.fat) || 0)
     }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+    const entryCount = entries.length;
+    getElement('todayNutrition')?.classList.toggle('hidden', !entryCount || !currentUser);
+    const count = getElement('todayMealCount');
+    if (count) count.textContent = entryCount ? `${entryCount} ${entryCount === 1 ? 'refeição registrada' : 'refeições registradas'}` : 'Nenhuma refeição registrada';
+    const nutritionCount = getElement('todayNutritionCount');
+    if (nutritionCount) nutritionCount.textContent = entryCount ? `${entryCount} ${entryCount === 1 ? 'refeição' : 'refeições'}` : '';
+    const planTargets = cardapioActivePlan?.nutrition_targets || {};
+    const targetKeys = { calories: 'targetCalories', protein: 'targetProtein', carbs: 'targetCarbs', fat: 'targetFat' };
+    const labels = { calories: 'kcal', protein: 'g', carbs: 'g', fat: 'g' };
     Object.entries(totals).forEach(([key, value]) => {
         const rounded = Math.round(value);
+        const target = Number(hasDailyView ? todayDietDay.targets?.[key] : planTargets[targetKeys[key]]);
+        const hasTarget = Number.isFinite(target) && target > 0;
         const valueElement = getElement(`today${key.charAt(0).toUpperCase()}${key.slice(1)}`);
+        const targetElement = getElement(`today${key.charAt(0).toUpperCase()}${key.slice(1)}Target`);
         const progressElement = getElement(`today${key.charAt(0).toUpperCase()}${key.slice(1)}Progress`);
-        if (valueElement) valueElement.textContent = key === 'calories' ? rounded.toLocaleString('pt-BR') : `${rounded} g`;
-        if (progressElement) progressElement.style.width = `${Math.min((value / dailyNutritionTargets[key]) * 100, 100)}%`;
+        const macroButton = document.querySelector(`[data-today-macro="${key}"]`);
+        if (valueElement) valueElement.textContent = `${rounded.toLocaleString('pt-BR')} ${labels[key]}`;
+        if (targetElement) {
+            targetElement.textContent = hasTarget ? `de ${Math.round(target).toLocaleString('pt-BR')} ${labels[key]}` : '';
+            targetElement.classList.toggle('hidden', !hasTarget);
+        }
+        if (progressElement) {
+            const progress = hasTarget ? Math.min(Math.max((value / target) * 100, 0), 100) : 0;
+            progressElement.style.setProperty('--macro-progress', `${progress}%`);
+            progressElement.classList.toggle('is-unavailable', !hasTarget);
+        }
+        if (macroButton) {
+            macroButton.dataset.consumed = String(Number(value) || 0);
+            macroButton.dataset.target = hasTarget ? String(target) : '';
+            macroButton.dataset.unit = labels[key];
+        }
     });
+    renderTodayMacroDetails();
 }
 
 function renderDietTable() {
@@ -2530,7 +2725,7 @@ function renderDietTable() {
     if (!dietEntries.length) {
         container.innerHTML = `
             <div class="empty-state empty-state--compact">
-                <span><i class="fas fa-bowl-food"></i></span>
+                <span><i class="fas fa-utensils"></i></span>
                 <div><strong>Nenhuma refeição neste período</strong><p>Registre sua primeira refeição para acompanhar os macros.</p></div>
             </div>`;
         return;
@@ -2552,6 +2747,18 @@ function renderDietTable() {
         </article>`).join('');
 }
 
+function renderTodayRecentMeals() {
+    const container = getElement('todayRecentMeals');
+    if (!container) return;
+    const today = localDateInputValue();
+    const entries = dietEntries.filter(entry => entry.date === today).slice(0, 3);
+    if (!entries.length) {
+        container.innerHTML = '<div class="empty-state empty-state--compact"><span><i class="fas fa-utensils"></i></span><div><strong>Nenhuma refeição registrada</strong><p>Seu primeiro registro aparecerá aqui.</p></div></div>';
+        return;
+    }
+    container.innerHTML = entries.map(entry => `<article class="diary-meal-card"><span class="diary-meal-card__icon"><i class="fas ${mealIconClass(entry.meal_type)}"></i></span><div class="diary-meal-card__content"><div><strong>${escapeHtml(getMealTypeLabel(entry.meal_type))}</strong></div><p>${escapeHtml(entry.description)}</p></div><div class="diary-meal-card__energy"><strong>${Math.round(Number(entry.calories) || 0)}</strong><small>kcal</small></div></article>`).join('');
+}
+
 function measurementMetric(label, value, unit = '') {
     if (value == null || value === '') return '';
     return `<div><small>${label}</small><strong>${escapeHtml(value)}${unit}</strong></div>`;
@@ -2560,9 +2767,16 @@ function measurementMetric(label, value, unit = '') {
 // --- CARDÁPIO DE HOJE (sincronizado com o plano de dieta) ---
 let cardapioActivePlan = null;
 let cardapioDay = 1;
-let cardapioTodayEntries = [];
 let pendingDietDaySuggestion = null;
-let dailyNutritionTargets = { calories: 2200, protein: 160, carbs: 220, fat: 70 };
+let todayDietDay = null;
+let todayDietOptionsSlotKey = null;
+let pendingDietDailyContext = null;
+let todayDietMutationSlotKey = null;
+let dietDailyView = null;
+let dietDailyDate = null;
+let dietDailyOptionsSlotKey = null;
+let dietDailyMutationSlotKey = null;
+let dietPlansLibraryLoaded = false;
 
 function dietPlanItemText(item) {
     if (!item || typeof item !== "object") return String(item || "");
@@ -2572,7 +2786,8 @@ function dietPlanItemText(item) {
 }
 
 function dietPlanItemsText(meal) {
-    return Array.isArray(meal.items) ? meal.items.map(dietPlanItemText).filter(Boolean).join(", ") : (meal.description || "");
+    const items = Array.isArray(meal.items) ? meal.items.map(dietPlanItemText).filter(Boolean) : [];
+    return items.length ? items.join(", ") : (meal.description || "");
 }
 
 function getStoredCardapioDay() {
@@ -2591,27 +2806,21 @@ function normalizeMealType(value) {
 
 function cardapioMealTypeToEntry(mealType) {
     const norm = normalizeMealType(mealType);
-    if (norm.includes("cafe") || norm.includes("manha")) return "Café da manhã";
-    if (norm.includes("almoco")) return "Almoço";
-    if (norm.includes("jantar")) return "Jantar";
     if (norm.includes("lanche") && norm.includes("tarde")) return "Lanche da tarde";
     if (norm.includes("lanche")) return "Lanche da manhã";
+    if (norm.includes("cafe")) return "Café da manhã";
+    if (norm.includes("almoco")) return "Almoço";
+    if (norm.includes("jantar")) return "Jantar";
     if (norm.includes("ceia")) return "Ceia";
     return mealType || "Café da manhã";
-}
-
-function cardapioTodayEntryKeys() {
-    const keys = new Set();
-    cardapioTodayEntries.forEach(entry => {
-        keys.add(`${entry.date}|${normalizeMealType(entry.meal_type)}`);
-    });
-    return keys;
 }
 
 async function loadTodayCardapio() {
     if (!currentUser) {
         cardapioActivePlan = null;
+        todayDietDay = null;
         renderTodayCardapio(null, null);
+        renderDietCurrentPlanHub(null, null);
         return;
     }
     const section = getElement("todayCardapioSection");
@@ -2619,52 +2828,31 @@ async function loadTodayCardapio() {
     const today = localDateInputValue();
     cardapioDay = getStoredCardapioDay();
 
-    const plansRes = await fetch(`${API_BASE}/diet_plans`, { credentials: 'include' });
-    if (dietEntriesLoadPromise && dietEntriesLoadRange.startDate === today && dietEntriesLoadRange.endDate === today) {
-        const entries = await dietEntriesLoadPromise;
-        cardapioTodayEntries = Array.isArray(entries) ? entries.slice() : [];
-    } else if (dietEntriesLoadRange.startDate === today && dietEntriesLoadRange.endDate === today && Array.isArray(dietEntries)) {
-        cardapioTodayEntries = dietEntries.slice();
+    let dailyResponse;
+    let currentPlanResponse;
+    try {
+        [dailyResponse, currentPlanResponse] = await Promise.all([
+            fetch(`${API_BASE}/diet/days/${encodeURIComponent(today)}`, { credentials: "include" }),
+            fetch(`${API_BASE}/diet_plans/current`, { credentials: "include" })
+        ]);
+    } catch (error) {
+        renderTodayCardapio(null, 'Sem conexão. Seu plano não foi removido. Reconecte e tente novamente.');
+        renderDietCurrentPlanHub(cardapioActivePlan, 'Não foi possível carregar seu plano de dieta.');
+        return;
+    }
+    if (currentPlanResponse.ok) {
+        const currentPlanPayload = await currentPlanResponse.json();
+        cardapioActivePlan = currentPlanPayload.plan || null;
+        renderDietCurrentPlanHub(cardapioActivePlan, null);
     } else {
-        const entriesRes = await fetch(`${API_BASE}/diet?start_date=${today}&end_date=${today}`, { credentials: 'include' });
-        cardapioTodayEntries = entriesRes.ok ? await entriesRes.json() : [];
+        renderDietCurrentPlanHub(cardapioActivePlan, 'Não foi possível carregar seu plano de dieta.');
     }
-
-    if (!plansRes.ok) {
-        renderTodayCardapio(null, 'Não foi possível carregar seu plano de dieta.');
+    if (!dailyResponse.ok) {
+        renderTodayCardapio(null, 'Não foi possível carregar sua alimentação de hoje.');
         return;
     }
-    const plans = await plansRes.json();
-    if (!plans.length) {
-        cardapioActivePlan = null;
-        setDailyNutritionTargets(null);
-        renderTodayCardapio(null, null);
-        return;
-    }
-    const latestPlanId = plans[0].id;
-    const planRes = await fetch(`${API_BASE}/diet_plans/${latestPlanId}`, { credentials: 'include' });
-    if (!planRes.ok) {
-        renderTodayCardapio(null, 'Não foi possível carregar o cardápio do plano.');
-        return;
-    }
-    cardapioActivePlan = await planRes.json();
-    setDailyNutritionTargets(cardapioActivePlan.nutrition_targets);
-    renderTodayCardapio(cardapioActivePlan, null);
-}
-
-function setDailyNutritionTargets(targets) {
-    dailyNutritionTargets = targets ? {
-        calories: Number(targets.targetCalories) || 2200,
-        protein: Number(targets.targetProtein) || 160,
-        carbs: Number(targets.targetCarbs) || 220,
-        fat: Number(targets.targetFat) || 70
-    } : { calories: 2200, protein: 160, carbs: 220, fat: 70 };
-    const labels = { calories: "kcal", protein: "g", carbs: "g", fat: "g" };
-    Object.entries(dailyNutritionTargets).forEach(([key, value]) => {
-        const targetElement = getElement(`today${key.charAt(0).toUpperCase()}${key.slice(1)}Target`);
-        if (targetElement) targetElement.textContent = `de ${Math.round(value).toLocaleString("pt-BR")} ${labels[key]}`;
-    });
-    updateDailySummary();
+    todayDietDay = await dailyResponse.json();
+    renderTodayCardapio(todayDietDay, null);
 }
 
 function editDailyNutritionTargets() {
@@ -2676,83 +2864,66 @@ function editDailyNutritionTargets() {
     if (window.openDietPlanWizardWithPlan) window.openDietPlanWizardWithPlan(cardapioActivePlan);
 }
 
-function renderTodayCardapio(plan, errorMessage) {
-    const chipsEl = getElement("todayDayChips");
-    const bodyEl = getElement("todayCardapioBody");
-    if (!chipsEl || !bodyEl) return;
+function renderTodayCardapio(dailyView, errorMessage) {
+    const bodyEl = getElement('todayCardapioBody');
+    if (!bodyEl) return;
+    updateDailySummary();
+    const register = '<button type="button" class="today-food-primary" onclick="showAddDietModal()">Registrar refeição</button>';
+    if (errorMessage) {
+        bodyEl.innerHTML = `<p role="alert">${escapeHtml(errorMessage)}</p><button type="button" class="text-button" onclick="loadTodayCardapio()">Tentar novamente</button>${register}`;
+        return;
+    }
+    const slots = Array.isArray(dailyView?.slots) ? dailyView.slots : [];
+    const slot = slots.find(item => item.result === 'pending');
+    if (!slot) {
+        const message = !dailyView?.plan ? 'Você pode registrar sua alimentação sem ter um plano.' : slots.length ? 'Todas as refeições planejadas de hoje já têm um resultado.' : 'Sem refeições previstas para hoje.';
+        bodyEl.innerHTML = `<p class="today-muted">${message}</p>${register}`;
+        return;
+    }
+    const alternatives = Array.isArray(slot.alternatives) ? slot.alternatives : [];
+    const meal = alternatives.find(item => Number(item.id) === Number(slot.selected_plan_meal_id)) || alternatives[0];
+    if (!meal) {
+        bodyEl.innerHTML = `<p class="today-muted">Sem opção disponível para esta refeição.</p>${register}`;
+        return;
+    }
+    const optionPosition = alternatives.findIndex(item => Number(item.id) === Number(meal.id)) + 1;
+    const selectorOpen = todayDietOptionsSlotKey === slot.slot_key;
+    const selector = selectorOpen ? `<div class="today-meal-options" aria-label="Alternativas de ${escapeHtml(slot.label)}">${alternatives.map((option, index) => `
+        <button type="button" class="today-meal-option${Number(option.id) === Number(meal.id) ? ' is-selected' : ''}" onclick="selectTodayDietOption('${slot.slot_key}', ${Number(option.id)})" aria-pressed="${Number(option.id) === Number(meal.id)}">
+            <strong>Opção ${index + 1}</strong><span>${escapeHtml(dietPlanItemsText(option))}</span>
+        </button>`).join('')}</div>` : '';
+    const disabled = todayDietMutationSlotKey === slot.slot_key ? ' disabled' : '';
+    bodyEl.innerHTML = `<div class="today-meal"><div class="today-meal__intro"><span class="today-meal__icon"><i data-lucide="${mealIconName(meal.meal_type)}" aria-hidden="true"></i></span><div><p class="today-muted">Opção ${optionPosition} de ${alternatives.length}</p><h3>${escapeHtml(slot.label || meal.meal_type)}</h3></div></div><p class="today-food-description">${escapeHtml(dietPlanItemsText(meal))}</p><button type="button" class="today-food-primary" onclick="quickLogDailyMeal('${slot.slot_key}', 'exact')"${disabled}><i data-lucide="check" aria-hidden="true"></i> Comi isso</button><div class="today-food-secondary"><button type="button" class="text-button" onclick="quickLogDailyMeal('${slot.slot_key}', 'describe')"${disabled}>Comi diferente</button>${alternatives.length > 1 ? `<button type="button" class="text-button" onclick="toggleTodayDietOptions('${slot.slot_key}')" aria-expanded="${selectorOpen}"${disabled}>Trocar opção</button>` : ''}</div>${selector}</div>`;
+}
 
-    const chips = [1, 2, 3].map(day => `
+function renderDietCurrentPlanHub(plan, errorMessage) {
+    const chipsEl = getElement('dietCurrentDayChips');
+    const bodyEl = getElement('dietCurrentPlanBody');
+    if (!chipsEl || !bodyEl) return;
+    chipsEl.innerHTML = [1, 2, 3].map(day => `
         <button type="button" class="day-chip${day === cardapioDay ? ' is-active' : ''}" onclick="setCardapioDay(${day})" aria-pressed="${day === cardapioDay}">Dia ${day}</button>
     `).join('');
-    chipsEl.innerHTML = chips;
-
     if (errorMessage) {
-        bodyEl.innerHTML = `<div class="empty-state empty-state--compact"><span><i class="fas fa-triangle-exclamation"></i></span><div><strong>Cardápio indisponível</strong><p>${escapeHtml(errorMessage)}</p></div></div>`;
+        bodyEl.innerHTML = `<div class="empty-state empty-state--compact"><span><i class="fas fa-triangle-exclamation"></i></span><div><strong>Plano indisponível</strong><p>${escapeHtml(errorMessage)}</p></div><button type="button" class="btn-secondary" onclick="loadTodayCardapio()">Tentar novamente</button></div>`;
         return;
     }
-    if (!plan || !plan.meals || !plan.meals.length) {
-        bodyEl.innerHTML = `<div class="empty-state empty-state--compact"><span><i class="fas fa-seedling"></i></span><div><strong>Sem plano de dieta</strong><p>Crie um plano guiado e acompanhe suas refeições do dia.</p></div><button type="button" class="btn-primary" data-plan-wizard="diet"><i class="fas fa-wand-magic-sparkles"></i> Criar plano</button></div>`;
+    if (!plan?.meals?.length) {
+        bodyEl.innerHTML = `<div class="empty-state empty-state--compact"><span><i class="fas fa-seedling"></i></span><div><strong>Nenhum plano ativo</strong><p>Crie ou selecione um plano alimentar para começar.</p></div><button type="button" class="btn-primary" data-plan-wizard="diet">Criar plano</button></div>`;
         return;
     }
-
-    const dayMeals = plan.meals
+    const meals = plan.meals
         .filter(meal => normalizeMealType(meal.day_of_week) === `dia ${cardapioDay}`)
         .sort((a, b) => (a.order || 0) - (b.order || 0));
-
-const doneKeys = cardapioTodayEntryKeys();
-
-    const pendingMeals = [];
-    const doneMeals = [];
-    dayMeals.forEach(meal => {
-        const entryType = cardapioMealTypeToEntry(meal.meal_type);
-        const isDone = doneKeys.has(`${localDateInputValue()}|${normalizeMealType(entryType)}`);
-        (isDone ? doneMeals : pendingMeals).push({ meal, entryType });
-    });
-
-    const itemMarkup = ({ meal }) => {
-        const items = dietPlanItemsText(meal);
-        return `
-            <article class="cardapio-item">
-                <div class="cardapio-item__head">
-                    <span class="cardapio-item__icon"><i class="fas ${mealIconClass(meal.meal_type)}"></i></span>
-                    <div class="cardapio-item__copy">
-                        <strong>${escapeHtml(meal.meal_type)}</strong>
-                        <p>${escapeHtml(items)}</p>
-                        <div class="cardapio-item__macros"><span>${Math.round(Number(meal.calories) || 0)} kcal</span><span>${Math.round(Number(meal.protein) || 0)}g prot.</span><span>${Math.round(Number(meal.carbs) || 0)}g carb.</span><span>${Math.round(Number(meal.fat) || 0)}g gord.</span></div>
-                    </div>
-                    <span class="cardapio-item__status" aria-hidden="true"><i class="far fa-circle"></i></span>
-                </div>
-                <div class="cardapio-item__actions">
-                    <button type="button" class="btn-quick" onclick="quickLogPlanMeal(${meal.id}, 'exact')"><i class="fas fa-check"></i> Comi exatamente</button>
-                    <button type="button" class="btn-quick btn-quick--soft" onclick="quickLogPlanMeal(${meal.id}, 'describe')"><i class="fas fa-pen"></i> Descrevi diferente</button>
-                    <button type="button" class="entry-action" onclick="openEditPlanMealModal(${meal.id})" aria-label="Editar refeição do plano"><i class="fas fa-pen-to-square"></i></button>
-                </div>
-            </article>`;
-    };
-
-    const pendingMarkup = pendingMeals.map(itemMarkup).join('');
-    const bodyInner = doneMeals.length
-        ? `<div class="cardapio-progress"><i class="fas fa-check-circle"></i> ${doneMeals.length} de ${dayMeals.length} refeições de hoje registradas</div>`
-        : '';
-
     bodyEl.innerHTML = `
-        ${bodyInner}\n
-        ${pendingMeals.length
-            ? `<div class="cardapio-list">${pendingMarkup}</div>`
-            : dayMeals.length
-                ? `<div class="empty-state empty-state--compact empty-state--all-done"><span><i class="fas fa-circle-check"></i></span><div><strong>Cardápio de hoje concluído</strong><p>Todas as refeições foram registradas.</p></div></div>`
-                : `<div class="empty-state empty-state--compact"><span><i class="fas fa-utensils"></i></span><div><strong>Este dia está vazio</strong><p>Escolha outro dia da rotação.</p></div></div>`}
-        <div class="cardapio-footer">
-            <button type="button" class="btn-secondary" onclick="openSuggestDietModal()"><i class="fas fa-wand-magic-sparkles"></i> Sugerir mudanças</button>
-            <button type="button" class="btn-add" onclick="showAddDietModal()"><i class="fas fa-plus"></i> Adicionar refeição</button>
-        </div>`;
+        <div class="cardapio-list">${meals.map(meal => `<article class="cardapio-item"><div class="cardapio-item__head"><span class="cardapio-item__icon"><i class="fas ${mealIconClass(meal.meal_type)}"></i></span><div class="cardapio-item__copy"><strong>${escapeHtml(meal.meal_type)}</strong><p>${escapeHtml(dietPlanItemsText(meal))}</p><div class="cardapio-item__macros"><span>${Math.round(Number(meal.calories) || 0)} kcal</span><span>${Math.round(Number(meal.protein) || 0)}g prot.</span></div></div><button type="button" class="entry-action" onclick="openEditPlanMealModal(${meal.id})" aria-label="Editar refeição do plano"><i class="fas fa-pen-to-square"></i></button></div></article>`).join('')}</div>
+        <div class="cardapio-footer"><button type="button" class="btn-secondary" onclick="window.viewDietPlan?.(${Number(plan.id)})">Ver plano completo</button><button type="button" class="btn-secondary" onclick="openSuggestDietModal()"><i class="fas fa-wand-magic-sparkles"></i> Sugerir mudança</button><button type="button" class="btn-primary" onclick="editDailyNutritionTargets()">Ajustar plano</button></div>`;
 }
 
 function setCardapioDay(day) {
     if (![1, 2, 3].includes(Number(day))) return;
     setStoredCardapioDay(Number(day));
     cardapioDay = Number(day);
-    renderTodayCardapio(cardapioActivePlan, null);
+    renderDietCurrentPlanHub(cardapioActivePlan, null);
 }
 
 function findPlanMeal(mealId) {
@@ -2760,48 +2931,377 @@ function findPlanMeal(mealId) {
     return (cardapioActivePlan.meals || []).find(meal => Number(meal.id) === Number(mealId)) || null;
 }
 
-async function quickLogPlanMeal(mealId, mode) {
-    const meal = findPlanMeal(mealId);
-    if (!meal) {
+function findTodayDietSlot(slotKey) {
+    return (todayDietDay?.slots || []).find(slot => slot.slot_key === slotKey) || null;
+}
+
+function toggleTodayDietOptions(slotKey) {
+    todayDietOptionsSlotKey = todayDietOptionsSlotKey === slotKey ? null : slotKey;
+    renderTodayCardapio(todayDietDay, null);
+}
+
+async function selectTodayDietOption(slotKey, mealId) {
+    if (todayDietMutationSlotKey) return;
+    const slot = findTodayDietSlot(slotKey);
+    if (!slot) return;
+    todayDietMutationSlotKey = slotKey;
+    renderTodayCardapio(todayDietDay, null);
+    try {
+        const response = await fetch(`${API_BASE}/diet/days/${encodeURIComponent(todayDietDay.date)}/slots/${encodeURIComponent(slotKey)}/selection`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ diet_plan_meal_id: mealId })
+        });
+        if (!response.ok) {
+            const errorData = await response.json();
+            showToast(errorData.error || "Não foi possível trocar a opção.", "error");
+            return;
+        }
+        slot.selected_plan_meal_id = mealId;
+        todayDietOptionsSlotKey = null;
+        renderTodayCardapio(todayDietDay, null);
+    } catch (error) {
+        showToast("Erro de conexão!", "error");
+    } finally {
+        todayDietMutationSlotKey = null;
+        renderTodayCardapio(todayDietDay, null);
+    }
+}
+
+async function quickLogDailyMeal(slotKey, mode) {
+    if (todayDietMutationSlotKey) return;
+    const slot = findTodayDietSlot(slotKey);
+    const meal = slot?.alternatives?.find(item => Number(item.id) === Number(slot.selected_plan_meal_id));
+    if (!slot || !meal) {
         showToast("Refeição não encontrada.", "error");
         return;
     }
     const entryType = cardapioMealTypeToEntry(meal.meal_type);
     if (mode === "describe") {
         showAddDietModal();
+        pendingDietDailyContext = { slotKey, mealId: meal.id };
+    getElement('dietDate').disabled = true;
+    getElement('dietMeal').disabled = true;
+        getElement("dietDate").value = todayDietDay.date;
         getElement("dietMeal").value = entryType;
-        const items = dietPlanItemsText(meal);
-        getElement("dietDescription").value = items;
+        getElement("dietDescription").value = "";
         syncChoiceCards();
         return;
     }
+    todayDietMutationSlotKey = slotKey;
+    renderTodayCardapio(todayDietDay, null);
     try {
-        const response = await fetch(`${API_BASE}/diet`, {
-            method: "POST",
+        const response = await fetch(`${API_BASE}/diet/days/${encodeURIComponent(todayDietDay.date)}/slots/${encodeURIComponent(slotKey)}/outcome`, {
+            method: "PUT",
             headers: { "Content-Type": "application/json" },
             credentials: "include",
             body: JSON.stringify({
-                date: localDateInputValue(),
-                meal_type: entryType,
-                description: dietPlanItemsText(meal),
-                calories: meal.calories,
-                protein: meal.protein,
-                carbs: meal.carbs,
-                fat: meal.fat,
-                notes: meal.notes
+                result: "consumed_planned",
+                diet_plan_meal_id: meal.id
             })
         });
         if (response.ok) {
             showToast("Refeição registrada!", "success");
-            loadDietEntries({ showLoading: false });
-            loadTodayCardapio();
+            await Promise.all([loadDietEntries({ showLoading: false }), loadTodayCardapio()]);
         } else {
             const errorData = await response.json();
             showToast(errorData.error || "Erro ao registrar!", "error");
         }
     } catch (error) {
         showToast("Erro de conexão!", "error");
+    } finally {
+        todayDietMutationSlotKey = null;
+        if (todayDietDay) renderTodayCardapio(todayDietDay, null);
     }
+}
+
+function dietDailyDateObject(value) {
+    return new Date(`${value || localDateInputValue()}T12:00:00`);
+}
+
+function dietDailyDateText(value) {
+    const today = localDateInputValue();
+    if (value === today) return 'Hoje';
+    const yesterday = dietDailyDateObject(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (value === localDateInputValue(yesterday)) return 'Ontem';
+    return dietDailyDateObject(value).toLocaleDateString('pt-BR', {
+        weekday: 'long', day: '2-digit', month: 'long'
+    });
+}
+
+function dailySlotSelectedMeal(slot) {
+    return (slot?.alternatives || []).find(meal => Number(meal.id) === Number(slot.selected_plan_meal_id))
+        || slot?.alternatives?.[0]
+        || null;
+}
+
+function dailyViewEntries(view = dietDailyView) {
+    return [
+        ...(view?.slots || []).map(slot => slot.entry).filter(Boolean),
+        ...(view?.manual_entries || [])
+    ];
+}
+
+function renderDietDailyMacros() {
+    const container = getElement('dietDailyMacros');
+    if (!container) return;
+    const entries = dailyViewEntries();
+    container.classList.remove('hidden');
+    if (!entries.length) {
+        container.innerHTML = '<header><span>Resumo do dia</span><small>Os macros aparecem após o primeiro registro.</small></header>';
+        return;
+    }
+    const totals = dietDailyView?.totals || {};
+    const targets = dietDailyView?.targets || {};
+    const definitions = [
+        ['calories', 'Calorias', 'kcal', 'flame'],
+        ['protein', 'Proteínas', 'g', 'beef'],
+        ['carbs', 'Carboidratos', 'g', 'wheat'],
+        ['fat', 'Gorduras', 'g', 'droplet']
+    ];
+    container.innerHTML = `<header><span>Resumo do dia</span><small>${entries.length} ${entries.length === 1 ? 'registro' : 'registros'}</small></header><div class="diet-daily-macro-grid">${definitions.map(([key, label, unit, icon]) => {
+        const value = Number(totals[key]) || 0;
+        const target = Number(targets[key]);
+        const hasTarget = Number.isFinite(target) && target > 0;
+        const progress = hasTarget ? Math.min((value / target) * 100, 100) : 0;
+        return `<article class="diet-daily-macro diet-daily-macro--${key}"><span class="diet-daily-macro__icon"><i data-lucide="${icon}" aria-hidden="true"></i></span><div><small>${label}</small><strong>${Math.round(value).toLocaleString('pt-BR')} ${unit}</strong>${hasTarget ? `<span>de ${Math.round(target).toLocaleString('pt-BR')} ${unit}</span>` : ''}</div>${hasTarget ? `<i class="diet-daily-macro__progress"><span style="width:${progress}%"></span></i>` : ''}</article>`;
+    }).join('')}</div>`;
+}
+
+function dailyMealMacros(entry) {
+    if (!entry) return '';
+    const parts = [
+        `${Math.round(Number(entry.calories) || 0)} kcal`,
+        `${Math.round(Number(entry.protein) || 0)}g P`,
+        `${Math.round(Number(entry.carbs) || 0)}g C`,
+        `${Math.round(Number(entry.fat) || 0)}g G`
+    ];
+    return `<p class="diet-daily-slot__macros">${parts.join(' · ')}</p>`;
+}
+
+function renderDietDailyAlternatives(slot, selectedMeal) {
+    if (dietDailyOptionsSlotKey !== slot.slot_key) return '';
+    return `<div class="diet-daily-options" aria-label="Alternativas de ${escapeHtml(slot.label)}">${(slot.alternatives || []).map(meal => `<button type="button" class="diet-daily-option${Number(meal.id) === Number(selectedMeal?.id) ? ' is-selected' : ''}" onclick="selectDietDailyOption('${slot.slot_key}', ${Number(meal.id)})" aria-pressed="${Number(meal.id) === Number(selectedMeal?.id)}"><span><strong>Opção ${Number(meal.option) || 1}</strong><small>Dia ${Number(meal.option) || 1}</small></span><p>${escapeHtml(dietPlanItemsText(meal))}</p><i data-lucide="check" aria-hidden="true"></i></button>`).join('')}</div>`;
+}
+
+function renderDietDailySlot(slot) {
+    const meal = dailySlotSelectedMeal(slot);
+    if (!meal) return '';
+    const option = Number(meal.option) || 1;
+    const busy = dietDailyMutationSlotKey === slot.slot_key ? ' disabled' : '';
+    const title = escapeHtml(slot.label || meal.meal_type || 'Refeição');
+    const plannedText = escapeHtml(dietPlanItemsText(slot.planned_snapshot || meal));
+    const actual = slot.entry;
+    const icon = mealIconName(slot.label || meal.meal_type);
+    if (slot.result === 'skipped') {
+        return `<article class="diet-daily-slot diet-daily-slot--compact"><span class="diet-daily-slot__icon"><i data-lucide="${icon}" aria-hidden="true"></i></span><div><h3>${title}</h3><p>Refeição pulada</p></div><span class="diet-daily-status diet-daily-status--skipped">Pulada</span><button type="button" class="text-button" onclick="resetDietDailySlot('${slot.slot_key}')"${busy}>Corrigir</button></article>`;
+    }
+    if (slot.result === 'consumed_planned') {
+        return `<article class="diet-daily-slot diet-daily-slot--done"><header><span class="diet-daily-slot__icon"><i data-lucide="${icon}" aria-hidden="true"></i></span><div><h3>${title}</h3><p>Opção ${option} · Dia ${option}</p></div><span class="diet-daily-status diet-daily-status--done"><i data-lucide="check" aria-hidden="true"></i> Concluída</span></header><div class="diet-daily-actual"><span>Consumido</span><strong>${escapeHtml(actual?.description || plannedText)}</strong>${dailyMealMacros(actual)}</div><div class="diet-daily-slot__footer"><small>Conforme a opção planejada</small><div class="diet-daily-slot__record-actions"><button type="button" class="text-button" onclick="editDietEntry(${Number(actual?.id)})">Corrigir registro</button><button type="button" class="text-button diet-daily-skip" onclick="deleteDietEntry(${Number(actual?.id)})">Excluir registro</button></div></div></article>`;
+    }
+    if (slot.result === 'consumed_different') {
+        return `<article class="diet-daily-slot diet-daily-slot--done"><header><span class="diet-daily-slot__icon"><i data-lucide="${icon}" aria-hidden="true"></i></span><div><h3>${title}</h3><p>Opção ${option} · Dia ${option}</p></div><span class="diet-daily-status diet-daily-status--done"><i data-lucide="check" aria-hidden="true"></i> Registrada</span></header><div class="diet-daily-actual"><span>Você consumiu</span><strong>${escapeHtml(actual?.description || 'Consumo registrado')}</strong>${dailyMealMacros(actual)}</div><div class="diet-daily-planned"><span>Estava previsto</span><p>${plannedText}</p></div><div class="diet-daily-slot__footer"><span></span><div class="diet-daily-slot__record-actions"><button type="button" class="text-button" onclick="editDietEntry(${Number(actual?.id)})">Corrigir registro</button><button type="button" class="text-button diet-daily-skip" onclick="deleteDietEntry(${Number(actual?.id)})">Excluir registro</button></div></div></article>`;
+    }
+    const alternatives = slot.alternatives || [];
+    return `<article class="diet-daily-slot"><header><span class="diet-daily-slot__icon"><i data-lucide="${icon}" aria-hidden="true"></i></span><div><h3>${title}</h3><p>Opção ${option} de ${alternatives.length} · Dia ${option}</p></div><span class="diet-daily-status">Pendente</span></header><p class="diet-daily-slot__food">${escapeHtml(dietPlanItemsText(meal))}</p><button type="button" class="diet-daily-primary" onclick="setDietDailyOutcome('${slot.slot_key}', 'consumed_planned')"${busy}><i data-lucide="check" aria-hidden="true"></i> Comi isso</button><div class="diet-daily-secondary">${alternatives.length > 1 ? `<button type="button" class="text-button" onclick="toggleDietDailyOptions('${slot.slot_key}')" aria-expanded="${dietDailyOptionsSlotKey === slot.slot_key}"${busy}>Trocar opção</button>` : ''}<button type="button" class="text-button" onclick="openDietDailyDifferent('${slot.slot_key}')"${busy}>Comi diferente</button><button type="button" class="text-button diet-daily-skip" onclick="setDietDailyOutcome('${slot.slot_key}', 'skipped')"${busy}>Pulei</button></div>${renderDietDailyAlternatives(slot, meal)}</article>`;
+}
+
+function renderDietDailyManualEntry(entry) {
+    return `<article class="diet-daily-manual"><span class="diet-daily-slot__icon"><i data-lucide="${mealIconName(entry.meal_type)}" aria-hidden="true"></i></span><div><span>Registro adicional</span><h3>${escapeHtml(getMealTypeLabel(entry.meal_type))}</h3><p>${escapeHtml(entry.description)}</p>${dailyMealMacros(entry)}</div><div class="diet-daily-manual__actions"><button type="button" class="text-button" onclick="editDietEntry(${Number(entry.id)})">Corrigir</button><button type="button" class="text-button diet-daily-skip" onclick="deleteDietEntry(${Number(entry.id)})">Excluir</button></div></article>`;
+}
+
+function renderDietDailyMeals(errorMessage = '') {
+    const container = getElement('dietDailyMealsBody');
+    if (!container) return;
+    if (errorMessage) {
+        container.innerHTML = `<div class="diet-daily-empty" role="alert"><strong>Não foi possível carregar o diário.</strong><p>${escapeHtml(errorMessage)}</p><button type="button" class="btn-secondary" onclick="loadDietDailyScreen()">Tentar novamente</button></div>`;
+        return;
+    }
+    const slots = dietDailyView?.slots || [];
+    const manual = dietDailyView?.manual_entries || [];
+    if (!slots.length && !manual.length) {
+        container.innerHTML = '<div class="diet-daily-empty"><span class="diet-daily-slot__icon"><i data-lucide="utensils" aria-hidden="true"></i></span><div><strong>Nenhuma refeição registrada</strong><p>Use “Registrar outra refeição” quando quiser adicionar o que consumiu.</p></div></div>';
+        return;
+    }
+    container.innerHTML = `${slots.map(renderDietDailySlot).join('')}${manual.length ? `<div class="diet-daily-additional"><h3>Outras refeições</h3>${manual.map(renderDietDailyManualEntry).join('')}</div>` : ''}`;
+}
+
+function renderDietDailyPlan() {
+    const container = getElement('dietDailyPlan');
+    if (!container) return;
+    const plan = dietDailyView?.plan;
+    if (!plan) {
+        cardapioActivePlan = null;
+        container.innerHTML = '<div><span class="eyebrow">Plano alimentar</span><h2 id="dietDailyPlanTitle">Sem plano atual</h2><p>O diário funciona normalmente sem um plano.</p></div><button type="button" class="btn-secondary" data-plan-wizard="diet">Criar plano alimentar</button>';
+        return;
+    }
+    cardapioActivePlan = plan;
+    container.innerHTML = `<div><span class="eyebrow">Plano alimentar atual</span><h2 id="dietDailyPlanTitle">${escapeHtml(plan.title || 'Seu plano alimentar')}</h2></div><div class="diet-daily-plan__actions"><button type="button" class="text-button" onclick="window.viewDietPlan?.(${Number(plan.id)})">Ver plano</button><button type="button" class="text-button" onclick="editDailyNutritionTargets()">Editar plano</button><button type="button" class="text-button" onclick="toggleDietPlansLibrary(true)">Meus planos</button></div>`;
+}
+
+function updateDietDailyDateHeader() {
+    const value = dietDailyDate || localDateInputValue();
+    const input = getElement('dietDailyDate');
+    if (input) input.value = value;
+    const label = getElement('dietDailyDateLabel');
+    if (label) label.textContent = dietDailyDateText(value);
+    getElement('dietDailyTodayButton')?.classList.toggle('hidden', value === localDateInputValue());
+}
+
+async function loadDietDailyScreen(dateValue = dietDailyDate || localDateInputValue()) {
+    if (!currentUser) {
+        renderGuestPresentation('diet_plans');
+        return;
+    }
+    dietDailyDate = dateValue;
+    dietDailyOptionsSlotKey = null;
+    updateDietDailyDateHeader();
+    const container = getElement('dietDailyMealsBody');
+    if (container) container.innerHTML = '<div class="diet-daily-empty"><span class="today-icon--spin"><i data-lucide="loader-circle" aria-hidden="true"></i></span><div><strong>Carregando seu dia</strong></div></div>';
+    try {
+        const response = await fetch(`${API_BASE}/diet/days/${encodeURIComponent(dietDailyDate)}`, { credentials: 'include' });
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.error || 'Tente novamente em instantes.');
+        }
+        dietDailyView = await response.json();
+        dietEntries = dailyViewEntries(dietDailyView);
+        renderDietDailyMacros();
+        renderDietDailyMeals();
+        renderDietDailyPlan();
+    } catch (error) {
+        dietDailyView = null;
+        getElement('dietDailyMacros')?.classList.add('hidden');
+        renderDietDailyMeals(error.message);
+        const planContainer = getElement('dietDailyPlan');
+        if (planContainer) planContainer.innerHTML = '<div><span class="eyebrow">Plano alimentar</span><h2 id="dietDailyPlanTitle">Plano indisponível</h2><p>Tente carregar o diário novamente.</p></div>';
+    }
+}
+
+function changeDietDailyDate(offset) {
+    const next = dietDailyDateObject(dietDailyDate || localDateInputValue());
+    next.setDate(next.getDate() + Number(offset || 0));
+    loadDietDailyScreen(localDateInputValue(next));
+}
+
+function selectDietDailyDate(value = localDateInputValue()) {
+    if (!value) return;
+    loadDietDailyScreen(value);
+}
+
+function openDietDailyCalendar() {
+    const input = getElement('dietDailyDate');
+    if (typeof input?.showPicker === 'function') input.showPicker();
+    else input?.focus();
+}
+
+function showAddDietModalForDailyDate() {
+    showAddDietModal();
+    if (!getElement('dietModal')?.classList.contains('show')) return;
+    getElement('dietDate').value = dietDailyDate || localDateInputValue();
+}
+
+function toggleDietDailyOptions(slotKey) {
+    dietDailyOptionsSlotKey = dietDailyOptionsSlotKey === slotKey ? null : slotKey;
+    renderDietDailyMeals();
+}
+
+async function selectDietDailyOption(slotKey, mealId) {
+    if (dietDailyMutationSlotKey) return;
+    dietDailyMutationSlotKey = slotKey;
+    renderDietDailyMeals();
+    try {
+        const response = await fetch(`${API_BASE}/diet/days/${encodeURIComponent(dietDailyDate)}/slots/${encodeURIComponent(slotKey)}/selection`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+            body: JSON.stringify({ diet_plan_meal_id: mealId })
+        });
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.error || 'Não foi possível trocar a opção.');
+        }
+        dietDailyOptionsSlotKey = null;
+        await refreshDietDailySurfaces();
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        dietDailyMutationSlotKey = null;
+        if (dietDailyView) renderDietDailyMeals();
+    }
+}
+
+function openDietDailyDifferent(slotKey) {
+    const slot = (dietDailyView?.slots || []).find(item => item.slot_key === slotKey);
+    const meal = dailySlotSelectedMeal(slot);
+    if (!slot || !meal) return;
+    showAddDietModal();
+    pendingDietDailyContext = { slotKey, mealId: meal.id };
+    getElement('dietDate').disabled = true;
+    getElement('dietMeal').disabled = true;
+    getElement('dietDate').value = dietDailyDate;
+    getElement('dietMeal').value = cardapioMealTypeToEntry(meal.meal_type);
+    getElement('dietDescription').value = '';
+    syncChoiceCards();
+}
+
+async function setDietDailyOutcome(slotKey, result) {
+    if (dietDailyMutationSlotKey) return;
+    const slot = (dietDailyView?.slots || []).find(item => item.slot_key === slotKey);
+    const meal = dailySlotSelectedMeal(slot);
+    if (!slot || !meal) return;
+    dietDailyMutationSlotKey = slotKey;
+    renderDietDailyMeals();
+    try {
+        const response = await fetch(`${API_BASE}/diet/days/${encodeURIComponent(dietDailyDate)}/slots/${encodeURIComponent(slotKey)}/outcome`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+            body: JSON.stringify({ result, diet_plan_meal_id: meal.id })
+        });
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.error || 'Não foi possível atualizar a refeição.');
+        }
+        showToast(result === 'skipped' ? 'Refeição marcada como pulada.' : 'Refeição registrada!', 'success');
+        await refreshDietDailySurfaces();
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        dietDailyMutationSlotKey = null;
+        if (dietDailyView) renderDietDailyMeals();
+    }
+}
+
+async function resetDietDailySlot(slotKey) {
+    if (dietDailyMutationSlotKey) return;
+    dietDailyMutationSlotKey = slotKey;
+    try {
+        const response = await fetch(`${API_BASE}/diet/days/${encodeURIComponent(dietDailyDate)}/slots/${encodeURIComponent(slotKey)}/outcome`, {
+            method: 'DELETE', credentials: 'include'
+        });
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.error || 'Não foi possível reabrir a refeição.');
+        }
+        await refreshDietDailySurfaces();
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        dietDailyMutationSlotKey = null;
+    }
+}
+
+async function refreshDietDailySurfaces() {
+    await loadDietDailyScreen(dietDailyDate);
+    if (dietDailyDate === localDateInputValue()) await loadTodayCardapio();
+}
+
+async function toggleDietPlansLibrary(show) {
+    const library = getElement('dietPlansLibrary');
+    if (!library) return;
+    library.classList.toggle('hidden', !show);
+    if (!show || dietPlansLibraryLoaded) return;
+    dietPlansLibraryLoaded = true;
+    await window.loadDietPlans?.();
 }
 
 async function openEditPlanMealModal(mealId) {
@@ -2879,7 +3379,8 @@ async function generateDietDaySuggestion() {
             body: JSON.stringify({ day: cardapioDay, feedback })
         });
         if (response.ok) {
-            const data = await response.json();
+            let data = await response.json();
+            if (response.status === 202 && data.job_id) data = await window.waitForAIJob(data);
             pendingDietDaySuggestion = data.meals;
             const previewEl = getElement("suggestDietPreview");
             previewEl.innerHTML = data.meals.map(meal => `
@@ -2938,8 +3439,7 @@ function renderMeasurementTable() {
         container.innerHTML = `
             <div class="empty-state">
                 <span><i class="fas fa-ruler-combined"></i></span>
-                <div><strong>Nenhuma medição encontrada</strong><p>Adicione uma medição para iniciar seu histórico.</p></div>
-                <button type="button" class="btn-primary" onclick="showAddMeasurementModal()">Adicionar medição</button>
+                <div><strong>Nenhuma medição encontrada</strong><p>Registre uma medição ou ajuste o período selecionado.</p><button type="button" onclick="showAddMeasurementModal()">Nova medição</button><button type="button" onclick="clearMeasurementFilters()">Limpar período</button></div>
             </div>`;
         return;
     }
@@ -2960,7 +3460,7 @@ function renderMeasurementTable() {
         </article>`).join('');
 
     if (measurementHasMore) {
-        container.insertAdjacentHTML('beforeend', `<div class="profile-load-more"><button type="button" onclick="loadMeasurements()">Carregar mais</button></div>`);
+        container.insertAdjacentHTML('beforeend', `<div class="profile-load-more"><button type="button" onclick="loadMeasurements(true)">Carregar mais</button></div>`);
     }
 }
 
@@ -2975,6 +3475,36 @@ async function handleProfileSubmit(e) {
     const restrictions = getElement("profileRestrictions")?.value.trim();
     const weight = getElement("profileWeight")?.value;
     const height = getElement("profileHeight")?.value;
+
+    if (pendingProfileRequiredFields.length) {
+        const values = {
+            age: Number(age),
+            gender,
+            activity_level: activity,
+            weight: Number(weight),
+            height: Number(height)
+        };
+        const valid = {
+            age: Number.isFinite(values.age) && values.age >= 18 && values.age <= 120,
+            gender: Boolean(values.gender),
+            activity_level: Boolean(values.activity_level),
+            weight: Number.isFinite(values.weight) && values.weight >= 30 && values.weight <= 300,
+            height: Number.isFinite(values.height) && values.height >= 120 && values.height <= 250
+        };
+        const firstMissing = pendingProfileRequiredFields.find(field => !valid[field]);
+        if (firstMissing) {
+            const focusTargets = {
+                age: 'profileAge',
+                gender: 'genderCards',
+                activity_level: 'activityCards',
+                weight: 'profileWeight',
+                height: 'profileHeight'
+            };
+            showToast('Preencha os dados obrigatórios para gerar sua dieta.', 'error');
+            getElement(focusTargets[firstMissing])?.focus();
+            return;
+        }
+    }
 
     try {
         const response = await fetch(`${API_BASE}/profile`, {
@@ -2995,11 +3525,12 @@ async function handleProfileSubmit(e) {
         });
 
         if (response.ok) {
+            const resume = pendingPostProfileResume;
+            pendingPostProfileResume = null;
+            pendingProfileRequiredFields = [];
             closeAppModal(getElement("profileModal"));
             showToast("Perfil salvo com sucesso!", "success");
-            if (pendingPostProfileResume) {
-                const resume = pendingPostProfileResume;
-                pendingPostProfileResume = null;
+            if (resume) {
                 requestAnimationFrame(resume);
             }
         } else {
@@ -3024,13 +3555,15 @@ async function editDietEntry(id) {
     getElement("dietNotes").value = entry.notes || "";
     
     // Preenche os campos de macros se existirem
-    getElement("dietCalories").value = entry.calories || "";
-    getElement("dietProtein").value = entry.protein || "";
-    getElement("dietCarbs").value = entry.carbs || "";
-    getElement("dietFat").value = entry.fat || "";
+    getElement("dietCalories").value = entry.calories ?? "";
+    getElement("dietProtein").value = entry.protein ?? "";
+    getElement("dietCarbs").value = entry.carbs ?? "";
+    getElement("dietFat").value = entry.fat ?? "";
+    getElement("dietDate").disabled = Boolean(entry.daily_meal_state_id);
+    getElement("dietMeal").disabled = Boolean(entry.daily_meal_state_id);
 
-    getElement("dietModalTitle").textContent = "Editar Registro de Dieta";
-    syncDietDateChips();
+    pendingDietDailyContext = null;
+    window.DietEntryFlow?.begin(true);
     syncChoiceCards();
     openAppModal(getElement("dietModal"));
 }
@@ -3042,7 +3575,8 @@ async function deleteDietEntry(id) {
         const response = await fetch(`/api/diet/${id}`, { method: "DELETE", credentials: 'include' });
         if (response.ok) {
             showToast("Refeição excluída!", "success");
-            loadDietEntries({ showLoading: false });
+            if (currentTab === 'diet_plans') await refreshDietDailySurfaces();
+            else await Promise.all([loadDietEntries({ showLoading: false }), loadTodayCardapio()]);
         } else {
             const errorData = await response.json();
             showToast(errorData.error || "Erro ao excluir!", "error");
@@ -3073,16 +3607,15 @@ async function editMeasurement(id) {
 }
 
 async function deleteMeasurement(id) {
+    const accountVersion = measurementAccountVersion;
     if (!confirm("Tem certeza que deseja excluir esta medição?")) return;
     showToast("Excluindo...", "info");
     try {
         const response = await fetch(`/api/measurements/${id}`, { method: "DELETE", credentials: 'include' });
+        if (accountVersion !== measurementAccountVersion) return;
         if (response.ok) {
             showToast("Medição excluída!", "success");
-            measurements = [];
-            measurementHasMore = false;
-            loadMeasurements();
-            loadMeasurementSummary();
+            await Promise.all([loadMeasurements(), loadMeasurementSummary()]);
         } else {
             const errorData = await response.json();
             showToast(errorData.error || "Erro ao excluir!", "error");
@@ -3104,17 +3637,14 @@ function clearDietFilters() {
     loadDietEntries();
 }
 function clearMeasurementFilters() {
-    const startDate = getElement("measurementStartDate");
-    const endDate = getElement("measurementEndDate");
-    
-    if (startDate) startDate.value = "";
-    if (endDate) endDate.value = "";
-    measurements = [];
-    measurementHasMore = false;
-    loadMeasurements();
+    setBodyPeriod('all');
 }
 
 function clearChat() {
+    renderChatWelcome();
+}
+
+function renderChatWelcome() {
     const chatMessages = getElement("chatMessages");
     if (!chatMessages) return;
     
@@ -3128,6 +3658,28 @@ function clearChat() {
             </div>
         </div>
     `;
+}
+
+async function loadChatHistory() {
+    renderChatWelcome();
+    if (!currentUser || !currentUser.is_premium) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/chat/history`, { credentials: 'include' });
+        if (!response.ok) return;
+
+        const history = await response.json();
+        if (!history.length) return;
+
+        const chatMessages = getElement("chatMessages");
+        chatMessages.innerHTML = '';
+        history.forEach((entry) => {
+            addMessageToChat(entry.message, 'user');
+            addMessageToChat(entry.response, 'bot');
+        });
+    } catch (error) {
+        console.error('Error loading chat history:', error);
+    }
 }
 
 async function checkUserProfile() {

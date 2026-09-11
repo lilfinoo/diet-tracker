@@ -1,10 +1,11 @@
 import base64
+from datetime import datetime
 import json
 import uuid
 
 import pytest
 
-from src.models.user import db, DietPlan, DietPlanMeal, User, WorkoutExercise, WorkoutPlan
+from src.models.user import AdminActionAudit, db, DietPlan, DietPlanMeal, Subscription, User, WorkoutExercise, WorkoutPlan
 from src.services import ai
 from src.services.ai import (
     AIQuotaExceededError,
@@ -14,10 +15,11 @@ from src.services.ai import (
     AITruncatedResponseError,
     generate_response,
 )
+from tests.helpers import registration_payload
 
 
 def register(client, username="alice"):
-    return client.post("/api/register", json={"username": username, "password": "strong-password"})
+    return client.post("/api/register", json=registration_payload(username))
 
 
 def test_register_and_create_diet_entry(client):
@@ -57,6 +59,10 @@ def test_admin_uuid_route(app, client):
 
     response = client.post(f"/api/admin/users/{target_id}/ban")
     assert response.status_code == 200
+    with app.app_context():
+        audit = AdminActionAudit.query.one()
+        assert audit.action == "user.banned"
+        assert audit.subject_user_id == target_id
 
 
 def test_admin_can_grant_and_revoke_premium(app, client):
@@ -70,15 +76,56 @@ def test_admin_can_grant_and_revoke_premium(app, client):
         db.session.commit()
         target_id = target.id
 
-    grant = client.patch(f"/api/admin/users/{target_id}/premium", json={"is_premium": True})
+    missing_duration = client.patch(
+        f"/api/admin/users/{target_id}/premium", json={"is_premium": True}
+    )
+    assert missing_duration.status_code == 400
+    assert "quanto tempo" in missing_duration.get_json()["error"]
+
+    grant = client.patch(
+        f"/api/admin/users/{target_id}/premium",
+        json={"is_premium": True, "duration_days": 30},
+    )
     assert grant.status_code == 200
     assert grant.get_json()["user"]["is_premium"] is True
+    with app.app_context():
+        subscription = Subscription.query.filter_by(
+            user_id=target_id, provider="admin", plan_code="premium_student"
+        ).one()
+        assert subscription.status == "active"
+        assert 29 <= (subscription.current_period_end - datetime.utcnow()).days <= 30
+        assert db.session.get(User, target_id).is_premium is False
+        assert AdminActionAudit.query.filter_by(action="premium.granted").count() == 1
 
     revoke = client.patch(f"/api/admin/users/{target_id}/premium", json={"is_premium": False})
     assert revoke.status_code == 200
     assert revoke.get_json()["user"]["is_premium"] is False
     with app.app_context():
         assert db.session.get(User, target_id).is_premium is False
+        assert Subscription.query.filter_by(user_id=target_id, provider="admin").one().status == "canceled"
+        assert AdminActionAudit.query.filter_by(action="premium.revoked").count() == 1
+
+
+def test_admin_can_grant_permanent_premium_access(app, client):
+    register(client, "permanent-admin")
+    with app.app_context():
+        admin = User.query.filter_by(username="permanent-admin").one()
+        admin.is_admin = True
+        target = User(username="permanent-premium")
+        target.set_password("strong-password")
+        db.session.add(target)
+        db.session.commit()
+        target_id = target.id
+
+    response = client.patch(
+        f"/api/admin/users/{target_id}/premium",
+        json={"is_premium": True, "duration_days": None},
+    )
+
+    assert response.status_code == 200
+    with app.app_context():
+        grant = Subscription.query.filter_by(user_id=target_id, provider="admin").one()
+        assert grant.current_period_end is None
 
 
 def test_premium_update_requires_admin(client):
@@ -95,6 +142,51 @@ def test_gemini_requires_api_key(app):
         user = User(username="gemini-user")
         with pytest.raises(AIServiceError, match="GEMINI_API_KEY"):
             generate_response("Olá", user, None)
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (type("ProviderError", (Exception,), {"code": 429, "status": "RESOURCE_EXHAUSTED"})(), "quota_rate_limit"),
+        (type("ProviderError", (Exception,), {"code": 503, "status": "UNAVAILABLE"})(), "timeout_unavailable"),
+        (ai.httpx.ReadTimeout("timed out"), "timeout_unavailable"),
+        (type("ProviderError", (Exception,), {"code": 401, "status": "UNAUTHENTICATED"})(), "authentication_configuration"),
+        (type("ProviderError", (Exception,), {"code": 403, "status": "PERMISSION_DENIED"})(), "authentication_configuration"),
+    ],
+)
+def test_gemini_provider_errors_use_structured_categories(error, expected):
+    assert ai._provider_error_category(error)[0] == expected
+
+
+def test_gemini_failure_log_excludes_provider_message(app, monkeypatch, caplog):
+    secret = "prompt health-data secret@example.com api-key-value"
+
+    class ProviderError(Exception):
+        code = 503
+        status = "UNAVAILABLE"
+
+    class Models:
+        def generate_content(self, **_kwargs):
+            raise ProviderError(secret)
+
+    class Client:
+        models = Models()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    monkeypatch.setattr(ai.genai, "Client", lambda **_kwargs: Client())
+    with app.app_context(), caplog.at_level("WARNING"):
+        app.config["GEMINI_API_KEY"] = "configured"
+        with pytest.raises(AIServiceUnavailableError, match="indisponível"):
+            ai._completion("system", "private prompt", 100, 0.2)
+
+    assert "category=timeout_unavailable http_status=503" in caplog.text
+    assert secret not in caplog.text
+    assert "private prompt" not in caplog.text
 
 
 def test_chat_uses_configured_output_limit(app, monkeypatch):
@@ -222,6 +314,75 @@ def test_workout_generation_uses_fallback_model(app, monkeypatch):
     assert models == ["primary-model", "fallback-model"]
 
 
+def test_workout_retry_sends_only_invalid_days_and_previous_plan(app, monkeypatch):
+    captured = {}
+
+    def completion(*args, **kwargs):
+        captured["system"] = args[0]
+        captured["payload"] = json.loads(args[1])
+        captured["schema"] = kwargs["json_schema"]
+        return '{"days":[]}'
+
+    monkeypatch.setattr(ai, "_completion", completion)
+    questionnaire = {
+        "goal": "hypertrophy",
+        "experience_level": "advanced",
+        "days_per_week": 5,
+        "split_type": "abcde",
+        "session_duration": 90,
+        "equipment": ["full_gym"],
+        "limitations": "",
+        "priorities": "",
+        "avoid_exercises": "",
+    }
+    previous_plan = {"type": "workout_plan", "days": [{"focus": f"Dia {index}", "exercises": []} for index in range(1, 6)]}
+    correction = {
+        "previous_plan": previous_plan,
+        "validation_errors": {
+            "days.1.roles.2": "Faltou pressão inclinada.",
+            "days.4.focus": "Exercício fora do foco.",
+        },
+        "invalid_day_numbers": [1, 4],
+    }
+
+    with app.app_context():
+        ai.generate_workout_plan(questionnaire, None, correction)
+
+    assert captured["payload"]["repair"] == correction
+    assert [day["day_number"] for day in captured["payload"]["required_days"]] == [1, 4]
+    assert captured["payload"]["required_days"][0]["selection_limits"]["unique_catalog_keys"] is True
+    assert captured["payload"]["required_days"][0]["selection_limits"]["max_per_group"]["horizontal_push"] == 4
+    assert captured["payload"]["required_days"][1]["selection_limits"]["max_per_group"]["horizontal_pull"] == 2
+    assert captured["payload"]["required_days"][1]["selection_limits"]["max_per_training_role"] == 2
+    assert all(len(day["slots"]) == 6 for day in captured["payload"]["required_days"])
+    assert [slot["allowed_groups"] for slot in captured["payload"]["required_days"][1]["slots"][:4]] == [
+        ["vertical_push"],
+        ["vertical_push"],
+        ["lateral_raise"],
+        ["lateral_raise"],
+    ]
+    shoulder_slots = captured["payload"]["required_days"][1]["slots"]
+    assert shoulder_slots[0]["allowed_catalog_keys"] == shoulder_slots[1]["allowed_catalog_keys"]
+    assert shoulder_slots[2]["allowed_catalog_keys"] == shoulder_slots[3]["allowed_catalog_keys"]
+    assert captured["schema"]["properties"]["days"]["items"]["properties"]["exercises"]["minItems"] == 6
+    exercise_schema = captured["schema"]["properties"]["days"]["items"]["properties"]["exercises"]["items"]
+    assert "slot_id" in exercise_schema["required"]
+    assert exercise_schema["properties"]["sets"] == {"type": "integer", "minimum": 1, "maximum": 6}
+    assert exercise_schema["properties"]["reps"] == {"type": "string", "minLength": 1, "maxLength": 30}
+    assert exercise_schema["properties"]["rest_seconds"] == {"type": "integer", "minimum": 20, "maximum": 300}
+    allowed_slot_keys = {
+        catalog_key
+        for day in captured["payload"]["required_days"]
+        for slot in day["slots"]
+        for catalog_key in slot["allowed_catalog_keys"]
+    }
+    assert set(exercise_schema["properties"]["catalog_key"]["enum"]) == allowed_slot_keys
+    assert captured["schema"]["properties"]["days"]["items"]["properties"]["day_number"]["enum"] == [1, 4]
+    assert "Retorne somente" in captured["system"]
+    assert "três funções distintas" in captured["system"]
+    assert "horizontal_pull" in captured["system"]
+
+
 def test_macro_endpoint_reports_invalid_ai_json(client, monkeypatch):
     register(client)
     monkeypatch.setattr(
@@ -272,7 +433,7 @@ def test_macro_endpoint_photo_without_description_is_valid(client, monkeypatch):
             "precision": "alta",
         },
     )
-    gif = base64.b64encode(b"jpeg-byte-content").decode()
+    gif = base64.b64encode(b"\x89PNG\r\n\x1a\nminimal").decode()
     response = client.post(
         "/api/diet/ai_macros",
         json={"image": {"data": gif, "mime_type": "image/png"}},

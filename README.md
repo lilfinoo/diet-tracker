@@ -2,7 +2,7 @@
 
 Aplicação Flask com SPA estática para acompanhamento de dieta, medidas, planos e chat com IA.
 
-Planos Premium são criados por questionários guiados. Treinos possuem divisões por dia e permitem substituir temporariamente um exercício durante uma sessão sem alterar o plano original.
+Planos Premium são criados por questionários guiados. Treinos possuem divisões por dia e permitem substituir temporariamente um exercício durante uma sessão sem alterar o plano original. A rede interna permite perfil público opcional, vínculo consentido entre aluno e profissional, acompanhamento alimentar diário e revisão versionada de planos sem sobrescrever o original.
 
 ## Ambiente local
 
@@ -28,16 +28,19 @@ As imagens são importadas da API pública do [wger](https://wger.de/) e servida
 python scripts/import_wger_media.py
 ```
 
-O aplicativo exibe apenas correspondências revisadas. Exercícios sem mídia segura usam um placeholder neutro. Os créditos ficam disponíveis em **Perfil > Créditos das imagens** e em `copilot/assets/exercises/wger/manifest.json`.
+O aplicativo exibe apenas correspondências revisadas. Exercícios sem mídia segura usam um placeholder neutro. Origem, autoria e licença permanecem registradas em `copilot/assets/exercises/wger/manifest.json`.
 
-As associações aprovadas e seus IDs exatos de imagem ficam em `scripts/wger-overrides.json`, evitando mudanças silenciosas quando a API for atualizada. Algumas mídias aprovadas são identificadas pelo wger como geradas por IA e recebem essa indicação nos créditos; use `--exclude-ai` para omiti-las. Para gerar candidatos em `scripts/wger-match-report.json` sem alterar as mídias publicadas, use `python scripts/import_wger_media.py --allow-automatic --dry-run` e revise o relatório antes de atualizar os overrides.
+As associações aprovadas e seus IDs exatos de imagem ficam em `scripts/wger-overrides.json`, evitando mudanças silenciosas quando a API for atualizada. Algumas mídias aprovadas são identificadas pelo wger como geradas por IA nos metadados; use `--exclude-ai` para omiti-las. Para gerar candidatos em `scripts/wger-match-report.json` sem alterar as mídias publicadas, use `python scripts/import_wger_media.py --allow-automatic --dry-run` e revise o relatório antes de atualizar os overrides.
 
 ## Deploy (Render)
 
-Defina as envs: `SECRET_KEY`, `DATABASE_URL`, `GEMINI_API_KEY`, `WORKOUTX_API_KEY`, `FLASK_ENV=production`, `SESSION_COOKIE_SECURE=true` e `CORS_ORIGINS` (domínio do site). No Render:
+Defina as envs: `APP_ENV=production`, `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, `GEMINI_API_KEY`, `WORKOUTX_API_KEY`, `SESSION_COOKIE_SECURE=true`, `CORS_ORIGINS`, `METRICS_ENABLED=true`, `METRICS_TOKEN` e as quatro variáveis `MEDIA_R2_*`. No Render:
 
-- **Start command**: `python -m flask --app main db upgrade && gunicorn --workers 1 --worker-class gthread --threads 4 --bind 0.0.0.0:$PORT --timeout 120 main:app` (equivalente ao `Procfile` e aplica migrations uma única vez antes do servidor).
+- **Start command**: use o `Procfile`, que aplica migrations e aceita `WEB_CONCURRENCY`/`GUNICORN_THREADS`. Mantenha `WEB_CONCURRENCY=1` enquanto as métricas Prometheus não estiverem em modo multiprocess e ajuste threads/pool somente após teste de carga.
 - **Health check path**: `/api/health`.
+- **Background Worker**: `python -m celery -A main:celery_app worker --loglevel=INFO --concurrency=2`.
+
+Redis, fila de IA, métricas, Grafana Cloud, Asaas e backups estão detalhados em [`OPERATIONS.md`](OPERATIONS.md).
 
 ## Segurança
 

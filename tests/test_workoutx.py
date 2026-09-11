@@ -1,5 +1,6 @@
 from src.services import workoutx
-from src.models.user import ExerciseMediaReview, User, db
+from src.models.user import ExerciseMediaReview, User, WorkoutXExercise, db
+from tests.helpers import registration_payload
 
 
 class _Response:
@@ -53,6 +54,70 @@ def test_workoutx_search_discards_unsafe_provider_ids(app, monkeypatch):
         ]
 
 
+def test_workoutx_imports_every_page_and_updates_existing_records(app, monkeypatch):
+    responses = [
+        b'{"total":3,"count":2,"data":[{"id":"0001","name":"First","target":"abs"},{"id":"0002","name":"Second","target":"biceps"}]}',
+        b'{"total":3,"count":1,"data":[{"id":"0003","name":"Third","target":"quads"}]}',
+    ]
+    monkeypatch.setattr(workoutx, "_request", lambda url: responses.pop(0))
+
+    with app.app_context():
+        db.session.add(WorkoutXExercise(provider_id="0001", data={"id": "0001", "name": "Old"}))
+        db.session.commit()
+
+        assert workoutx.import_exercises() == 3
+        assert WorkoutXExercise.query.count() == 3
+        assert db.session.get(WorkoutXExercise, "0001").data["name"] == "First"
+
+
+def test_catalog_selection_prioritizes_common_movements():
+    selected = workoutx.select_exercises([
+        {"id": "1", "name": "Bosu Squat", "target": "quads", "equipment": "Bosu Ball"},
+        {"id": "2", "name": "Leg Press Machine", "target": "quads", "equipment": "Leverage Machine"},
+    ])
+
+    assert [item["id"] for item in selected] == ["2", "1"]
+
+
+def test_preview_collection_resumes_without_refetching_saved_pages(app, tmp_path, monkeypatch):
+    responses = [
+        b'{"total":2,"data":[{"id":"0001","name":"First"}]}',
+        b'{"total":2,"data":[{"id":"0002","name":"Second"}]}',
+    ]
+    calls = []
+
+    def request(url):
+        calls.append(url)
+        return responses.pop(0)
+
+    monkeypatch.setattr(workoutx, "_request", request)
+    with app.app_context():
+        first = workoutx.collect_preview_exercises(tmp_path, pause_seconds=0)
+        second = workoutx.collect_preview_exercises(tmp_path, pause_seconds=0)
+
+    assert first == {"pages_downloaded": 2, "pages_cached": 2, "total": 2}
+    assert second == {"pages_downloaded": 0, "pages_cached": 2, "total": 2}
+    assert calls == [
+        "https://api.workoutxapp.com/v1/exercises?limit=10&offset=0",
+        "https://api.workoutxapp.com/v1/exercises?limit=10&offset=1",
+    ]
+
+
+def test_preview_application_replaces_the_active_catalog(app, monkeypatch):
+    monkeypatch.setattr(workoutx, "preview_exercises", lambda directory=None: [
+        {"id": "0001", "name": "First", "target": "abs"},
+        {"id": "0002", "name": "Second", "target": "biceps"},
+    ])
+    with app.app_context():
+        db.session.add(WorkoutXExercise(provider_id="old", data={"id": "old", "name": "Old"}))
+        db.session.commit()
+
+        assert workoutx.apply_preview_catalog() == 2
+        assert [item.provider_id for item in WorkoutXExercise.query.order_by(WorkoutXExercise.provider_id)] == [
+            "0001", "0002"
+        ]
+
+
 def test_workoutx_rejects_oversized_response(app, monkeypatch):
     monkeypatch.setattr(
         workoutx,
@@ -75,7 +140,7 @@ def test_exercise_media_requires_login(client):
 
 def test_admin_can_approve_and_serve_exercise_media(app, client, tmp_path, monkeypatch):
     app.config["WORKOUTX_MEDIA_MAPPING_PATH"] = tmp_path / "media.json"
-    assert client.post("/api/register", json={"username": "admin", "password": "strong-password"}).status_code == 201
+    assert client.post("/api/register", json=registration_payload("admin")).status_code == 201
     with app.app_context():
         User.query.filter_by(username="admin").one().is_admin = True
         db.session.commit()

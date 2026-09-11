@@ -4,6 +4,8 @@
     let dietPlans = [];
     let workoutPlans = [];
     let workoutTodayState = null;
+    let workoutTodayError = "";
+    let startingTodayWorkout = false;
     let workoutCurrentPlan = null;
     let workoutCurrentDecision = null;
     const WEEKDAY_LABELS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
@@ -27,8 +29,8 @@
         flexible: "Flexível"
     };
     const CHANGE_PACES = {
-        conservative: "Conservador",
-        moderate: "Moderado"
+        conservative: "Gradual (recomendado)",
+        moderate: "Mais rápida"
     };
     const INGREDIENT_POOL = [];
     let ingredientPoolLoading = null;
@@ -158,14 +160,18 @@
         diet: { step: 0, answers: defaultDietAnswers(), error: "", fieldErrors: {}, generating: false },
         workout: { step: 0, answers: defaultWorkoutAnswers(), error: "", fieldErrors: {}, generating: false }
     };
-    const dietView = { plan: null, selectedDay: 0 };
+    const dietView = { plan: null, selectedDay: 0, adherence: null, adherenceDate: null };
     const workoutSharePhotoCache = new Map();
     const shareLogo = new Image();
-    shareLogo.src = "assets/ChatGPT Image 26 de ago. de 2026, 01_07_52.png";
+    shareLogo.src = "/assets/ChatGPT Image 26 de ago. de 2026, 01_07_52.png";
     const workoutView = {
         plan: null,
         days: [],
         selectedDay: 0,
+        editMode: false,
+        activeExerciseId: null,
+        skippedExerciseIds: new Set(),
+        completedSetCounts: new Map(),
         session: null,
         sessionLoading: false,
         sessionError: "",
@@ -176,6 +182,9 @@
         shareDraft: null,
         sharePhotoToken: 0,
         setDrafts: new Map(),
+        draftSaveTimers: new Map(),
+        rest: null,
+        sessionSheetExpanded: false,
         replacementPanels: new Map(),
         exerciseCatalog: [],
         addExerciseOpen: false,
@@ -185,9 +194,13 @@
     };
     let activeWorkoutSummary = null;
     let activeWizardType = null;
+    let workoutGesture = null;
+    let ignoreNextWorkoutSheetClick = false;
     let professionalWizardContext = null;
     let workoutTimerInterval = null;
+    let workoutRestInterval = null;
     let workoutSyncInterval = null;
+    let workoutRecommendationTimer = null;
     let activeDockRequestToken = 0;
 
     function byId(id) {
@@ -232,8 +245,9 @@
         try {
             response = await fetch(`${API_BASE}${path}`, fetchOptions);
         } catch (error) {
-            const connectionError = new Error("Não foi possível conectar ao servidor. Tente novamente.");
+            const connectionError = new Error("Sem conexão. Seus dados continuam salvos neste dispositivo e serão sincronizados automaticamente.");
             connectionError.cause = error;
+            connectionError.code = "offline";
             throw connectionError;
         }
 
@@ -256,7 +270,126 @@
             requestError.data = data;
             throw requestError;
         }
+        if (response.status === 202 && data.job_id) {
+            return window.waitForAIJob(data);
+        }
         return data;
+    }
+
+    function workoutDraftStorageKey(sessionId) {
+        const userId = window.currentUser?.id || "anonymous";
+        return `fittracker.workout-draft.v1.${userId}.${sessionId}`;
+    }
+
+    function readLocalWorkoutDraft(sessionId) {
+        if (!sessionId) return null;
+        try {
+            const parsed = JSON.parse(localStorage.getItem(workoutDraftStorageKey(sessionId)) || "null");
+            return parsed && typeof parsed === "object" ? parsed : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function persistWorkoutDraftLocally(sessionId) {
+        if (!sessionId) return;
+        const sets = Object.fromEntries(workoutView.setDrafts.entries());
+        try {
+            localStorage.setItem(workoutDraftStorageKey(sessionId), JSON.stringify({
+                sets,
+                rest: workoutView.rest,
+                activeExerciseId: workoutView.activeExerciseId,
+                skippedExerciseIds: Array.from(workoutView.skippedExerciseIds),
+                completedSetCounts: Object.fromEntries(workoutView.completedSetCounts.entries()),
+                updatedAt: new Date().toISOString(),
+            }));
+        } catch (error) {
+            // The server autosave remains available when browser storage is unavailable.
+        }
+    }
+
+    function clearLocalWorkoutDraft(sessionId) {
+        if (!sessionId) return;
+        try {
+            localStorage.removeItem(workoutDraftStorageKey(sessionId));
+        } catch (error) {
+            // Nothing else is required when storage is unavailable.
+        }
+    }
+
+    function resetWorkoutExecutionState() {
+        workoutView.setDrafts.clear();
+        workoutView.skippedExerciseIds.clear();
+        workoutView.completedSetCounts.clear();
+        workoutView.activeExerciseId = null;
+        workoutView.rest = null;
+        workoutView.sessionSheetExpanded = false;
+    }
+
+    function hydrateWorkoutDrafts(session) {
+        if (!session?.id) return;
+        const completedIds = new Set(asArray(session.completed_exercise_ids).map(String));
+        const local = readLocalWorkoutDraft(session.id);
+        const serverSets = session.draft_sets && typeof session.draft_sets === "object" ? session.draft_sets : {};
+        const localSets = local?.sets && typeof local.sets === "object" ? local.sets : {};
+        workoutView.setDrafts.clear();
+        workoutView.skippedExerciseIds = new Set(asArray(local?.skippedExerciseIds).map(String));
+        completedIds.forEach((exerciseId) => workoutView.skippedExerciseIds.delete(exerciseId));
+        workoutView.completedSetCounts = new Map(
+            Object.entries(local?.completedSetCounts || {}).map(([exerciseId, count]) => [String(exerciseId), Number(count) || 0])
+        );
+        workoutView.activeExerciseId = local?.activeExerciseId == null ? null : String(local.activeExerciseId);
+        Object.entries({ ...serverSets, ...localSets }).forEach(([exerciseId, sets]) => {
+            if (!completedIds.has(String(exerciseId)) && Array.isArray(sets)) {
+                workoutView.setDrafts.set(String(exerciseId), sets);
+            }
+        });
+        workoutView.rest = local?.rest?.endsAt > Date.now() ? local.rest : null;
+        persistWorkoutDraftLocally(session.id);
+    }
+
+    async function saveWorkoutDraftToServer(sessionId, exerciseId, sets) {
+        if (!sessionId || !exerciseId) return;
+        try {
+            await apiRequest(`/workout_sessions/${apiSegment(sessionId)}/exercises/${apiSegment(exerciseId)}/draft`, {
+                method: "PUT",
+                body: { sets },
+            });
+            if (isCurrentWorkoutSession(sessionId)) workoutView.sessionError = "";
+        } catch (error) {
+            if (isCurrentWorkoutSession(sessionId)) {
+                workoutView.sessionError = error.message;
+                renderWorkoutDetail({ preserveScroll: true });
+            }
+        }
+    }
+
+    function scheduleWorkoutDraftSave(exerciseId) {
+        const sessionId = workoutView.session?.id;
+        if (!sessionId || !exerciseId) return;
+        persistWorkoutDraftLocally(sessionId);
+        const key = String(exerciseId);
+        window.clearTimeout(workoutView.draftSaveTimers.get(key));
+        workoutView.draftSaveTimers.set(key, window.setTimeout(() => {
+            workoutView.draftSaveTimers.delete(key);
+            saveWorkoutDraftToServer(sessionId, exerciseId, asArray(workoutView.setDrafts.get(key)));
+        }, 500));
+    }
+
+    function clearWorkoutExerciseDraft(sessionId, exerciseId) {
+        const key = String(exerciseId);
+        window.clearTimeout(workoutView.draftSaveTimers.get(key));
+        workoutView.draftSaveTimers.delete(key);
+        workoutView.setDrafts.delete(key);
+        persistWorkoutDraftLocally(sessionId);
+    }
+
+    function syncWorkoutDrafts() {
+        const sessionId = workoutView.session?.id;
+        if (!sessionId || !navigator.onLine) return;
+        workoutView.setDrafts.forEach((sets, exerciseId) => {
+            saveWorkoutDraftToServer(sessionId, exerciseId, asArray(sets));
+        });
     }
 
     function invalidAttributes(name, state) {
@@ -296,9 +429,36 @@
         `).join("")}</div>${fieldError(name, state)}`;
     }
 
+    function workoutEquipmentPicker(state) {
+        const selected = new Set(asArray(state.answers.equipment));
+        const detailedEquipment = Object.fromEntries(
+            Object.entries(WORKOUT_EQUIPMENT).filter(([value]) => !["full_gym", "bodyweight"].includes(value))
+        );
+        const hasDetailedSelection = Object.keys(detailedEquipment).some((value) => selected.has(value));
+        const detailsOpen = Boolean(state.customEquipmentOpen || hasDetailedSelection);
+        const mainOptions = [
+            ["full_gym", "Academia completa"],
+            ["bodyweight", "Peso corporal"],
+        ].map(([value, label]) => `
+            <label class="wizard-check">
+                <input type="checkbox" name="equipment" value="${value}"${selected.has(value) ? " checked" : ""}${invalidAttributes("equipment", state)}>
+                <span class="wizard-check__surface"><i class="fas fa-check" aria-hidden="true"></i><span>${label}</span></span>
+            </label>
+        `).join("");
+        return `
+            <div class="wizard-check-grid"${state.fieldErrors.equipment ? ' aria-describedby="wizard-error-equipment"' : ""}>
+                ${mainOptions}
+                <label class="wizard-check">
+                    <input type="checkbox" name="equipment_picker" value="custom"${detailsOpen ? " checked" : ""}>
+                    <span class="wizard-check__surface"><i class="fas fa-check" aria-hidden="true"></i><span>Escolher equipamentos</span></span>
+                </label>
+            </div>
+            ${detailsOpen ? `<div class="wizard-equipment-details"><span>Equipamentos específicos</span>${checkboxCards("equipment", detailedEquipment, state.answers.equipment, state)}</div>` : fieldError("equipment", state)}`;
+    }
+
     function loadIngredientPool() {
         if (INGREDIENT_POOL.length || ingredientPoolLoading) return ingredientPoolLoading;
-        ingredientPoolLoading = fetch("minha-pasta/alimentos.json")
+        ingredientPoolLoading = fetch("/minha-pasta/alimentos.json")
             .then((response) => (response.ok ? response.json() : []))
             .then((data) => {
                 (Array.isArray(data) ? data : []).forEach((item) => {
@@ -374,7 +534,7 @@
                 </div>
                 <div class="wizard-field-row">
                     <div class="wizard-field"><label for="wizard-training-days">Treinos por semana</label><select id="wizard-training-days" name="training_days_per_week"${invalidAttributes("training_days_per_week", state)}>${selectOptions({ 0: "Não treino", 1: "1 dia", 2: "2 dias", 3: "3 dias", 4: "4 dias", 5: "5 dias", 6: "6 dias", 7: "7 dias" }, answers.training_days_per_week)}</select>${fieldError("training_days_per_week", state)}</div>
-                    <fieldset class="wizard-fieldset"><legend>Ritmo da mudança</legend>${radioCards("change_pace", CHANGE_PACES, answers.change_pace, state, true)}<small class="wizard-field-hint">O ritmo moderado ainda usa limites conservadores de segurança.</small></fieldset>
+                    ${["fat_loss", "muscle_gain"].includes(answers.goal) ? `<fieldset class="wizard-fieldset"><legend>Velocidade para atingir o objetivo</legend>${radioCards("change_pace", CHANGE_PACES, answers.change_pace, state, true)}<small class="wizard-field-hint">${answers.goal === "fat_loss" ? "Gradual reduz cerca de 10% das calorias; mais rápida, 15%." : "Gradual aumenta cerca de 5% das calorias; mais rápida, 8%."} A opção mais rápida exige mais atenção à recuperação e à adesão.</small></fieldset>` : `<div class="wizard-field"><span class="field-label">Meta energética</span><p class="wizard-field-hint">Para manutenção e saúde geral, não aplicamos redução nem aumento automático de calorias.</p></div>`}
                 </div>`;
         }
         if (state.step === 1) {
@@ -426,13 +586,37 @@
         }, {});
     }
 
-    function recommendedSplit(days, experienceLevel) {
-        const numericDays = Number(days);
-        if (numericDays === 2) return "full_body";
-        if (numericDays === 3) return experienceLevel === "beginner" ? "full_body" : "abc";
-        if (numericDays === 4) return "upper_lower";
-        if (numericDays === 5) return "abcde";
-        return "abc";
+    function workoutSplitCards(state) {
+        const options = compatibleSplits(state.answers.days_per_week);
+        const invalid = Boolean(state.fieldErrors.split_type);
+        return `<div class="wizard-choice-grid wizard-choice-grid--compact"${invalid ? ' aria-describedby="wizard-error-split_type"' : ""}>${Object.entries(options).map(([value, label]) => `
+            <label class="wizard-choice${state.answers.split_type === value ? " wizard-choice--selected" : ""}">
+                <input type="radio" name="split_type" value="${esc(value)}"${state.answers.split_type === value ? " checked" : ""}${invalidAttributes("split_type", state)}>
+                <span class="wizard-choice__surface"><span>${esc(label)}</span><i class="fas fa-check" aria-hidden="true"></i></span>
+            </label>
+        `).join("")}</div>${fieldError("split_type", state)}`;
+    }
+
+    function scheduleWorkoutRecommendation(delay = 150) {
+        window.clearTimeout(workoutRecommendationTimer);
+        workoutRecommendationTimer = window.setTimeout(async () => {
+            const state = wizardMemory.workout;
+            if (activeWizardType !== "workout" || state.step !== 1 || !window.currentUser) return;
+            const token = (state.recommendationToken || 0) + 1;
+            state.recommendationToken = token;
+            try {
+                const recommendation = await apiRequest("/workout_plans/recommendation", {
+                    method: "POST",
+                    body: buildWizardPayload("workout")
+                });
+                if (activeWizardType !== "workout" || state.recommendationToken !== token) return;
+                state.recommendation = recommendation;
+                if (!state.splitManuallySelected) state.answers.split_type = recommendation.recommended_split;
+                renderWizard();
+            } catch (error) {
+                if (state.recommendationToken === token) state.recommendation = null;
+            }
+        }, delay);
     }
 
     function renderWorkoutStep(state) {
@@ -449,11 +633,11 @@
         if (state.step === 1) {
             return `
                 <div class="wizard-step-heading" tabindex="-1"><span>Etapa 2 de 3</span><h4>Estrutura do treino</h4><p>A divisão já está limitada às opções compatíveis com sua frequência.</p></div>
+                <fieldset class="wizard-fieldset"><legend>Equipamentos disponíveis</legend><p class="wizard-field-hint">Escolha uma opção ou abra a lista para informar equipamentos específicos.</p>${workoutEquipmentPicker(state)}</fieldset>
                 <div class="wizard-field-row">
-                    <fieldset class="wizard-fieldset"><legend>Divisão semanal</legend><p class="wizard-field-hint"><strong>Recomendação para você:</strong> ${esc(labelFor(SPLIT_TYPES, recommendedSplit(answers.days_per_week, answers.experience_level)))}. Você pode escolher outra estrutura abaixo.</p>${radioCards("split_type", compatibleSplits(answers.days_per_week), answers.split_type, state, true)}</fieldset>
+                    <fieldset class="wizard-fieldset"><legend>Divisão semanal</legend><p class="wizard-field-hint">Selecionamos uma estrutura inicial conforme sua frequência e seus equipamentos. Você pode escolher outra opção.</p>${workoutSplitCards(state)}</fieldset>
                     <div class="wizard-field"><label for="wizard-session-duration">Duração por sessão</label><select id="wizard-session-duration" name="session_duration"${invalidAttributes("session_duration", state)}>${selectOptions({ 20: "20 minutos", 30: "30 minutos", 45: "45 minutos", 60: "60 minutos", 75: "75 minutos", 90: "90 minutos" }, answers.session_duration)}</select>${fieldError("session_duration", state)}</div>
-                </div>
-                <fieldset class="wizard-fieldset"><legend>Equipamentos disponíveis</legend><p class="wizard-field-hint">Marque tudo o que costuma estar ao seu alcance.</p>${checkboxCards("equipment", WORKOUT_EQUIPMENT, answers.equipment, state)}</fieldset>`;
+                </div>`;
         }
         return `
             <div class="wizard-step-heading" tabindex="-1"><span>Etapa 3 de 3</span><h4>Ajustes e revisão</h4><p>Esses detalhes ajudam a IA a criar um treino mais seguro e relevante.</p></div>
@@ -470,7 +654,7 @@
             ? [
                 ["Objetivo", labelFor(DIET_GOALS, answers.goal)],
                 ["Rotina", `${answers.meals_per_day} refeições, dieta ${labelFor(DIET_PATTERNS, answers.diet_pattern).toLowerCase()}`],
-                ["Meta energética", `${answers.training_days_per_week} treino(s)/semana, ritmo ${labelFor(CHANGE_PACES, answers.change_pace).toLowerCase()}`],
+                ["Meta energética", ["fat_loss", "muscle_gain"].includes(answers.goal) ? `${answers.training_days_per_week} treino(s)/semana, velocidade ${labelFor(CHANGE_PACES, answers.change_pace).toLowerCase()}` : `${answers.training_days_per_week} treino(s)/semana, sem ajuste automático`],
                 ["Preparo", `${labelFor(BUDGETS, answers.budget)}, até ${answers.prep_minutes} min`]
             ]
             : [
@@ -623,7 +807,7 @@
                 if (!["3", "4", "5"].includes(String(answers.meals_per_day))) errors.meals_per_day = "Escolha quantas refeições deseja.";
                 if (!DIET_PATTERNS[answers.diet_pattern]) errors.diet_pattern = "Selecione um padrão alimentar.";
                 if (!Array.from({ length: 8 }, (_, index) => String(index)).includes(String(answers.training_days_per_week))) errors.training_days_per_week = "Escolha entre 0 e 7 dias.";
-                if (!CHANGE_PACES[answers.change_pace]) errors.change_pace = "Selecione um ritmo.";
+                if (!CHANGE_PACES[answers.change_pace]) errors.change_pace = "Selecione uma velocidade.";
             } else if (step === 1) {
                 const fields = {
                     allergies: "Alergias",
@@ -743,6 +927,10 @@
 
         state.generating = true;
         renderWizard();
+        window.analytics?.track("plan_generation_requested", {
+            plan_type: type,
+            surface: professionalWizardContext ? "professional" : "self_service"
+        });
         let result;
         try {
             const path = professionalWizardContext
@@ -755,6 +943,21 @@
         } catch (error) {
             state.generating = false;
             const serverFields = error.fields && typeof error.fields === "object" ? error.fields : {};
+            const profileFields = Object.fromEntries(Object.entries(serverFields).filter(([field]) => field.startsWith("profile.")));
+            if (type === "diet" && Object.keys(profileFields).length) {
+                if (professionalWizardContext) {
+                    const details = Object.values(profileFields).filter(Boolean).join(" ");
+                    showWizardErrors(type, {}, `O aluno precisa completar o perfil antes da geração. ${details}`.trim());
+                    return;
+                }
+                const context = professionalWizardContext;
+                closePlanWizard();
+                window.requestProfileCompletion?.(() => {
+                    openPlanWizard(type, context);
+                    generatePlan(type);
+                }, profileFields);
+                return;
+            }
             showWizardErrors(type, serverFields, error.message);
             return;
         }
@@ -791,10 +994,26 @@
         if (!control.name) return;
         const state = wizardMemory[activeWizardType];
         if (control.id === "wizard-ingredient-input") return;
+        if (activeWizardType === "workout" && control.name === "equipment_picker") {
+            state.customEquipmentOpen = control.checked;
+            if (!control.checked) {
+                state.answers.equipment = asArray(state.answers.equipment).filter((value) => ["full_gym", "bodyweight"].includes(value));
+                state.recommendation = null;
+                scheduleWorkoutRecommendation();
+            }
+            renderWizard();
+            return;
+        }
         if (control.type === "checkbox") {
             const current = new Set(asArray(state.answers[control.name]));
-            if (control.checked) current.add(control.value);
-            else current.delete(control.value);
+            if (activeWizardType === "workout" && control.name === "equipment" && control.checked && control.value === "full_gym") {
+                current.clear();
+                current.add("full_gym");
+                state.customEquipmentOpen = false;
+            } else if (control.checked) {
+                if (activeWizardType === "workout" && control.name === "equipment") current.delete("full_gym");
+                current.add(control.value);
+            } else current.delete(control.value);
             state.answers[control.name] = Array.from(current);
         } else {
             state.answers[control.name] = control.value;
@@ -802,7 +1021,16 @@
         delete state.fieldErrors[control.name];
 
         if (activeWizardType === "workout" && ["days_per_week", "experience_level"].includes(control.name)) {
-            state.answers.split_type = recommendedSplit(state.answers.days_per_week, state.answers.experience_level);
+            state.splitManuallySelected = false;
+        }
+        if (activeWizardType === "workout" && control.name === "days_per_week") {
+            const compatible = SPLITS_BY_DAYS[Number(state.answers.days_per_week)] || [];
+            if (!compatible.includes(state.answers.split_type)) state.answers.split_type = compatible[0] || "full_body";
+        }
+        if (activeWizardType === "workout" && ["days_per_week", "experience_level", "split_type", "session_duration", "equipment"].includes(control.name)) {
+            if (control.name === "split_type") state.splitManuallySelected = true;
+            state.recommendation = null;
+            scheduleWorkoutRecommendation();
         }
         if (control.name === "notes") {
             const count = byId("planWizardStep")?.querySelector(".wizard-character-count");
@@ -853,6 +1081,7 @@
         if (state.step < 2) {
             state.step += 1;
             renderWizard({ focusHeading: true });
+            if (activeWizardType === "workout" && state.step === 1) scheduleWorkoutRecommendation(0);
             return;
         }
         await generatePlan(activeWizardType);
@@ -871,6 +1100,7 @@
     function renderPlanList(type, plans) {
         const container = byId(type === "diet" ? "dietPlansTableBody" : "workoutPlansTableBody");
         if (!container) return;
+        document.querySelector(`.fab--${type}-plans`)?.classList.toggle("hidden", !plans.length);
         if (!plans.length) {
             const isDiet = type === "diet";
             container.innerHTML = `
@@ -888,8 +1118,9 @@
             const count = isDiet ? plan.meals_count : plan.exercises_count;
             const countLabel = isDiet ? "refeições" : "exercícios";
             const fallback = isDiet ? "Plano alimentar personalizado para sua rotina." : "Treino personalizado para sua evolução.";
-            const currentBadge = !isDiet && plan.is_current ? '<span class="plan-current-pill"><i class="fas fa-star" aria-hidden="true"></i> Plano atual</span>' : "";
-            const adjustLabel = isDiet ? "Ajustar" : "Ajustar agenda";
+            const currentBadge = plan.is_current ? '<span class="plan-current-pill"><i class="fas fa-star" aria-hidden="true"></i> Plano atual</span>' : "";
+            const adjustLabel = isDiet ? (plan.is_current ? "Ajustar" : "Usar plano") : "Ajustar agenda";
+            const adjustAction = isDiet && !plan.is_current ? "set-current" : "adjust";
             return `
                 <article class="plan-card plan-card--${type} plan-card--clickable" role="button" tabindex="0" aria-label="Abrir ${isDiet ? "plano alimentar" : "plano de treino"} ${esc(plan.title || "")}" data-plan-action="view" data-plan-type="${type}" data-plan-id="${esc(plan.id)}">
                     <div class="plan-card__icon"><i class="fas ${isDiet ? "fa-apple-alt" : "fa-dumbbell"}" aria-hidden="true"></i></div>
@@ -900,7 +1131,7 @@
                         <span class="plan-date"><i class="far fa-calendar" aria-hidden="true"></i> Criado em ${esc(formatDateTime(plan.created_at))}</span>
                     </div>
                     <div class="plan-card__actions">
-                        <button type="button" data-plan-action="adjust" data-plan-type="${type}" data-plan-id="${esc(plan.id)}" class="btn-adjust"><i class="fas fa-sliders" aria-hidden="true"></i> ${adjustLabel}</button>
+                        <button type="button" data-plan-action="${adjustAction}" data-plan-type="${type}" data-plan-id="${esc(plan.id)}" class="btn-adjust"><i class="fas ${isDiet && !plan.is_current ? "fa-check" : "fa-sliders"}" aria-hidden="true"></i> ${adjustLabel}</button>
                         <button type="button" data-plan-action="delete" data-plan-type="${type}" data-plan-id="${esc(plan.id)}" class="btn-delete plan-delete" aria-label="Excluir ${isDiet ? "plano alimentar" : "plano de treino"}"><i class="fas fa-trash" aria-hidden="true"></i></button>
                     </div>
                 </article>`;
@@ -973,7 +1204,7 @@
                     </button>
                 `).join("")}
             </section>
-            <p class="workout-current-modal__hint">Se você mudar a quantidade de dias, o app vai pedir para adaptar ou gerar um novo treino.</p>
+            <p class="workout-current-modal__hint">Se você mudar a quantidade de dias, o app vai pedir para adaptar o treino atual.</p>
         `;
         const saveButton = byId("workoutCurrentModal").querySelector("[data-workout-current-save]");
         if (saveButton) {
@@ -1012,7 +1243,6 @@
         const weekdays = Array.from(new Set(workoutCurrentDecision.weekdays || [])).sort((a, b) => a - b);
         const endpoints = {
             adapt: { path: `/workout_plans/${apiSegment(workoutCurrentPlan.id)}/current/adapt`, method: "POST" },
-            generate: { path: `/workout_plans/${apiSegment(workoutCurrentPlan.id)}/current/generate`, method: "POST" },
             current: { path: `/workout_plans/${apiSegment(workoutCurrentPlan.id)}/current`, method: "PUT" },
         };
         const endpoint = endpoints[mode] || endpoints.current;
@@ -1021,6 +1251,10 @@
                 method: endpoint.method,
                 body: { weekdays },
             });
+            if (workoutView.plan && String(workoutView.plan.id) === String(result.plan_id || workoutCurrentPlan.id)) {
+                workoutView.plan.is_current = true;
+                renderWorkoutDetail({ preserveScroll: true });
+            }
             showToast(result.message || "Agenda atualizada.", "success");
             closeAppModal(byId("workoutCurrentDecisionModal"));
             closeAppModal(byId("workoutCurrentModal"));
@@ -1066,7 +1300,7 @@
     async function loadDietPlans() {
         if (!window.currentUser) {
             const container = byId("dietPlansTableBody");
-            if (container) container.innerHTML = '<div class="guest-presentation guest-presentation--standalone"><i class="fas fa-bowl-food"></i><div><strong>Cardápios alinhados ao seu objetivo</strong><p>Explore o questionário e gere planos personalizados com IA Premium.</p></div></div>';
+            if (container) container.innerHTML = '<div class="guest-presentation guest-presentation--standalone"><i class="fas fa-utensils"></i><div><strong>Cardápios alinhados ao seu objetivo</strong><p>Explore o questionário e gere planos personalizados com IA Premium.</p></div></div>';
             return [];
         }
         const container = byId("dietPlansTableBody");
@@ -1080,7 +1314,7 @@
             renderPlanList("diet", dietPlans);
             return dietPlans;
         } catch (error) {
-            showToast(error.message, "error");
+            if (container) container.innerHTML = `<div class="plans-empty" role="alert"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i><h3>Planos indisponíveis</h3><p>${esc(error.message)}</p><button type="button" class="btn-secondary" data-retry-plan-list="diet">Tentar novamente</button></div>`;
             return [];
         } finally {
             container?.setAttribute("aria-busy", "false");
@@ -1101,14 +1335,19 @@
             if (!container.children.length) container.innerHTML = planLoadingMarkup("Carregando planos de treino...");
         }
         try {
-            workoutTodayState = await apiRequest("/workouts/today").catch(() => null);
+            try {
+                workoutTodayState = await apiRequest("/workouts/today");
+                workoutTodayError = "";
+            } catch (error) {
+                workoutTodayError = error.message;
+            }
             const plansResult = await apiRequest("/workout_plans");
             workoutPlans = Array.isArray(plansResult) ? plansResult : [];
             renderFilteredWorkoutPlans();
             window.renderWorkoutTodayCard?.();
             return workoutPlans;
         } catch (error) {
-            showToast(error.message, "error");
+            if (container) container.innerHTML = `<div class="plans-empty" role="alert"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i><h3>Planos indisponíveis</h3><p>${esc(error.message)}</p><button type="button" class="btn-secondary" data-retry-plan-list="workout">Tentar novamente</button></div>`;
             return [];
         } finally {
             container?.setAttribute("aria-busy", "false");
@@ -1116,74 +1355,110 @@
     }
 
     function renderWorkoutTodayCard() {
+        renderWorkoutPlanHub();
         const container = byId("workoutTodayCard");
         if (!container) return;
+        byId('dietTab')?.classList.toggle('today-workout-priority', Boolean(window.currentUser) && ['active', 'scheduled'].includes(workoutTodayState?.state));
         if (!window.currentUser) {
-            container.innerHTML = `
-                <article class="workout-today-card__shell workout-today-card__shell--guest">
-                    <div>
-                        <span class="content-kicker">Treino do dia</span>
-                        <h3>Escolha seu plano principal</h3>
-                        <p>Depois da escolha, o app mostra exatamente o que treinar hoje.</p>
-                    </div>
-                    <button type="button" class="btn-primary" onclick="openAuthModal('Crie sua conta para salvar seu treino principal.', 'register')">Começar</button>
-                </article>`;
+            container.innerHTML = '<p class="today-muted">Entre para acompanhar seu treino.</p>';
             return;
         }
         if (!workoutTodayState) {
+            if (workoutTodayError) {
+                container.innerHTML = `<article class="workout-today-card__shell"><div><span class="content-kicker">Treino do dia</span><h3>Não foi possível atualizar</h3><p>${esc(workoutTodayError)}</p></div><button type="button" class="btn-secondary" data-workout-today-action="retry">Tentar novamente</button></article>`;
+                return;
+            }
             container.innerHTML = `
                 <article class="workout-today-card__shell">
-                    <div class="plans-loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Carregando seu treino de hoje...</span></div>
+                    <div class="plans-loading"><i data-lucide="loader-circle" class="today-icon--spin" aria-hidden="true"></i><span>Carregando seu treino de hoje...</span></div>
                 </article>`;
             return;
         }
         const state = workoutTodayState.state || "unconfigured";
-        const plan = workoutTodayState.current_plan;
         const day = workoutTodayState.current_day;
-        const week = Array.isArray(workoutTodayState.week) ? workoutTodayState.week : [];
-        const nextDay = workoutTodayState.next_day;
-        const title = {
-            active: "Treino em andamento",
-            scheduled: "Treino de hoje",
-            completed: "Treino concluído",
-            partial: "Treino parcial",
-            rest: "Dia de descanso",
-            unconfigured: "Escolha seu plano principal",
-        }[state] || "Treino do dia";
-        const subtitle = {
-            active: day?.title || plan?.title || "Retome de onde parou.",
-            scheduled: day?.title || plan?.title || "Sua próxima sessão já está definida.",
-            completed: day?.title || plan?.title || "Você já cumpriu o treino agendado.",
-            partial: day?.title || plan?.title || "Você fez parte do treino de hoje.",
-            rest: nextDay?.title || "Hoje é um dia de recuperação.",
-            unconfigured: "Defina um treino principal para a semana aparecer aqui.",
-        }[state] || "Seu treino principal";
+        const name = day?.title || workoutTodayState.current_plan?.title || 'Treino de hoje';
+        const operational = ['active', 'scheduled'].includes(state);
+        if (operational) {
+            container.innerHTML = `<div class="today-workout"><div class="today-workout__head"><span class="today-workout__icon"><i data-lucide="dumbbell" aria-hidden="true"></i></span><div><span class="today-muted">${state === 'active' ? 'Treino em andamento' : 'Treino de hoje'}</span><h2>${esc(name)}</h2></div></div><button type="button" class="btn-primary" data-workout-today-action="${state === 'active' ? 'open-plan' : 'start-today'}">${state === 'active' ? 'Continuar treino' : 'Iniciar treino'} <i data-lucide="arrow-right" aria-hidden="true"></i></button></div>`;
+        } else {
+            const label = { completed: 'Treino concluído', partial: 'Treino finalizado parcialmente', rest: 'Hoje é descanso', unconfigured: 'Seu treino ainda não está configurado. Acesse Treino.' }[state] || 'Treino indisponível';
+            container.innerHTML = `<div class="today-workout-status"><span>${esc(label)}</span>${['completed', 'partial'].includes(state) ? '<button type="button" class="text-button" data-workout-today-action="open-activity">Ver resumo</button>' : ''}</div>`;
+        }
+    }
+
+    function toggleWorkoutPlansLibrary(forceOpen) {
+        const library = byId("workoutPlansLibrary");
+        if (!library) return;
+        const shouldOpen = typeof forceOpen === "boolean" ? forceOpen : library.classList.contains("hidden");
+        library.classList.toggle("hidden", !shouldOpen);
+        if (shouldOpen) {
+            requestAnimationFrame(() => {
+                library.scrollIntoView({ behavior: "smooth", block: "start" });
+                byId("workoutPlansLibraryTitle")?.focus?.({ preventScroll: true });
+            });
+        }
+    }
+
+    function workoutHubExerciseMarkup(exercise, index) {
+        const prescription = [
+            exercise.sets ? `${exercise.sets} séries` : "",
+            exercise.reps ? `${exercise.reps} reps` : "",
+            exercise.rest_seconds ? `${exercise.rest_seconds}s descanso` : "",
+        ].filter(Boolean).join(" · ");
+        return `<li class="workout-hub-exercise"><span>${esc(exercise.order || index + 1)}</span><div><strong>${esc(exercise.name || "Exercício")}</strong><small>${esc(prescription || exercise.primary_muscle || "Ver prescrição")}</small></div></li>`;
+    }
+
+    function renderWorkoutPlanHub() {
+        const container = byId("workoutPlanHub");
+        if (!container) return;
+        if (!window.currentUser) {
+            container.innerHTML = '<article class="workout-today-card__shell workout-today-card__shell--guest"><div><span class="content-kicker">Treino de hoje</span><h3>Organize sua rotina de treino</h3><p>Entre para ver sua sessão, registrar séries e acompanhar a evolução.</p></div></article>';
+            return;
+        }
+        if (!workoutTodayState) {
+            container.innerHTML = workoutTodayError
+                ? `<article class="workout-today-card__shell"><div><span class="content-kicker">Treino de hoje</span><h3>Não foi possível atualizar</h3><p>${esc(workoutTodayError)}</p></div><button type="button" class="btn-secondary" data-workout-today-action="retry">Tentar novamente</button></article>`
+                : '<article class="workout-today-card__shell"><div class="plans-loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Carregando seu treino...</span></div></article>';
+            return;
+        }
+        const state = workoutTodayState.state || "unconfigured";
+        const plan = workoutTodayState.current_plan;
+        const day = workoutTodayState.current_day || workoutTodayState.next_day;
+        const exercises = asArray(day?.exercises);
+        const isNextWorkout = state === "rest";
+        const stateCopy = {
+            active: ["Treino em andamento", "Continue de onde parou"],
+            scheduled: ["Treino de hoje", "Sua sessão está pronta"],
+            completed: ["Treino concluído", "Sessão salva no histórico"],
+            partial: ["Treino finalizado", "Sessão parcial salva"],
+            rest: ["Hoje é descanso", "Próximo treino"],
+            unconfigured: ["Comece por aqui", "Nenhum plano principal"],
+        }[state] || ["Treino", "Sua sessão"];
         const actionLabel = {
             active: "Continuar treino",
-            scheduled: "Treinar agora",
-            completed: "Reabrir treino",
-            partial: "Ver treino",
-            rest: "Abrir treino",
-            unconfigured: "Definir principal",
+            scheduled: "Iniciar treino",
+            completed: "Ver resumo",
+            partial: "Ver resumo",
+            rest: "Ver próximo treino",
+            unconfigured: "Criar plano de treino",
         }[state] || "Abrir treino";
-        const planLabel = plan ? `${esc(plan.title || "Plano principal")}` : "Sem plano principal";
-        const weekMarkup = week.length ? `<div class="workout-today-card__week">${week.map((item) => `<span class="workout-today-card__day${item.active ? " is-active" : ""}${item.day_id ? " is-planned" : ""}"><strong>${esc(item.label)}</strong><small>${item.day_title ? esc(item.day_title) : (item.active ? "Hoje" : "—")}</small></span>`).join("")}</div>` : "";
+        const action = state === "unconfigured"
+            ? "create-workout"
+            : (["completed", "partial"].includes(state) ? "open-activity" : "open-plan");
+        const week = asArray(workoutTodayState.week);
+        const dayTitle = day?.title || (state === "unconfigured" ? "Seu primeiro treino começa com um plano" : plan?.title || "Treino indisponível");
         container.innerHTML = `
-            <article class="workout-today-card__shell workout-today-card__shell--${esc(state)}">
-                <div class="workout-today-card__head">
-                    <div>
-                        <span class="content-kicker">Treino do dia</span>
-                        <h3>${esc(title)}</h3>
-                        <p>${esc(subtitle)}</p>
-                    </div>
-                    <span class="workout-today-card__badge"><i class="fas fa-bolt" aria-hidden="true"></i> ${esc(planLabel)}</span>
-                </div>
-                ${weekMarkup}
-                <div class="workout-today-card__footer">
-                    <button type="button" class="btn-primary" data-workout-today-action="${state === "unconfigured" ? "open-plans" : "open-plan"}">${esc(actionLabel)}</button>
-                    ${state === "unconfigured" ? '<button type="button" class="btn-secondary" data-workout-today-action="open-plans">Ver planos</button>' : ''}
-                </div>
-            </article>`;
+            <article class="workout-hub-hero workout-hub-hero--${esc(state)}">
+                <header class="workout-hub-hero__header">
+                    <div><span class="workout-hub-state"><i class="fas ${state === "completed" ? "fa-circle-check" : state === "active" ? "fa-circle-play" : "fa-dumbbell"}" aria-hidden="true"></i> ${esc(stateCopy[0])}</span><small>${esc(stateCopy[1])}</small><h3>${esc(dayTitle)}</h3>${day?.focus ? `<p>${esc(day.focus)}</p>` : ""}</div>
+                    ${plan?.session_duration ? `<span class="workout-hub-duration"><i class="fas fa-clock" aria-hidden="true"></i>${esc(plan.session_duration)} min</span>` : ""}
+                </header>
+                <button type="button" class="btn-primary workout-hub-primary" data-workout-today-action="${action}">${esc(actionLabel)} <i class="fas fa-arrow-right" aria-hidden="true"></i></button>
+                ${exercises.length ? `<details class="workout-hub-details"><summary><span class="workout-hub-details__show"><i class="fas fa-list-check" aria-hidden="true"></i> Mostrar detalhes</span><span class="workout-hub-details__hide"><i class="fas fa-chevron-up" aria-hidden="true"></i> Ocultar detalhes</span><small>${esc(exercises.length)} exercícios</small></summary><section class="workout-hub-sequence" aria-labelledby="workoutHubSequenceTitle"><div class="workout-hub-section-title"><div><span>Sequência</span><h4 id="workoutHubSequenceTitle">${isNextWorkout ? "Exercícios do próximo treino" : "Exercícios da sessão"}</h4></div></div><ol>${exercises.map(workoutHubExerciseMarkup).join("")}</ol></section></details>` : state === "unconfigured" ? '<p class="workout-hub-empty-copy">Crie um plano adequado ao seu objetivo ou escolha um plano que você já salvou.</p>' : ""}
+            </article>
+            ${week.length ? `<section class="workout-hub-section workout-hub-week" aria-labelledby="workoutHubWeekTitle"><div class="workout-hub-section-title"><div><span>Visão semanal</span><h3 id="workoutHubWeekTitle">Sua semana</h3></div></div><div class="workout-today-card__week">${week.map(item => `<span class="workout-today-card__day${item.active ? " is-active" : ""}${item.day_id ? " is-planned" : ""}"><strong>${esc(item.label)}</strong><small>${item.day_title ? esc(item.day_title) : "Descanso"}</small></span>`).join("")}</div></section>` : ""}
+            ${plan ? `<section class="workout-hub-section workout-hub-plan" aria-labelledby="workoutHubPlanTitle"><div class="workout-hub-plan__copy"><span class="content-kicker">Plano atual</span><h3 id="workoutHubPlanTitle">${esc(plan.title || "Plano de treino")}</h3><p>${esc(plan.description || "Seu plano principal para esta rotina.")}</p><div class="workout-hub-plan__meta">${plan.days_count || plan.days_per_week ? `<span><i class="fas fa-calendar-week" aria-hidden="true"></i>${esc(plan.days_count || plan.days_per_week)} dias</span>` : ""}${plan.exercises_count ? `<span><i class="fas fa-list-check" aria-hidden="true"></i>${esc(plan.exercises_count)} exercícios</span>` : ""}</div></div><div class="workout-hub-plan__actions"><button type="button" class="btn-secondary" data-workout-today-action="open-plan">Ver plano</button><button type="button" class="text-button" onclick="window.openWorkoutCurrentModal?.(${Number(plan.id)})">Ajustar agenda</button></div></section>` : ""}
+            <section class="workout-hub-library-link" aria-label="Planejamento de treino"><div><span class="content-kicker">Planejamento</span><h3>Meus planos</h3><p>Consulte sua biblioteca, troque o plano principal ou crie outro.</p></div><button type="button" class="btn-secondary" onclick="toggleWorkoutPlansLibrary(true)">Abrir biblioteca</button></section>`;
     }
 
     async function loadWorkoutTodayCard(forceFetch = false) {
@@ -1199,9 +1474,11 @@
             return workoutTodayState;
         }
         try {
-            workoutTodayState = await apiRequest("/workouts/today");
+            const result = await apiRequest("/workouts/today");
+            workoutTodayState = result;
+            workoutTodayError = "";
         } catch (error) {
-            workoutTodayState = null;
+            workoutTodayError = error.message;
         }
         renderWorkoutTodayCard();
         return workoutTodayState;
@@ -1334,12 +1611,15 @@
         const groups = groupDietMeals(plan);
         if (dietView.selectedDay >= groups.length) dietView.selectedDay = 0;
         const targets = plan.nutrition_targets || {};
+        const currentAction = plan.is_current
+            ? '<span class="plan-current-pill"><i class="fas fa-star" aria-hidden="true"></i> Plano atual</span>'
+            : '<button type="button" class="btn-primary plan-use-current" data-diet-action="set-current"><i class="fas fa-check" aria-hidden="true"></i> Usar este plano</button>';
         const summary = `
             <section class="plan-summary">
                 <div class="plan-summary__icon"><i class="fas fa-apple-alt" aria-hidden="true"></i></div>
                 <div><span>Plano alimentar</span><p>${esc(plan.description || "Uma rotina alimentar organizada para você.")}</p></div>
                 <small><i class="far fa-calendar" aria-hidden="true"></i> ${esc(formatDateTime(plan.created_at))}</small>
-            </section>`;
+            </section><div class="plan-current-action">${currentAction}<button type="button" class="btn-secondary" onclick="openPlanReviewRequest('diet', '${esc(plan.id)}')"><i class="fas fa-user-check"></i> Solicitar revisão profissional</button>${plan.professional_review ? `<span class="professional-review-badge"><i class="fas fa-shield-check"></i> Revisado por ${esc(plan.professional_review.professional?.username || "profissional")}</span>` : ""}</div>`;
         if (!groups.length) {
             details.innerHTML = `${summary}<div class="plan-details-empty">Nenhuma refeição detalhada para este plano.</div>`;
             return;
@@ -1369,6 +1649,7 @@
             const plan = await apiRequest(`/diet_plans/${apiSegment(id)}`);
             dietView.plan = plan;
             dietView.selectedDay = 0;
+            dietView.plan.professional_review = await apiRequest(`/diet_plans/${apiSegment(id)}/professional-review`).then((result) => result.professional_review).catch(() => null);
             const title = byId("viewDietPlanTitle");
             if (title) title.textContent = plan.title || "Plano de Dieta";
             renderDietDetail();
@@ -1391,6 +1672,22 @@
             showToast(error.message, "error");
         } finally {
             hideGlobalLoading();
+        }
+    }
+
+    async function setCurrentDietPlan(id = dietView.plan?.id) {
+        if (!id) return;
+        try {
+            const result = await apiRequest(`/diet_plans/${apiSegment(id)}/current`, { method: "PUT" });
+            if (dietView.plan && String(dietView.plan.id) === String(id)) {
+                dietView.plan = { ...dietView.plan, ...result.plan, is_current: true };
+                renderDietDetail();
+            }
+            await loadDietPlans();
+            window.loadTodayCardapio?.();
+            showToast("Plano alimentar definido como atual.", "success");
+        } catch (error) {
+            showToast(error.message, "error");
         }
     }
 
@@ -1478,11 +1775,15 @@
             return;
         }
         const token = ++activeDockRequestToken;
-        let result = null;
+        let result;
         try {
             result = await apiRequest("/workout_sessions/active");
         } catch (error) {
-            result = null;
+            if (workoutView.session) {
+                workoutView.sessionError = error.message;
+                renderWorkoutDetail({ preserveScroll: true });
+            }
+            return;
         }
         if (token !== activeDockRequestToken || byId("mainScreen")?.classList.contains("hidden")) return;
         activeWorkoutSummary = result;
@@ -1491,6 +1792,7 @@
         if (!modalOpen || !workoutView.session) return;
         if (result?.session && String(result.session.id) === String(workoutView.session.id)) {
             workoutView.session = result.session;
+            hydrateWorkoutDrafts(result.session);
             renderWorkoutDetail({ preserveScroll: true });
         } else if (!result?.session) {
             workoutView.session = null;
@@ -1514,6 +1816,7 @@
         showGlobalLoading("Carregando atividade...");
         try {
             const result = await apiRequest(`/activities/${apiSegment(activityId)}`);
+            workoutView.editMode = false;
             workoutView.session = null;
             workoutView.completedSummary = {
                 ...result.activity,
@@ -1533,19 +1836,8 @@
         }
     }
 
-    async function createExerciseGoalFromSummary(exerciseKey, exerciseName) {
-        const target = window.prompt(`Qual carga total deseja atingir em ${exerciseName}?`, "");
-        if (target == null || String(target).trim() === "") return;
-        try {
-            await apiRequest("/progress/exercise-goals", {
-                method: "POST",
-                body: { exercise_key: exerciseKey, target_load_kg: Number(target) },
-            });
-            showToast("Meta de exercício criada.", "success");
-            window.loadProgressOverview?.();
-        } catch (error) {
-            showToast(error.message, "error");
-        }
+    function createExerciseGoalFromSummary(exerciseKey, exerciseName, trigger) {
+        window.openExerciseGoalForm?.(exerciseKey, exerciseName, trigger);
     }
 
     function isCurrentWorkoutSession(sessionId) {
@@ -1556,6 +1848,9 @@
         workoutView.viewVersion += 1;
         workoutView.requestToken += 1;
         workoutView.pendingAction = "";
+        workoutView.editMode = false;
+        workoutView.addExerciseOpen = false;
+        workoutView.replacementPanels.clear();
     }
 
     function exerciseImage(exercise) {
@@ -1584,32 +1879,46 @@
         if (!panel) return "";
         const permanent = panel.mode === "permanent";
         const panelId = `replacement-panel-${esc(exercise.id)}`;
+        const currentExercise = displayedExercise(exercise).exercise;
+        const replacementOptions = asArray(panel.options);
+        const visibleOptions = panel.expanded ? replacementOptions : replacementOptions.slice(0, 3);
         if (panel.loading) {
             return `<section id="${panelId}" class="replacement-panel" tabindex="-1" aria-live="polite"><div class="replacement-panel__loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Buscando alternativas seguras...</span></div></section>`;
         }
         return `
             <section id="${panelId}" class="replacement-panel" tabindex="-1" aria-labelledby="replacement-title-${esc(exercise.id)}">
                 <div class="replacement-panel__header">
-                    <div><span>${permanent ? "Alteração permanente" : "Somente nesta sessão"}</span><h6 id="replacement-title-${esc(exercise.id)}">Trocar ${esc(exercise.name)}</h6><p>Alternativas compatíveis com o mesmo padrão de movimento.</p></div>
+                    <div><span>${permanent ? "Alteração permanente" : "Somente nesta sessão"}</span><h6 id="replacement-title-${esc(exercise.id)}">Trocar ${esc(currentExercise.name || exercise.name)}</h6><p>Melhores opções compatíveis para continuar o treino.</p></div>
                     <button type="button" class="replacement-close" data-workout-action="close-replacements" data-exercise-id="${esc(exercise.id)}" aria-label="Fechar alternativas"><i class="fas fa-xmark" aria-hidden="true"></i></button>
                 </div>
                 ${panel.error ? `<p class="session-inline-error" role="alert">${esc(panel.error)}</p>` : ""}
                 ${panel.message ? `<p class="replacement-message">${esc(panel.message)}</p>` : ""}
                 <div class="replacement-options">
-                    ${asArray(panel.options).slice(0, 3).map((option) => `
+                    ${visibleOptions.map((option) => {
+                        const matchItems = [
+                            option.primary_muscle && option.primary_muscle === currentExercise.primary_muscle && '<span><i class="fas fa-bullseye" aria-hidden="true"></i> Mesmo músculo</span>',
+                            option.movement_pattern && option.movement_pattern === currentExercise.movement_pattern && '<span><i class="fas fa-arrows-rotate" aria-hidden="true"></i> Mesmo movimento</span>',
+                            option.equipment && option.equipment === currentExercise.equipment && '<span><i class="fas fa-dumbbell" aria-hidden="true"></i> Mesmo equipamento</span>'
+                        ].filter(Boolean);
+                        const matches = (matchItems.length ? matchItems : ['<span><i class="fas fa-check" aria-hidden="true"></i> Movimento compatível</span>']).join("");
+                        const reason = String(option.rationale || "Mantém o foco do exercício original.").replace(/_/g, " ");
+                        return `
                         <article class="replacement-option">
                             ${exerciseImageMarkup(option)}
-                            <div class="replacement-option__body"><h6>${esc(option.name)}</h6><p>${esc(option.rationale || "Mantém o foco do exercício original.")}</p><span><i class="fas fa-dumbbell" aria-hidden="true"></i> ${esc(equipmentLabel(option.equipment))}</span></div>
-                            <button type="button" class="replacement-apply" data-workout-action="${permanent ? "apply-permanent-replacement" : "apply-replacement"}" data-exercise-id="${esc(exercise.id)}" data-catalog-key="${esc(option.catalog_key)}"${panel.applying === option.catalog_key ? " disabled" : ""}>${panel.applying === option.catalog_key ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Aplicando' : permanent ? "Trocar no plano" : "Usar hoje"}</button>
-                        </article>`).join("")}
+                            <div class="replacement-option__body"><h6>${esc(option.name)}</h6><p>${esc(reason)}</p><div class="replacement-option__matches">${matches}</div><span class="replacement-option__equipment"><i class="fas fa-dumbbell" aria-hidden="true"></i> ${esc(equipmentLabel(option.equipment))}</span></div>
+                            <button type="button" class="replacement-apply" data-workout-action="${permanent ? "apply-permanent-replacement" : "apply-replacement"}" data-exercise-id="${esc(exercise.id)}" data-catalog-key="${esc(option.catalog_key)}"${panel.applying === option.catalog_key ? " disabled" : ""}>${panel.applying === option.catalog_key ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Aplicando' : permanent ? "Trocar no plano" : "Trocar por este"}</button>
+                        </article>`;
+                    }).join("")}
                 </div>
-                ${!panel.error && !asArray(panel.options).length ? '<div class="replacement-empty"><i class="fas fa-circle-info" aria-hidden="true"></i><span>Nenhuma alternativa disponível para os equipamentos do plano.</span></div>' : ""}
+                ${!panel.expanded && replacementOptions.length > 3 ? `<button type="button" class="replacement-show-more" data-workout-action="show-more-replacements" data-exercise-id="${esc(exercise.id)}"><i class="fas fa-chevron-down" aria-hidden="true"></i> Ver mais alternativas</button>` : ""}
+                ${!panel.error && !replacementOptions.length ? '<div class="replacement-empty"><i class="fas fa-circle-info" aria-hidden="true"></i><span>Nenhuma alternativa disponível para os equipamentos do plano.</span></div>' : ""}
             </section>`;
     }
 
     function renderExerciseCard(originalExercise, index) {
         const { exercise, override } = displayedExercise(originalExercise);
         const active = Boolean(workoutView.session);
+        const editing = !active && workoutView.editMode;
         const panel = workoutView.replacementPanels.get(String(originalExercise.id));
         const order = originalExercise.order || index + 1;
         const detailChips = [
@@ -1631,13 +1940,15 @@
                 </div>
                 ${active
                     ? `<div class="exercise-session-actions"><button type="button" class="machine-busy-button" data-workout-action="replacement-options" data-exercise-id="${esc(originalExercise.id)}" aria-expanded="${Boolean(panel)}" aria-controls="replacement-panel-${esc(originalExercise.id)}"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> Máquina ocupada</button>${override ? `<button type="button" class="restore-exercise-button" data-workout-action="restore-exercise" data-exercise-id="${esc(originalExercise.id)}"${workoutView.pendingAction === `restore-${originalExercise.id}` ? " disabled" : ""}><i class="fas fa-rotate-left" aria-hidden="true"></i> Restaurar original</button>` : ""}</div>`
-                    : `<div class="workout-edit-actions"><button type="button" data-workout-action="permanent-replacement-options" data-exercise-id="${esc(originalExercise.id)}" aria-expanded="${Boolean(panel)}" aria-controls="replacement-panel-${esc(originalExercise.id)}"><i class="fas fa-shuffle" aria-hidden="true"></i> Substituir</button><button type="button" class="workout-remove-exercise" data-workout-action="delete-plan-exercise" data-exercise-id="${esc(originalExercise.id)}"><i class="fas fa-trash" aria-hidden="true"></i> Remover</button></div>`}
-                ${renderReplacementPanel(originalExercise, panel)}
+                    : editing
+                        ? `<div class="workout-edit-actions"><button type="button" data-workout-action="permanent-replacement-options" data-exercise-id="${esc(originalExercise.id)}" aria-expanded="${Boolean(panel)}" aria-controls="replacement-panel-${esc(originalExercise.id)}"><i class="fas fa-shuffle" aria-hidden="true"></i> Substituir</button><button type="button" class="workout-remove-exercise" data-workout-action="delete-plan-exercise" data-exercise-id="${esc(originalExercise.id)}"><i class="fas fa-trash" aria-hidden="true"></i> Remover</button></div>`
+                        : ""}
+                ${active || editing ? renderReplacementPanel(originalExercise, panel) : ""}
             </article>`;
     }
 
     function renderAddExercisePanel(day) {
-        if (!workoutView.addExerciseOpen) return "";
+        if (!workoutView.editMode || !workoutView.addExerciseOpen) return "";
         if (workoutView.catalogLoading) return '<div class="workout-add-panel"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Carregando exercícios compatíveis...</div>';
         const existingKeys = new Set(asArray(day.exercises).map((exercise) => exercise.catalog_key));
         const options = asArray(workoutView.exerciseCatalog).filter((item) => !existingKeys.has(item.key));
@@ -1652,8 +1963,9 @@
         </section>`;
     }
 
-    function workoutSetRowMarkup(order, values = {}) {
-        return `<div class="workout-set-row"><strong>${esc(order)}</strong><label><span>Carga total em kg</span><input type="number" min="0" max="100000" step="0.01" inputmode="decimal" value="${esc(values.load_kg || "")}" data-workout-set-load aria-label="Carga total da série ${esc(order)} em kg"></label><label><span>Repetições</span><input type="number" min="1" max="1000" step="1" inputmode="numeric" value="${esc(values.repetitions || "")}" data-workout-set-repetitions aria-label="Repetições da série ${esc(order)}"></label><label class="workout-set-warmup"><input type="checkbox" data-workout-set-warmup${values.is_warmup ? " checked" : ""}><span>Aquecimento</span></label></div>`;
+    function workoutSetRowMarkup(order, values = {}, current = false) {
+        const completed = Boolean(values.completed);
+        return `<div class="workout-set-row${completed ? " is-complete" : ""}${current ? " is-current" : ""}" data-workout-set-completed="${completed}" data-workout-set-index="${order - 1}"><strong><small>Série</small>${esc(order)}</strong><label><span>Carga (kg)</span><input type="number" min="0" max="100000" step="0.01" inputmode="decimal" value="${esc(values.load_kg || "")}" data-workout-set-load aria-label="Carga total da série ${esc(order)} em kg"></label><label><span>Repetições</span><input type="number" min="1" max="1000" step="1" inputmode="numeric" value="${esc(values.repetitions || "")}" data-workout-set-repetitions aria-label="Repetições da série ${esc(order)}"></label><label class="workout-set-warmup"><input type="checkbox" data-workout-set-warmup${values.is_warmup ? " checked" : ""}><span>Aquecimento</span></label><button type="button" class="workout-set-complete" data-workout-action="toggle-set-complete" aria-pressed="${completed}" aria-label="${completed ? "Reabrir" : "Concluir"} série ${esc(order)}"><i class="fas ${completed ? "fa-check" : "fa-circle"}" aria-hidden="true"></i><span>${completed ? "Feita" : "Marcar"}</span></button>${!completed ? `<button type="button" class="workout-set-remove" data-workout-action="remove-set" aria-label="Remover série ${esc(order)}"><i class="fas fa-minus" aria-hidden="true"></i></button>` : ""}</div>`;
     }
 
     function captureWorkoutSetDraft(exerciseId) {
@@ -1663,7 +1975,54 @@
             load_kg: row.querySelector("[data-workout-set-load]")?.value.trim() || "",
             repetitions: row.querySelector("[data-workout-set-repetitions]")?.value.trim() || "",
             is_warmup: Boolean(row.querySelector("[data-workout-set-warmup]")?.checked),
+            completed: row.dataset.workoutSetCompleted === "true",
         })));
+        scheduleWorkoutDraftSave(exerciseId);
+    }
+
+    function formatRestRemaining(seconds) {
+        const safe = Math.max(0, Math.ceil(seconds));
+        return `${String(Math.floor(safe / 60)).padStart(2, "0")}:${String(safe % 60).padStart(2, "0")}`;
+    }
+
+    function renderWorkoutRest(nextStep = "Próxima série") {
+        if (!workoutView.rest?.endsAt || workoutView.rest.endsAt <= Date.now()) return "";
+        const remaining = (workoutView.rest.endsAt - Date.now()) / 1000;
+        return `<section class="workout-rest" role="timer" aria-live="polite"><div class="workout-rest__clock"><small><i class="fas fa-hourglass-half" aria-hidden="true"></i> Descanso</small><strong id="workoutRestTime">${formatRestRemaining(remaining)}</strong><span>${esc(nextStep)}</span></div><div class="workout-rest__actions"><button type="button" data-workout-action="adjust-rest" data-rest-seconds="30"><i class="fas fa-plus" aria-hidden="true"></i>30s</button><button type="button" class="workout-rest-skip" data-workout-action="skip-rest">Pular descanso</button></div></section>`;
+    }
+
+    function startWorkoutRest(seconds, exerciseId) {
+        const duration = Math.max(0, Math.min(600, Number(seconds) || 0));
+        if (!duration) return;
+        workoutView.rest = { duration, endsAt: Date.now() + duration * 1000, exerciseId: String(exerciseId) };
+        persistWorkoutDraftLocally(workoutView.session?.id);
+        renderWorkoutDetail({ preserveScroll: true });
+    }
+
+    function adjustWorkoutRest(seconds) {
+        if (!workoutView.rest) return;
+        const remaining = workoutView.rest.endsAt - Date.now() + Number(seconds) * 1000;
+        if (remaining <= 0) workoutView.rest = null;
+        else workoutView.rest.endsAt = Date.now() + Math.min(600000, remaining);
+        persistWorkoutDraftLocally(workoutView.session?.id);
+        renderWorkoutDetail({ preserveScroll: true });
+    }
+
+    function updateWorkoutRestTimer() {
+        if (!workoutView.rest) return;
+        const remaining = workoutView.rest.endsAt - Date.now();
+        if (remaining <= 0) {
+            workoutView.rest = null;
+            persistWorkoutDraftLocally(workoutView.session?.id);
+            navigator.vibrate?.(150);
+            renderWorkoutDetail({ preserveScroll: true });
+            return;
+        }
+        const timer = byId("workoutRestTime");
+        if (timer) timer.textContent = formatRestRemaining(remaining / 1000);
+        document.querySelectorAll("[data-workout-rest-compact]").forEach((element) => {
+            element.textContent = formatRestRemaining(remaining / 1000);
+        });
     }
 
     function performedSetsFromView(exerciseId) {
@@ -1684,86 +2043,157 @@
         });
     }
 
+    function workoutPlannedSetCount(exercise) {
+        return Math.min(20, Math.max(1, Number(displayedExercise(exercise).exercise.sets) || 1));
+    }
+
+    function workoutExecutionProgress(exercises, completedIds) {
+        let completedSets = 0;
+        let totalSets = 0;
+        exercises.forEach((exercise) => {
+            const id = String(exercise.id);
+            const drafts = asArray(workoutView.setDrafts.get(id));
+            const planned = Math.max(workoutPlannedSetCount(exercise), drafts.length);
+            totalSets += planned;
+            completedSets += completedIds.has(id)
+                ? (workoutView.completedSetCounts.get(id) ?? planned)
+                : drafts.filter((set) => set.completed).length;
+        });
+        const completedExercises = exercises.filter((exercise) => completedIds.has(String(exercise.id))).length;
+        const skippedExercises = exercises.filter((exercise) => workoutView.skippedExerciseIds.has(String(exercise.id))).length;
+        return { completedSets, totalSets, completedExercises, skippedExercises };
+    }
+
+    function firstPendingWorkoutExercise(exercises, completedIds) {
+        return exercises.find((exercise) => (
+            !completedIds.has(String(exercise.id))
+            && !workoutView.skippedExerciseIds.has(String(exercise.id))
+        ));
+    }
+
     function renderActiveWorkout(day) {
         const exercises = asArray(day.exercises);
         const completedIds = completedWorkoutExerciseIds();
-        const completedCount = exercises.filter((exercise) => completedIds.has(String(exercise.id))).length;
-        const currentOriginal = exercises.find((exercise) => !completedIds.has(String(exercise.id)));
-        const progress = exercises.length ? Math.round((completedCount / exercises.length) * 100) : 0;
+        const progressState = workoutExecutionProgress(exercises, completedIds);
+        const resolvedCount = progressState.completedExercises + progressState.skippedExercises;
+        const readyToFinish = Boolean(exercises.length) && resolvedCount === exercises.length;
+        const defaultExercise = firstPendingWorkoutExercise(exercises, completedIds);
+        const selectedExercise = exercises.find((item) => String(item.id) === String(workoutView.activeExerciseId));
+        const currentOriginal = readyToFinish ? null : selectedExercise || defaultExercise || exercises[0];
+        if (currentOriginal && String(workoutView.activeExerciseId || "") !== String(currentOriginal.id)) {
+            workoutView.activeExerciseId = String(currentOriginal.id);
+        }
+        const exerciseProgress = exercises.length ? Math.round((resolvedCount / exercises.length) * 100) : 0;
         const timer = formatWorkoutElapsed(workoutElapsedSeconds(workoutView.session?.started_at));
         const toolbar = `
             <header class="active-workout-toolbar">
-                <div class="active-workout-status"><span><i class="fas fa-circle" aria-hidden="true"></i> Treino em andamento</span><strong>${esc(day.title)}</strong></div>
-                <div class="active-workout-timer" aria-label="Tempo de treino"><small><i class="fas fa-stopwatch" aria-hidden="true"></i> Tempo</small><time data-workout-elapsed data-workout-started-at="${esc(workoutView.session?.started_at || "")}">${timer}</time></div>
-                <div class="active-workout-progress" aria-label="${completedCount} de ${exercises.length} exercícios concluídos"><span><b>${completedCount}</b> de ${exercises.length}</span><div aria-hidden="true"><i style="width:${progress}%"></i></div></div>
+                <div class="active-workout-status"><span><i class="fas fa-circle" aria-hidden="true"></i> Sessão em andamento</span><strong>${esc(day.title)}</strong></div>
+                <div class="active-workout-timer" aria-label="Duração atual do treino"><small><i class="fas fa-stopwatch" aria-hidden="true"></i> Duração</small><time data-workout-elapsed data-workout-started-at="${esc(workoutView.session?.started_at || "")}">${timer}</time></div>
+                <div class="active-workout-progress" aria-label="${progressState.completedExercises} de ${exercises.length} exercícios e ${progressState.completedSets} de ${progressState.totalSets} séries realizadas"><span><b>${progressState.completedExercises}</b> de ${exercises.length} exercícios</span><small>${progressState.completedSets} de ${progressState.totalSets} séries</small><div aria-hidden="true"><i style="width:${exerciseProgress}%"></i></div></div>
+                <button type="button" class="active-workout-exit" data-workout-action="close-active-workout"><i class="fas fa-chevron-down" aria-hidden="true"></i> Sair</button>
             </header>`;
-        if (!currentOriginal) {
+        const queue = exercises.map((item, index) => {
+            const id = String(item.id);
+            const done = completedIds.has(id);
+            const skipped = workoutView.skippedExerciseIds.has(id);
+            const active = currentOriginal && id === String(currentOriginal.id);
+            const shown = displayedExercise(item).exercise;
+            return `<li class="${done ? "is-complete" : skipped ? "is-skipped" : active ? "is-current" : ""}"><button type="button" data-workout-action="select-session-exercise" data-exercise-id="${esc(item.id)}"${active ? ' aria-current="step"' : ""}><span>${done ? '<i class="fas fa-check" aria-hidden="true"></i>' : skipped ? '<i class="fas fa-forward" aria-hidden="true"></i>' : index + 1}</span><strong>${esc(shown.name)}</strong><small>${done ? "Concluído" : skipped ? "Pulado" : active ? "Agora" : "Próximo"}</small></button></li>`;
+        }).join("");
+        if (readyToFinish || !currentOriginal) {
             return `
                 <section class="active-workout-shell active-workout-shell--complete">
                     ${toolbar}
                     <div class="workout-complete-state">
                         <span><i class="fas fa-trophy" aria-hidden="true"></i></span>
-                        <div><small>Sessão completa</small><h4 id="workoutCompleteTitle" tabindex="-1">Todos os exercícios foram concluídos</h4><p>Finalize o treino para salvar esta sessão no seu histórico.</p></div>
+                        <div><small>Pronta para finalizar</small><h4 id="workoutCompleteTitle" tabindex="-1">Revise e finalize sua sessão</h4><p>${progressState.completedExercises} exercícios concluídos · ${progressState.completedSets} séries realizadas${progressState.skippedExercises ? ` · ${progressState.skippedExercises} pulado(s)` : ""}.</p></div>
                         <button type="button" class="finish-workout-button active-workout-finish" data-workout-action="finish-session"${workoutView.pendingAction === "finish" ? " disabled" : ""}>${workoutView.pendingAction === "finish" ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i>' : '<i class="fas fa-flag-checkered" aria-hidden="true"></i>'} Finalizar treino</button>
                     </div>
+                    <details class="active-workout-queue"><summary><span>Revisar sequência</span><strong>${resolvedCount}/${exercises.length}</strong></summary><ol>${queue}</ol></details>
                 </section>`;
         }
 
+        const currentId = String(currentOriginal.id);
         const { exercise, override } = displayedExercise(currentOriginal);
-        const panel = workoutView.replacementPanels.get(String(currentOriginal.id));
-        const currentPosition = completedCount + 1;
+        const panel = workoutView.replacementPanels.get(currentId);
+        const currentIndex = exercises.indexOf(currentOriginal);
+        const exerciseDone = completedIds.has(currentId);
+        const exerciseSkipped = workoutView.skippedExerciseIds.has(currentId);
         const details = [
             exercise.primary_muscle && `<span><i class="fas fa-bullseye" aria-hidden="true"></i>${esc(exercise.primary_muscle)}</span>`,
             exercise.equipment && `<span><i class="fas fa-dumbbell" aria-hidden="true"></i>${esc(equipmentLabel(exercise.equipment))}</span>`,
-            exercise.rest_seconds && `<span><i class="fas fa-hourglass-half" aria-hidden="true"></i>${esc(exercise.rest_seconds)}s de descanso</span>`
+            exercise.rest_seconds && `<span><i class="fas fa-hourglass-half" aria-hidden="true"></i>${esc(exercise.rest_seconds)}s descanso</span>`
         ].filter(Boolean).join("");
-        const plannedSets = Math.min(10, Math.max(1, Number(exercise.sets) || 1));
-        const setDraft = asArray(workoutView.setDrafts.get(String(currentOriginal.id)));
+        const plannedSets = workoutPlannedSetCount(currentOriginal);
+        const setDraft = asArray(workoutView.setDrafts.get(currentId));
+        const setCount = Math.max(plannedSets, setDraft.length);
+        const currentSetIndex = Array.from({ length: setCount }, (_, index) => index).find((index) => !setDraft[index]?.completed);
         const setRows = Array.from(
-            { length: Math.max(plannedSets, setDraft.length) },
-            (_, index) => workoutSetRowMarkup(index + 1, setDraft[index])
+            { length: setCount },
+            (_, index) => workoutSetRowMarkup(index + 1, setDraft[index], index === currentSetIndex)
         ).join("");
-        const queue = exercises.map((item, index) => {
-            const done = completedIds.has(String(item.id));
-            const active = String(item.id) === String(currentOriginal.id);
-            const shown = displayedExercise(item).exercise;
-            return `<li class="${done ? "is-complete" : active ? "is-current" : ""}"><span>${done ? '<i class="fas fa-check" aria-hidden="true"></i>' : index + 1}</span><strong>${esc(shown.name)}</strong>${active ? "<small>Agora</small>" : ""}</li>`;
-        }).join("");
+        const nextStep = currentSetIndex == null
+            ? "Próximo exercício"
+            : `Próxima: ${exercise.name} · série ${currentSetIndex + 1} de ${setCount}`;
+        const navigation = `<nav class="current-exercise-navigation" aria-label="Navegação entre exercícios"><button type="button" data-workout-action="previous-session-exercise"${currentIndex <= 0 ? " disabled" : ""}><i class="fas fa-arrow-left" aria-hidden="true"></i> Anterior</button><span>${currentIndex + 1} de ${exercises.length}</span><button type="button" data-workout-action="next-session-exercise"${currentIndex >= exercises.length - 1 ? " disabled" : ""}>Próximo <i class="fas fa-arrow-right" aria-hidden="true"></i></button></nav>`;
+        const sheetExpanded = Boolean(workoutView.sessionSheetExpanded);
+        const currentSeriesLabel = currentSetIndex == null ? `${setCount} de ${setCount}` : `${currentSetIndex + 1} de ${setCount}`;
+        const plannedLoad = exercise.weight || "Conforme orientação";
+        const completeSetLabel = currentSetIndex == null
+            ? '<i class="fas fa-check-double" aria-hidden="true"></i> Séries concluídas'
+            : `<i class="fas fa-check" aria-hidden="true"></i> Concluir série ${currentSetIndex + 1}`;
+        const completeExerciseLabel = workoutView.pendingAction === `complete-${currentOriginal.id}`
+            ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Salvando...'
+            : '<i class="fas fa-check" aria-hidden="true"></i> Concluir exercício';
+        const stateContent = exerciseDone
+            ? `<div class="current-exercise-resolved is-complete"><i class="fas fa-circle-check" aria-hidden="true"></i><div><strong>Exercício concluído</strong><p>As séries registradas já foram salvas.</p></div></div>`
+            : exerciseSkipped
+                ? `<div class="current-exercise-resolved is-skipped"><i class="fas fa-forward" aria-hidden="true"></i><div><strong>Exercício pulado</strong><p>Ele não será contado como concluído.</p></div><button type="button" data-workout-action="resume-exercise" data-exercise-id="${esc(currentOriginal.id)}">Retomar exercício</button></div>`
+                : `<section class="workout-set-entry" aria-labelledby="workoutSetEntryTitle">
+                    <div class="workout-set-entry__heading"><div><small>Registro opcional</small><h4 id="workoutSetEntryTitle">Carga e repetições por série</h4></div><button type="button" data-workout-action="add-set"><i class="fas fa-plus" aria-hidden="true"></i> Adicionar série</button></div>
+                    <div class="workout-set-entry__rows">${setRows}</div>
+                    <button type="button" class="complete-current-set-button" data-workout-action="complete-current-set" data-exercise-id="${esc(currentOriginal.id)}" data-workout-set-index="${currentSetIndex == null ? "" : esc(currentSetIndex)}"${currentSetIndex == null || workoutView.pendingAction ? " disabled" : ""}>${completeSetLabel}</button>
+                    <p>O registro é opcional. Você também pode concluir o exercício sem preencher todas as séries.</p>
+                    <button type="button" class="complete-exercise-button workout-exercise-primary" data-workout-action="complete-exercise" data-exercise-id="${esc(currentOriginal.id)}"${workoutView.pendingAction ? " disabled" : ""}>${completeExerciseLabel}</button>
+                </section>`;
         return `
-            <section class="active-workout-shell">
-                ${toolbar}
-                ${workoutView.sessionError ? `<p class="session-inline-error" role="alert"><i class="fas fa-circle-exclamation" aria-hidden="true"></i> ${esc(workoutView.sessionError)}</p>` : ""}
-                <article class="current-exercise-stage" data-workout-swipe-card data-exercise-id="${esc(currentOriginal.id)}" aria-describedby="workoutSwipeHint">
-                    <span class="workout-swipe-action workout-swipe-action--complete" aria-hidden="true"><i class="fas fa-check"></i> Concluir</span>
-                    <span class="workout-swipe-action workout-swipe-action--replace" aria-hidden="true"><i class="fas fa-shuffle"></i> Alternativas</span>
+            <section class="active-workout-shell active-workout-shell--immersive">
+                <article class="current-exercise-stage current-exercise-stage--player${exerciseDone ? " is-completed-view" : exerciseSkipped ? " is-skipped-view" : ""}" data-workout-exercise-card data-exercise-id="${esc(currentOriginal.id)}">
                     <figure class="current-exercise-media">${exerciseImageMarkup(exercise)}</figure>
-                    <div class="current-exercise-content">
-                        <span class="current-exercise-kicker">Exercício ${currentPosition} de ${exercises.length}</span>
+                    ${toolbar}
+                    ${navigation}
+                    <div class="current-exercise-content current-exercise-content--overlay">
+                        <span class="current-exercise-kicker">Exercício ${currentIndex + 1} de ${exercises.length}</span>
                         ${override ? '<span class="session-override-badge"><i class="fas fa-shuffle" aria-hidden="true"></i> Substituição desta sessão</span>' : ""}
-                        <h3 id="currentExerciseTitle" tabindex="-1">${esc(exercise.name)}</h3>
-                        <div class="current-exercise-prescription"><strong>${esc(exercise.sets ?? "—")}<small>séries</small></strong><span>×</span><strong>${esc(exercise.reps ?? "—")}<small>repetições</small></strong></div>
-                        ${details ? `<div class="current-exercise-meta">${details}</div>` : ""}
-                        ${exercise.weight ? `<p class="current-exercise-note"><i class="fas fa-weight-hanging" aria-hidden="true"></i><span><strong>Carga</strong>${esc(exercise.weight)}</span></p>` : ""}
-                        ${exercise.effort_guidance ? `<p class="current-exercise-note"><i class="fas fa-gauge-high" aria-hidden="true"></i><span><strong>Esforço</strong>${esc(exercise.effort_guidance)}</span></p>` : ""}
-                        ${exercise.notes ? `<p class="current-exercise-instruction"><i class="fas fa-circle-info" aria-hidden="true"></i>${esc(exercise.notes)}</p>` : ""}
-                        <section class="workout-set-entry" aria-labelledby="workoutSetEntryTitle">
-                            <div class="workout-set-entry__heading"><div><small>Registro real</small><h4 id="workoutSetEntryTitle">Séries executadas</h4></div><button type="button" data-workout-action="add-set"><i class="fas fa-plus" aria-hidden="true"></i> Série</button></div>
-                            <div class="workout-set-entry__labels" aria-hidden="true"><span>Série</span><span>Carga total (kg)</span><span>Repetições</span></div>
-                            <div class="workout-set-entry__rows">${setRows}</div>
-                            <p>Preencha somente as séries realizadas. Deixe a carga vazia para exercícios sem carga externa.</p>
-                        </section>
-                        <div class="current-exercise-actions">
-                            <button type="button" class="complete-exercise-button" data-workout-action="complete-exercise" data-exercise-id="${esc(currentOriginal.id)}"${workoutView.pendingAction === `complete-${currentOriginal.id}` ? " disabled" : ""}>${workoutView.pendingAction === `complete-${currentOriginal.id}` ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Salvando...' : '<i class="fas fa-check" aria-hidden="true"></i> Exercício concluído'}</button>
-                            <button type="button" class="replace-current-exercise-button" data-workout-action="replacement-options" data-exercise-id="${esc(currentOriginal.id)}" aria-expanded="${Boolean(panel)}" aria-controls="replacement-panel-${esc(currentOriginal.id)}"><i class="fas fa-shuffle" aria-hidden="true"></i> Substituir</button>
-                            ${override ? `<button type="button" class="restore-exercise-button" data-workout-action="restore-exercise" data-exercise-id="${esc(currentOriginal.id)}"${workoutView.pendingAction === `restore-${currentOriginal.id}` ? " disabled" : ""}><i class="fas fa-rotate-left" aria-hidden="true"></i> Restaurar original</button>` : ""}
+                        <div class="current-exercise-title-row"><h3 id="currentExerciseTitle" tabindex="-1">${esc(exercise.name)}</h3></div>
+                        <div class="workout-player-tools">
+                            <div class="workout-player-prescription">
+                                <span><small>Carga</small><strong>${esc(plannedLoad)}</strong></span>
+                                <span><small>Reps</small><strong>${esc(exercise.reps ?? "—")}</strong></span>
+                                <span><small>Série</small><strong>${esc(currentSeriesLabel)}</strong></span>
+                            </div>
+                            ${!exerciseDone && !exerciseSkipped ? `<button type="button" class="replace-current-exercise-button replace-current-exercise-button--visible" data-workout-action="replacement-options" data-exercise-id="${esc(currentOriginal.id)}" aria-expanded="${Boolean(panel)}" aria-controls="replacement-panel-${esc(currentOriginal.id)}"><span aria-hidden="true">⇄</span> Trocar exercício</button>` : ""}
                         </div>
+                        <div class="workout-player-progress"><span>${progressState.completedExercises} de ${exercises.length} exercícios</span><i aria-hidden="true"><b style="width:${exerciseProgress}%"></b></i></div>
                     </div>
+                    ${workoutView.rest ? `<div class="workout-player-rest"><span><i class="fas fa-hourglass-half" aria-hidden="true"></i> Descanso</span><strong data-workout-rest-compact>${formatRestRemaining((workoutView.rest.endsAt - Date.now()) / 1000)}</strong></div>` : ""}
+                    <section class="workout-session-sheet${sheetExpanded ? " is-expanded" : " is-collapsed"}" data-workout-sheet aria-label="Controles da sessão">
+                        <button type="button" class="workout-sheet-handle" data-workout-action="toggle-session-sheet" aria-expanded="${sheetExpanded}" aria-controls="workoutSessionSheetContent"><span aria-hidden="true"></span><b>${sheetExpanded ? "Recolher painel" : "Arraste para registrar séries"}</b><i class="fas fa-chevron-${sheetExpanded ? "down" : "up"}" aria-hidden="true"></i></button>
+                        <div id="workoutSessionSheetContent" class="workout-session-sheet__scroll"${sheetExpanded ? "" : " inert"}>
+                            ${renderWorkoutRest(nextStep)}
+                            ${workoutView.sessionError ? `<p class="session-inline-error" role="alert"><i class="fas fa-circle-exclamation" aria-hidden="true"></i> <span>${esc(workoutView.sessionError)}</span><button type="button" data-workout-action="retry-session">Tentar novamente</button></p>` : ""}
+                            ${details ? `<div class="current-exercise-meta">${details}</div>` : ""}
+                            ${exercise.effort_guidance ? `<p class="current-exercise-note"><i class="fas fa-gauge-high" aria-hidden="true"></i><span><strong>Esforço</strong>${esc(exercise.effort_guidance)}</span></p>` : ""}
+                            ${exercise.notes ? `<p class="current-exercise-instruction"><i class="fas fa-circle-info" aria-hidden="true"></i>${esc(exercise.notes)}</p>` : ""}
+                            ${stateContent}
+                            ${!exerciseDone && !exerciseSkipped ? `<details class="current-exercise-secondary"><summary>Mais ações</summary><div><button type="button" class="skip-current-exercise-button" data-workout-action="skip-exercise" data-exercise-id="${esc(currentOriginal.id)}"><i class="fas fa-forward" aria-hidden="true"></i> Pular exercício</button>${override ? `<button type="button" class="restore-exercise-button" data-workout-action="restore-exercise" data-exercise-id="${esc(currentOriginal.id)}"${workoutView.pendingAction === `restore-${currentOriginal.id}` ? " disabled" : ""}><i class="fas fa-rotate-left" aria-hidden="true"></i> Restaurar original</button>` : ""}</div></details>` : ""}
+                            <details class="active-workout-queue"><summary><span>Sequência do treino</span><strong>${progressState.completedExercises} concluídos${progressState.skippedExercises ? ` · ${progressState.skippedExercises} pulado(s)` : ""}</strong></summary><ol>${queue}</ol></details>
+                            <div class="workout-sheet-session-actions"><button type="button" class="finish-workout-link" data-workout-action="finish-session"><i class="fas fa-stop-circle" aria-hidden="true"></i> Finalizar treino</button></div>
+                            <div class="workout-sheet-danger"><span>Encerrar sem salvar o treino</span><button type="button" class="cancel-workout-button" data-workout-action="cancel-session"><i class="fas fa-trash-can" aria-hidden="true"></i> Cancelar e apagar sessão</button></div>
+                        </div>
+                    </section>
                 </article>
-                <p id="workoutSwipeHint" class="workout-swipe-hint"><span><i class="fas fa-arrow-left" aria-hidden="true"></i> Alternativas</span><span><i class="fas fa-arrow-right" aria-hidden="true"></i> Concluir</span></p>
                 ${renderReplacementPanel(currentOriginal, panel)}
-                <details class="active-workout-queue"><summary><span>Sequência do treino</span><strong>${completedCount}/${exercises.length} concluídos</strong></summary><ol>${queue}</ol></details>
-                <button type="button" class="finish-workout-link" data-workout-action="finish-session"><i class="fas fa-stop-circle" aria-hidden="true"></i> Encerrar treino antes de concluir tudo</button>
-                <button type="button" class="cancel-workout-button" data-workout-action="cancel-session"><i class="fas fa-trash-can" aria-hidden="true"></i> Cancelar treino atual</button>
             </section>`;
     }
 
@@ -1776,8 +2206,11 @@
         const exerciseList = asArray(summary.exercises).map((exercise) => {
             const bestSetText = formatWorkoutBestSet(exercise.best_set);
             const hasRecord = asArray(exercise.personal_records).length > 0;
-            return `<li class="${hasRecord ? "has-personal-record" : ""}"><div><strong>${esc(exercise.name)}${hasRecord ? ' <em><i class="fas fa-trophy" aria-hidden="true"></i> Novo PR</em>' : ""}</strong><span>${esc(exercise.sets_performed)} ${exercise.sets_performed === 1 ? "série realizada" : "séries realizadas"}</span><span class="completed-workout-exercise-links">${exercise.catalog_key ? `<button type="button" data-workout-action="view-exercise-progress" data-exercise-key="${esc(exercise.catalog_key)}">Ver progresso</button><button type="button" data-workout-action="set-exercise-goal" data-exercise-key="${esc(exercise.catalog_key)}" data-exercise-name="${esc(exercise.name)}">Definir meta</button>` : ""}</span></div><b>${esc(bestSetText)}</b></li>`;
+            return `<li class="${hasRecord ? "has-personal-record" : ""}"><div><strong>${esc(exercise.name)}${hasRecord ? ' <em><i class="fas fa-trophy" aria-hidden="true"></i> Novo PR</em>' : ""}</strong><span>${esc(exercise.sets_performed)} ${exercise.sets_performed === 1 ? "série realizada" : "séries realizadas"}</span><span class="completed-workout-exercise-links">${exercise.catalog_key ? `<button type="button" data-workout-action="view-exercise-progress" data-exercise-key="${esc(exercise.catalog_key)}">Ver progresso</button><button type="button" data-workout-action="set-exercise-goal" data-exercise-key="${esc(exercise.catalog_key)}" data-exercise-name="${esc(exercise.name)}">Definir meta</button>` : ""}</span>${hasRecord ? (window.renderProgressRecord?.(exercise.personal_records[0]) || "") : ""}</div><b>${esc(bestSetText)}</b></li>`;
         }).join("");
+        const skippedList = asArray(summary.skipped_exercises).length
+            ? `<section class="completed-workout-skipped"><h4>Exercícios pulados</h4><ul>${asArray(summary.skipped_exercises).map((exercise) => `<li><i class="fas fa-forward" aria-hidden="true"></i><span>${esc(exercise.name)}</span></li>`).join("")}</ul></section>`
+            : "";
         const personalRecords = asArray(summary.personal_records);
         const recordsBlock = personalRecords.length ? `<section class="workout-result-highlight"><div><i class="fas fa-trophy" aria-hidden="true"></i><span><small>Novo progresso</small><strong>${esc(personalRecords.length)} ${personalRecords.length === 1 ? "novo recorde" : "novos recordes"}</strong></span></div>${personalRecords.map((record) => `<p><b>${esc(record.exercise_name)}</b><span>${esc(formatWorkoutBestSet(record))}</span></p>`).join("")}</section>` : "";
         const weekly = summary.weekly_progress?.current;
@@ -1790,7 +2223,7 @@
         }
 
         return `<section class="completed-workout-summary">
-            <header><span><i class="fas fa-check" aria-hidden="true"></i></span><div><small>Treino concluído</small><h3>${esc(summary.workout_name)}</h3><p>${summary.exercises_performed === summary.total_exercises ? "Sessão completa" : `${esc(summary.exercises_performed)} de ${esc(summary.total_exercises)} exercícios concluídos`}</p></div></header>
+            <header><span><i class="fas ${summary.completion_state === "partial" ? "fa-flag" : "fa-check"}" aria-hidden="true"></i></span><div><small>${summary.completion_state === "partial" ? "Treino finalizado parcialmente" : "Treino concluído"}</small><h3>${esc(summary.workout_name)}</h3><p>${summary.exercises_performed === summary.total_exercises ? "Sessão completa" : `${esc(summary.exercises_performed)} de ${esc(summary.total_exercises)} exercícios concluídos${summary.skipped_count ? ` · ${esc(summary.skipped_count)} pulado(s)` : ""}`}</p></div></header>
             <div class="completed-workout-metrics">
                 <article><i class="fas fa-stopwatch" aria-hidden="true"></i><strong>${esc(formatWorkoutElapsed(summary.duration_seconds))}</strong><span>duração</span></article>
                 <article><i class="fas fa-dumbbell" aria-hidden="true"></i><strong>${esc(summary.exercises_performed)}</strong><span>exercícios</span></article>
@@ -1799,8 +2232,8 @@
             </div>
             ${recordsBlock}${weeklyBlock}${achievementsBlock}
             <button type="button" class="workout-share-button" data-workout-action="open-workout-share"><i class="fas fa-share-nodes" aria-hidden="true"></i><span><strong>${workoutView.summaryOrigin === "activities" ? "Compartilhar atividade" : "Compartilhar treino"}</strong><small>Criar card com foto e exercícios</small></span><i class="fas fa-arrow-right" aria-hidden="true"></i></button>
-            ${workoutView.summaryOrigin === "workout" ? '<button type="button" class="workout-save-button" data-workout-action="save-workout-profile"><i class="fas fa-bookmark" aria-hidden="true"></i><span><strong>Salvar no perfil</strong><small>Registrar e ver suas atividades</small></span><i class="fas fa-arrow-right" aria-hidden="true"></i></button>' : ""}
             ${exerciseList ? `<section class="completed-workout-exercises"><h4>Exercícios realizados</h4><ul>${exerciseList}</ul></section>` : '<p class="completed-workout-empty">Nenhum exercício foi marcado como concluído.</p>'}
+            ${skippedList}
             ${workoutView.summaryOrigin === "activities" ? '<button type="button" class="workout-delete-button" data-workout-action="delete-activity"><i class="fas fa-trash" aria-hidden="true"></i> Excluir atividade</button>' : ""}
             <button type="button" class="completed-workout-close" data-workout-action="close-summary">${workoutView.summaryOrigin === "activities" ? "Voltar às atividades" : "Voltar ao plano"}</button>
         </section>`;
@@ -2329,9 +2762,29 @@
         }
     }
 
+    function contextualWorkoutDay(plan) {
+        if (!plan?.is_current || String(workoutTodayState?.current_plan_id || "") !== String(plan.id || "")) return null;
+        return ["active", "scheduled"].includes(workoutTodayState?.state)
+            ? workoutTodayState.current_day
+            : workoutTodayState?.next_day;
+    }
+
+    function setWorkoutPlanEditMode(editing) {
+        if (workoutView.session || workoutView.sessionLoading || workoutView.pendingAction) return;
+        workoutView.editMode = Boolean(editing);
+        workoutView.addExerciseOpen = false;
+        workoutView.replacementPanels.clear();
+        renderWorkoutDetail({
+            focusSelector: editing
+                ? "#workoutPlanEditTitle"
+                : '[data-workout-action="enter-plan-edit"]'
+        });
+    }
+
     function renderWorkoutDetail(options = {}) {
         const details = byId("viewWorkoutPlanDetails");
         if (!details) return;
+        byId("viewWorkoutPlanModal")?.classList.toggle("workout-execution-mode", Boolean(workoutView.session && !workoutView.completedSummary));
         const previousScroll = options.preserveScroll ? details.scrollTop : 0;
         if (workoutView.completedSummary) {
             const title = byId("viewWorkoutPlanTitle");
@@ -2345,17 +2798,39 @@
         if (!plan) return;
         if (workoutView.selectedDay >= workoutView.days.length) workoutView.selectedDay = 0;
         const day = selectedWorkoutDay();
+        const editing = workoutView.editMode && !workoutView.session;
+        const contextualDay = contextualWorkoutDay(plan);
         const summaryMeta = [
-            plan.goal && labelFor(WORKOUT_GOALS, plan.goal, plan.goal),
-            plan.experience_level && labelFor(EXPERIENCE_LEVELS, plan.experience_level, plan.experience_level),
-            plan.session_duration && `${plan.session_duration} min`
+            plan.split_type && `<span><i class="fas fa-layer-group" aria-hidden="true"></i><small>Divisão</small><strong>${esc(labelFor(SPLIT_TYPES, plan.split_type, plan.split_type))}</strong></span>`,
+            (plan.days_count || plan.days_per_week || workoutView.days.length) && `<span><i class="fas fa-calendar-week" aria-hidden="true"></i><small>Frequência</small><strong>${esc(plan.days_count || plan.days_per_week || workoutView.days.length)} dias/semana</strong></span>`,
+            plan.session_duration && `<span><i class="fas fa-clock" aria-hidden="true"></i><small>Duração</small><strong>${esc(plan.session_duration)} min</strong></span>`
         ].filter(Boolean);
+        const currentAction = plan.is_current
+            ? '<span class="plan-current-pill"><i class="fas fa-star" aria-hidden="true"></i> Plano atual</span>'
+            : '<button type="button" class="btn-primary plan-use-current" data-workout-action="use-current-plan"><i class="fas fa-check" aria-hidden="true"></i> Usar este plano</button>';
+        const professionalReview = plan.professional_review
+            ? `<span class="professional-review-badge"><i class="fas fa-shield-check" aria-hidden="true"></i> Revisado por ${esc(plan.professional_review.professional?.username || "profissional")}</span>`
+            : "";
+        const editContext = editing ? `
+            <section class="workout-plan-edit-context" aria-labelledby="workoutPlanEditTitle">
+                <div><span>Modo de edição</span><h3 id="workoutPlanEditTitle" tabindex="-1">Editar estrutura do plano</h3><p>Adicione, remova ou substitua exercícios. As mudanças valem para as próximas sessões.</p></div>
+                <div class="workout-plan-edit-context__actions">
+                    <button type="button" class="btn-secondary" data-workout-action="request-plan-review"><i class="fas fa-user-check" aria-hidden="true"></i> Solicitar revisão</button>
+                    <button type="button" class="workout-plan-edit-back" data-workout-action="exit-plan-edit"><i class="fas fa-arrow-left" aria-hidden="true"></i> Voltar ao plano</button>
+                </div>
+            </section>` : "";
+        const nextWorkout = !editing && contextualDay ? `
+            <section class="workout-plan-next" aria-label="Próximo treino">
+                <span><i class="fas fa-forward" aria-hidden="true"></i>${workoutTodayState?.state === "active" ? "Em andamento" : workoutTodayState?.state === "scheduled" ? "Treino de hoje" : "Próximo treino"}</span>
+                <strong>${esc(contextualDay.title || contextualDay.code || "Treino programado")}</strong>
+                ${contextualDay.focus ? `<small>${esc(contextualDay.focus)}</small>` : ""}
+            </section>` : "";
         const summary = `
-            <section class="plan-summary workout-summary">
-                <div class="plan-summary__icon"><i class="fas fa-dumbbell" aria-hidden="true"></i></div>
-                <div><span>Plano de treino</span><p>${esc(plan.description || "Uma rotina criada para sua evolução.")}</p>${summaryMeta.length ? `<div class="workout-summary__meta">${summaryMeta.map((item) => `<small>${esc(item)}</small>`).join("")}</div>` : ""}</div>
-                <small><i class="far fa-calendar" aria-hidden="true"></i> ${esc(formatDateTime(plan.created_at))}</small>
-            </section>`;
+            <section class="workout-plan-overview${editing ? " is-editing" : ""}">
+                <div class="workout-plan-overview__icon"><i class="fas fa-dumbbell" aria-hidden="true"></i></div>
+                <div class="workout-plan-overview__copy"><span>${plan.is_current ? "Plano atual" : "Plano de treino"}</span><h3>${esc(plan.title || "Plano de treino")}</h3><p>${esc(plan.description || "Uma rotina criada para sua evolução.")}</p>${summaryMeta.length ? `<div class="workout-summary__meta">${summaryMeta.join("")}</div>` : ""}${professionalReview}</div>
+                <div class="workout-plan-overview__actions">${currentAction}${editing ? "" : `<button type="button" class="workout-plan-edit-entry" data-workout-action="enter-plan-edit"${workoutView.sessionLoading ? " disabled" : ""}><i class="fas fa-pen" aria-hidden="true"></i> Editar plano</button>`}</div>
+            </section>${editContext}${nextWorkout}`;
         if (!day) {
             details.innerHTML = `${summary}<div class="plan-details-empty">Nenhum exercício detalhado para este plano.</div>`;
             return;
@@ -2366,7 +2841,9 @@
             <div class="plan-day-tabs plan-day-tabs--workout" role="tablist" aria-label="Dias do plano de treino">
                 ${workoutView.days.map((workoutDay, index) => `<button type="button" role="tab" id="workout-day-tab-${index}" aria-controls="workout-day-panel" aria-selected="${index === workoutView.selectedDay}" tabindex="${index === workoutView.selectedDay ? "0" : "-1"}" class="plan-day-tab${index === workoutView.selectedDay ? " active" : ""}" data-workout-action="select-day" data-day-index="${index}"><span>${esc(workoutDay.code || `Dia ${index + 1}`)}</span><strong>${esc(workoutDay.title || `Treino ${index + 1}`)}</strong></button>`).join("")}
             </div>`;
-        const sessionControls = workoutView.sessionLoading
+        const sessionControls = editing
+            ? '<span class="workout-edit-day-status"><i class="fas fa-pen-ruler" aria-hidden="true"></i> Editando este treino</span>'
+            : workoutView.sessionLoading
             ? '<div class="session-loading" role="status"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Verificando sessão...</div>'
             : session
                 ? `<div class="active-session-bar"><div><span><i class="fas fa-circle" aria-hidden="true"></i> Treino em andamento</span><small>Iniciado em ${esc(formatDateTime(session.started_at))}</small></div><i class="fas fa-stopwatch" aria-hidden="true"></i></div>`
@@ -2377,17 +2854,18 @@
             ? `<button type="button" class="finish-workout-button finish-workout-button--full" data-workout-action="finish-session"${workoutView.pendingAction === "finish" ? " disabled" : ""}>${workoutView.pendingAction === "finish" ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i>' : '<i class="fas fa-circle-check" aria-hidden="true"></i>'} Finalizar treino</button>`
             : "";
         const panel = session ? renderActiveWorkout(day) : `
-            <section id="workout-day-panel" role="tabpanel" aria-labelledby="workout-day-tab-${workoutView.selectedDay}" class="workout-day-panel">
-                <div class="workout-day-header"><div><span>Treino selecionado</span><h4>${esc(day.title)}</h4>${day.focus ? `<p>${esc(day.focus)}</p>` : ""}</div>${sessionControls}</div>
+            <section id="workout-day-panel" role="tabpanel" aria-labelledby="workout-day-tab-${workoutView.selectedDay}" class="workout-day-panel${editing ? " is-editing" : ""}">
+                <div class="workout-day-header"><div><span>${editing ? "Estrutura do treino" : contextualDay && String(contextualDay.id) === String(day.id) ? workoutTodayState?.state === "scheduled" ? "Treino de hoje" : "Próximo treino" : "Treino selecionado"}</span><h4>${esc(day.title)}</h4>${day.focus ? `<p>${esc(day.focus)}</p>` : ""}</div>${sessionControls}</div>
                 ${workoutView.sessionError ? `<p class="session-inline-error" role="alert"><i class="fas fa-circle-exclamation" aria-hidden="true"></i> ${esc(workoutView.sessionError)}</p>` : ""}
-                <div class="plan-section-title workout-plan-edit-heading"><span><i class="fas fa-bolt" aria-hidden="true"></i> Sequência do dia</span><div><small>${asArray(day.exercises).length} exercícios</small><button type="button" data-workout-action="toggle-add-exercise"><i class="fas fa-plus" aria-hidden="true"></i> Adicionar</button></div></div>
+                <div class="plan-section-title workout-plan-edit-heading"><span><i class="fas fa-bolt" aria-hidden="true"></i> Sequência do dia</span><div><small>${asArray(day.exercises).length} exercícios</small>${editing ? '<button type="button" data-workout-action="toggle-add-exercise"><i class="fas fa-plus" aria-hidden="true"></i> Adicionar</button>' : ""}</div></div>
                 ${renderAddExercisePanel(day)}
                 <div class="exercise-list">${asArray(day.exercises).length ? asArray(day.exercises).map(renderExerciseCard).join("") : '<div class="plan-details-empty">Nenhum exercício neste dia.</div>'}</div>
                 ${sessionFooter}
             </section>`;
         const title = byId("viewWorkoutPlanTitle");
-        if (title) title.textContent = session ? "Treino em andamento" : plan.title || "Plano de Treino";
+        if (title) title.textContent = session ? "Treino em andamento" : editing ? "Editar plano" : plan.title || "Plano de Treino";
         details.innerHTML = `${session ? "" : summary}${tabs}${panel}`;
+        byId("viewWorkoutPlanModal")?.classList.toggle("workout-execution-mode", Boolean(details.querySelector(".active-workout-shell--immersive")));
         details.scrollTop = previousScroll;
         updateWorkoutTimer();
         if (options.focusSelector) requestAnimationFrame(() => details.querySelector(options.focusSelector)?.focus());
@@ -2397,7 +2875,6 @@
         const day = selectedWorkoutDay();
         workoutView.requestToken += 1;
         const token = workoutView.requestToken;
-        workoutView.session = null;
         workoutView.sessionError = "";
         workoutView.replacementPanels.clear();
         if (!day?.id || !workoutView.plan?.id) {
@@ -2412,6 +2889,8 @@
             if (token !== workoutView.requestToken) return;
             workoutView.session = result.session || null;
             if (workoutView.session) {
+                workoutView.editMode = false;
+                hydrateWorkoutDrafts(workoutView.session);
                 activeWorkoutSummary = {
                     session: workoutView.session,
                     plan: { id: workoutView.plan.id, title: workoutView.plan.title },
@@ -2446,20 +2925,23 @@
                 : 0;
             if (String(workoutView.plan?.id || "") !== String(plan.id)) workoutView.exerciseCatalog = [];
             workoutView.plan = plan;
+            workoutView.plan.professional_review = await apiRequest(`/workout_plans/${apiSegment(id)}/professional-review`).then((result) => result.professional_review).catch(() => null);
             workoutView.days = normalizedWorkoutDays(plan);
-            const preferredDayIndex = preferredDayId == null
+            const operationalDayId = preferredDayId == null ? contextualWorkoutDay(plan)?.id : preferredDayId;
+            const preferredDayIndex = operationalDayId == null
                 ? -1
-                : workoutView.days.findIndex((day) => String(day.id) === String(preferredDayId));
+                : workoutView.days.findIndex((day) => String(day.id) === String(operationalDayId));
             workoutView.selectedDay = preferredDayIndex >= 0
                 ? preferredDayIndex
                 : Math.min(reopenSelectedDay, Math.max(workoutView.days.length - 1, 0));
+            workoutView.editMode = false;
             workoutView.session = null;
             workoutView.completedSummary = null;
             workoutView.shareOpen = false;
             workoutView.shareDraft = null;
             workoutView.sharePhotoToken += 1;
             workoutView.summaryOrigin = "workout";
-            workoutView.setDrafts.clear();
+            resetWorkoutExecutionState();
             workoutView.sessionError = "";
             workoutView.pendingAction = "";
             workoutView.replacementPanels.clear();
@@ -2504,6 +2986,8 @@
             const result = await apiRequest(`/workout_plans/${apiSegment(workoutView.plan.id)}/days/${apiSegment(day.id)}/sessions`, { method: "POST" });
             if (viewVersion !== workoutView.viewVersion || String(workoutView.plan?.id) !== String(planId) || String(selectedWorkoutDay()?.id) !== String(dayId)) return;
             workoutView.session = result.session;
+            workoutView.editMode = false;
+            hydrateWorkoutDrafts(result.session);
             activeWorkoutSummary = {
                 session: result.session,
                 plan: { id: workoutView.plan.id, title: workoutView.plan.title },
@@ -2536,9 +3020,10 @@
             workoutView.replacementPanels.set(key, {
                 mode: "session",
                 loading: false,
-                options: asArray(result.options).slice(0, 3),
+                options: asArray(result.options),
                 message: result.message || "",
                 error: "",
+                expanded: false,
                 payload
             });
         } catch (error) {
@@ -2597,7 +3082,7 @@
 
     async function openPermanentReplacementOptions(exerciseId) {
         const exercise = findSelectedExercise(exerciseId);
-        if (!exercise || workoutView.session || !workoutView.plan?.id) return;
+        if (!exercise || workoutView.session || !workoutView.editMode || !workoutView.plan?.id) return;
         const key = String(exercise.id);
         workoutView.replacementPanels.set(key, { mode: "permanent", loading: true, options: [], message: "", error: "" });
         renderWorkoutDetail({ preserveScroll: true, focusSelector: `#replacement-panel-${exercise.id}` });
@@ -2614,7 +3099,7 @@
         const exercise = findSelectedExercise(exerciseId);
         const panel = workoutView.replacementPanels.get(String(exerciseId));
         const dayId = selectedWorkoutDay()?.id;
-        if (!exercise || panel?.mode !== "permanent" || panel.applying) return;
+        if (!exercise || !workoutView.editMode || panel?.mode !== "permanent" || panel.applying) return;
         panel.applying = catalogKey;
         renderWorkoutDetail({ preserveScroll: true });
         try {
@@ -2632,7 +3117,7 @@
     }
 
     async function toggleAddPlanExercise() {
-        if (workoutView.session) return;
+        if (workoutView.session || !workoutView.editMode) return;
         workoutView.addExerciseOpen = !workoutView.addExerciseOpen;
         if (!workoutView.addExerciseOpen || workoutView.exerciseCatalog.length) {
             renderWorkoutDetail({ preserveScroll: true });
@@ -2654,7 +3139,7 @@
 
     async function addPlanExercise() {
         const day = selectedWorkoutDay();
-        if (!day?.id || workoutView.pendingAction) return;
+        if (!day?.id || !workoutView.editMode || workoutView.pendingAction) return;
         const exerciseName = byId("workoutAddExerciseName")?.value?.trim() || "";
         const catalogItem = workoutView.exerciseCatalog.find((item) => String(item.name).toLocaleLowerCase() === exerciseName.toLocaleLowerCase());
         const payload = {
@@ -2684,7 +3169,7 @@
     async function deletePlanExercise(exerciseId) {
         const exercise = findSelectedExercise(exerciseId);
         const dayId = selectedWorkoutDay()?.id;
-        if (!exercise || workoutView.pendingAction || !window.confirm(`Remover ${exercise.name} deste plano?`)) return;
+        if (!exercise || !workoutView.editMode || workoutView.pendingAction || !window.confirm(`Remover ${exercise.name} deste plano?`)) return;
         workoutView.pendingAction = `delete-${exercise.id}`;
         try {
             const result = await apiRequest(`/workout_plans/${apiSegment(workoutView.plan.id)}/exercises/${apiSegment(exercise.id)}`, { method: "DELETE" });
@@ -2731,7 +3216,75 @@
         }
     }
 
-    async function completeWorkoutExercise(exerciseId) {
+    function selectSessionExercise(exerciseId) {
+        const exercises = asArray(selectedWorkoutDay()?.exercises);
+        if (!exercises.some((exercise) => String(exercise.id) === String(exerciseId))) return;
+        const currentId = document.querySelector("[data-workout-exercise-card]")?.dataset.exerciseId;
+        if (currentId && !completedWorkoutExerciseIds().has(String(currentId))) captureWorkoutSetDraft(currentId);
+        workoutView.activeExerciseId = String(exerciseId);
+        workoutView.sessionSheetExpanded = false;
+        persistWorkoutDraftLocally(workoutView.session?.id);
+        renderWorkoutDetail({ focusSelector: "#currentExerciseTitle" });
+    }
+
+    function navigateSessionExercise(direction) {
+        const exercises = asArray(selectedWorkoutDay()?.exercises);
+        const currentIndex = exercises.findIndex((exercise) => String(exercise.id) === String(workoutView.activeExerciseId));
+        const target = exercises[currentIndex + direction];
+        if (target) selectSessionExercise(target.id);
+    }
+
+    function skipSessionExercise(exerciseId) {
+        if (!workoutView.session || completedWorkoutExerciseIds().has(String(exerciseId))) return;
+        captureWorkoutSetDraft(exerciseId);
+        workoutView.skippedExerciseIds.add(String(exerciseId));
+        const nextExercise = firstPendingWorkoutExercise(asArray(selectedWorkoutDay()?.exercises), completedWorkoutExerciseIds());
+        workoutView.activeExerciseId = nextExercise ? String(nextExercise.id) : null;
+        workoutView.sessionSheetExpanded = false;
+        workoutView.rest = null;
+        persistWorkoutDraftLocally(workoutView.session.id);
+        renderWorkoutDetail({ focusSelector: nextExercise ? "#currentExerciseTitle" : "#workoutCompleteTitle" });
+    }
+
+    function resumeSessionExercise(exerciseId) {
+        workoutView.skippedExerciseIds.delete(String(exerciseId));
+        workoutView.activeExerciseId = String(exerciseId);
+        workoutView.sessionSheetExpanded = false;
+        persistWorkoutDraftLocally(workoutView.session?.id);
+        renderWorkoutDetail({ focusSelector: "#currentExerciseTitle" });
+    }
+
+    async function setWorkoutSetCompleted(row, exerciseId, completed) {
+        if (!row || !exerciseId || workoutView.pendingAction) return;
+        if (completed && !row.querySelector("[data-workout-set-repetitions]")?.value.trim()) {
+            showToast("Informe as repetições antes de concluir a série.", "error");
+            row.querySelector("[data-workout-set-repetitions]")?.focus();
+            return;
+        }
+        row.dataset.workoutSetCompleted = String(completed);
+        row.classList.toggle("is-complete", completed);
+        captureWorkoutSetDraft(exerciseId);
+        if (completed) {
+            startWorkoutRest(displayedExercise(findSelectedExercise(exerciseId)).exercise.rest_seconds, exerciseId);
+        } else {
+            workoutView.rest = null;
+            persistWorkoutDraftLocally(workoutView.session?.id);
+            renderWorkoutDetail({ preserveScroll: true });
+        }
+    }
+
+    function removeWorkoutSet(row, exerciseId) {
+        const rows = Array.from(row?.parentElement?.querySelectorAll(".workout-set-row") || []);
+        if (!row || !exerciseId || rows.length <= 1 || row.dataset.workoutSetCompleted === "true") return;
+        captureWorkoutSetDraft(exerciseId);
+        const drafts = asArray(workoutView.setDrafts.get(String(exerciseId)));
+        drafts.splice(Number(row.dataset.workoutSetIndex), 1);
+        workoutView.setDrafts.set(String(exerciseId), drafts);
+        scheduleWorkoutDraftSave(exerciseId);
+        renderWorkoutDetail({ preserveScroll: true });
+    }
+
+    async function completeWorkoutExercise(exerciseId, options = {}) {
         const exercise = findSelectedExercise(exerciseId);
         const session = workoutView.session;
         if (!exercise || !session || workoutView.pendingAction) return;
@@ -2755,9 +3308,19 @@
             }
             if (viewVersion !== workoutView.viewVersion || !isCurrentWorkoutSession(session.id)) return;
             workoutView.session = result.session;
-            workoutView.setDrafts.delete(String(exercise.id));
+            workoutView.completedSetCounts.set(String(exercise.id), performedSets.length);
+            workoutView.skippedExerciseIds.delete(String(exercise.id));
+            clearWorkoutExerciseDraft(session.id, exercise.id);
             workoutView.replacementPanels.delete(String(exercise.id));
-            showToast("Exercício concluído. Vamos para o próximo!", "success");
+            const nextExercise = firstPendingWorkoutExercise(asArray(selectedWorkoutDay()?.exercises), completedWorkoutExerciseIds());
+            workoutView.activeExerciseId = nextExercise ? String(nextExercise.id) : null;
+            workoutView.sessionSheetExpanded = false;
+            if (options.startRest && nextExercise && Number(options.restSeconds) > 0) {
+                const duration = Math.max(0, Math.min(600, Number(options.restSeconds)));
+                workoutView.rest = { duration, endsAt: Date.now() + duration * 1000, exerciseId: String(nextExercise.id) };
+            }
+            persistWorkoutDraftLocally(session.id);
+            showToast(nextExercise ? "Exercício concluído. Próximo exercício preparado." : "Todas as séries foram registradas.", "success");
         } catch (error) {
             if (viewVersion === workoutView.viewVersion) workoutView.sessionError = error.message;
         } finally {
@@ -2771,7 +3334,19 @@
 
     async function finishWorkoutSession() {
         const session = workoutView.session;
-        if (!session || workoutView.pendingAction || !window.confirm("Finalizar o treino de hoje?")) return;
+        if (!session || workoutView.pendingAction) return;
+        const exercises = asArray(selectedWorkoutDay()?.exercises);
+        const completedIds = completedWorkoutExerciseIds();
+        const skippedExercises = exercises.filter((exercise) => workoutView.skippedExerciseIds.has(String(exercise.id)));
+        const unresolvedCount = exercises.filter((exercise) => (
+            !completedIds.has(String(exercise.id))
+            && !workoutView.skippedExerciseIds.has(String(exercise.id))
+        )).length;
+        const incomplete = Boolean(unresolvedCount || skippedExercises.length);
+        const confirmation = incomplete
+            ? "Finalizar treino incompleto? Exercícios e séries pendentes não serão marcados como concluídos."
+            : "Finalizar treino? Revise seus registros antes de confirmar.";
+        if (!window.confirm(confirmation)) return;
         const actionKey = "finish";
         const viewVersion = workoutView.viewVersion;
         activeDockRequestToken += 1;
@@ -2784,6 +3359,9 @@
             workoutView.session = null;
             workoutView.completedSummary = {
                 ...result.summary,
+                skipped_exercises: skippedExercises.map((exercise) => ({ id: exercise.id, name: displayedExercise(exercise).exercise.name })),
+                skipped_count: skippedExercises.length,
+                completion_state: incomplete ? "partial" : "complete",
                 weekly_progress: result.weekly_progress,
                 exercise_goals_reached: asArray(result.exercise_goals_reached),
                 achievements_unlocked: asArray(result.achievements_unlocked),
@@ -2792,7 +3370,8 @@
             workoutView.shareOpen = false;
             workoutView.shareDraft = null;
             workoutView.sharePhotoToken += 1;
-            workoutView.setDrafts.clear();
+            resetWorkoutExecutionState();
+            clearLocalWorkoutDraft(session.id);
             clearActiveWorkoutDock();
             workoutView.replacementPanels.clear();
             showToast("Treino finalizado. Excelente trabalho!", "success");
@@ -2825,7 +3404,8 @@
             workoutView.shareOpen = false;
             workoutView.shareDraft = null;
             workoutView.sharePhotoToken += 1;
-            workoutView.setDrafts.clear();
+            resetWorkoutExecutionState();
+            clearLocalWorkoutDraft(session.id);
             workoutView.replacementPanels.clear();
             showToast("Treino atual cancelado.", "success");
         } catch (error) {
@@ -2893,41 +3473,94 @@
         return (currentIndex + direction + total) % total;
     }
 
-    function initializePlanExperience() {
-        let workoutSwipe = null;
-        let workoutSwipeCommitting = false;
+    function startWorkoutPlayerGesture(event) {
+        if (!event.isPrimary || event.button > 0 || !workoutView.session || workoutView.replacementPanels.size) return;
+        const stage = event.target.closest(".current-exercise-stage--player");
+        if (!stage) return;
+        const handle = event.target.closest(".workout-sheet-handle");
+        const insideSheet = event.target.closest(".workout-session-sheet");
+        if (insideSheet && !handle) return;
+        if (!handle && event.target.closest("button, input, select, textarea, label, a, summary, details")) return;
+        workoutGesture = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            deltaX: 0,
+            deltaY: 0,
+            axis: handle ? "vertical" : null,
+            moved: false,
+            handle: Boolean(handle),
+            expanded: Boolean(workoutView.sessionSheetExpanded),
+            stage,
+            sheet: stage.querySelector(".workout-session-sheet"),
+        };
+        stage.setPointerCapture?.(event.pointerId);
+    }
 
-        function resetWorkoutSwipe(card) {
-            if (!card) return;
-            card.classList.remove("is-dragging", "is-swiping-left", "is-swiping-right");
-            card.style.removeProperty("--swipe-x");
+    function moveWorkoutPlayerGesture(event) {
+        const gesture = workoutGesture;
+        if (!gesture || gesture.pointerId !== event.pointerId) return;
+        gesture.deltaX = event.clientX - gesture.startX;
+        gesture.deltaY = event.clientY - gesture.startY;
+        const absX = Math.abs(gesture.deltaX);
+        const absY = Math.abs(gesture.deltaY);
+        if (!gesture.axis && Math.max(absX, absY) > 8) {
+            gesture.axis = absX > absY * 1.2 ? "horizontal" : "vertical";
         }
+        if (!gesture.axis) return;
+        gesture.moved = Math.max(absX, absY) > 12;
+        event.preventDefault();
+        if (gesture.axis === "horizontal") {
+            const offset = Math.max(-110, Math.min(110, gesture.deltaX * 0.55));
+            gesture.stage.style.setProperty("--player-swipe-x", `${offset}px`);
+            gesture.stage.classList.add("is-player-dragging");
+            return;
+        }
+        if (!gesture.sheet) return;
+        const collapsedOffset = Math.max(0, gesture.sheet.offsetHeight - 76);
+        const baseOffset = gesture.expanded ? 0 : collapsedOffset;
+        const offset = Math.max(0, Math.min(collapsedOffset, baseOffset + gesture.deltaY));
+        gesture.sheet.style.transform = `translateY(${offset}px)`;
+        gesture.sheet.classList.add("is-dragging");
+    }
 
-        function finishWorkoutSwipe(event) {
-            const swipe = workoutSwipe;
-            workoutSwipe = null;
-            if (!swipe) return;
-            const { card, exerciseId, horizontal, distance } = swipe;
-            if (card.hasPointerCapture?.(event.pointerId)) card.releasePointerCapture(event.pointerId);
-            const threshold = Math.min(150, card.clientWidth * 0.28);
-            if (!horizontal || Math.abs(distance) < threshold || workoutSwipeCommitting) {
-                resetWorkoutSwipe(card);
-                return;
+    function endWorkoutPlayerGesture(event) {
+        const gesture = workoutGesture;
+        if (!gesture || gesture.pointerId !== event.pointerId) return;
+        workoutGesture = null;
+        gesture.stage.classList.remove("is-player-dragging");
+        gesture.stage.style.removeProperty("--player-swipe-x");
+        gesture.sheet?.classList.remove("is-dragging");
+        if (gesture.sheet) gesture.sheet.style.transform = "";
+        if (!gesture.moved) return;
+        if (gesture.handle) {
+            ignoreNextWorkoutSheetClick = true;
+            window.setTimeout(() => { ignoreNextWorkoutSheetClick = false; }, 400);
+        }
+        if (gesture.axis === "vertical" && Math.abs(gesture.deltaY) >= 44) {
+            const expanded = gesture.deltaY < 0;
+            if (expanded !== workoutView.sessionSheetExpanded) {
+                workoutView.sessionSheetExpanded = expanded;
+                renderWorkoutDetail({ preserveScroll: true });
             }
-
-            workoutSwipeCommitting = true;
-            card.classList.remove("is-dragging");
-            card.classList.add(distance > 0 ? "is-committing-right" : "is-committing-left");
-            window.setTimeout(() => {
-                const action = distance > 0
-                    ? completeWorkoutExercise(exerciseId)
-                    : openReplacementOptions(exerciseId);
-                Promise.resolve(action).finally(() => {
-                    workoutSwipeCommitting = false;
-                });
-            }, 150);
+            return;
         }
+        if (gesture.axis === "horizontal" && Math.abs(gesture.deltaX) >= 58 && Math.abs(gesture.deltaX) > Math.abs(gesture.deltaY) * 1.2) {
+            if (gesture.deltaX < 0) {
+                const exerciseId = gesture.stage.dataset.exerciseId;
+                const exercise = findSelectedExercise(exerciseId);
+                if (!exercise) return;
+                completeWorkoutExercise(exerciseId, {
+                    startRest: true,
+                    restSeconds: displayedExercise(exercise).exercise.rest_seconds,
+                });
+            } else {
+                navigateSessionExercise(-1);
+            }
+        }
+    }
 
+    function initializePlanExperience() {
         const form = byId("guidedPlanForm");
         form?.addEventListener("submit", handleWizardSubmit);
         form?.addEventListener("input", handleWizardInput);
@@ -2953,6 +3586,7 @@
         document.addEventListener("keydown", trapWizardFocus, true);
         loadIngredientPool();
         if (!workoutTimerInterval) workoutTimerInterval = window.setInterval(updateWorkoutTimer, 1000);
+        if (!workoutRestInterval) workoutRestInterval = window.setInterval(updateWorkoutRestTimer, 1000);
         if (!workoutSyncInterval) {
             workoutSyncInterval = window.setInterval(() => {
                 if (window.currentUser && !byId("mainScreen")?.classList.contains("hidden")) loadActiveWorkoutDock();
@@ -2961,8 +3595,14 @@
         document.addEventListener("visibilitychange", () => {
             if (window.currentUser && document.visibilityState === "visible" && !byId("mainScreen")?.classList.contains("hidden")) {
                 loadActiveWorkoutDock();
+                syncWorkoutDrafts();
             }
         });
+        window.addEventListener("online", () => {
+            syncWorkoutDrafts();
+            loadActiveWorkoutDock();
+        });
+        window.addEventListener("pagehide", () => persistWorkoutDraftLocally(workoutView.session?.id));
         byId("activeWorkoutDock")?.addEventListener("click", openActiveWorkout);
         ["workoutGoalFilter", "workoutExperienceFilter", "workoutDaysFilter"].forEach((id) => {
             byId(id)?.addEventListener("change", renderFilteredWorkoutPlans);
@@ -2978,8 +3618,35 @@
             const workoutTodayAction = event.target.closest("[data-workout-today-action]");
             if (workoutTodayAction) {
                 const action = workoutTodayAction.dataset.workoutTodayAction;
+                if (action === 'start-today') {
+                    if (startingTodayWorkout) return;
+                    startingTodayWorkout = true;
+                    workoutTodayAction.disabled = true;
+                    try {
+                        const state = await loadWorkoutTodayCard(true);
+                        if (state?.state === 'scheduled' && state.current_day?.id) {
+                            const plan = await viewWorkoutPlan(state.current_plan_id, state.current_day.id);
+                            if (plan && byId("viewWorkoutPlanModal")?.classList.contains("show") && !workoutView.session && String(selectedWorkoutDay()?.id) === String(state.current_day.id)) await startWorkoutSession();
+                        } else if (state?.state === 'active') await openWorkoutTodayPlan();
+                    } finally {
+                        startingTodayWorkout = false;
+                        workoutTodayAction.disabled = false;
+                        await loadWorkoutTodayCard(true);
+                    }
+                }
                 if (action === "open-plan") window.openWorkoutTodayPlan?.();
+                if (action === "open-activity" && workoutTodayState?.completed_session?.id) {
+                    openWorkoutActivity(workoutTodayState.completed_session.id);
+                }
+                if (action === "create-workout") openPlanWizard("workout");
                 if (action === "open-plans") window.showTab?.("workout_plans");
+                if (action === "retry") loadWorkoutTodayCard(true);
+                return;
+            }
+            const retryPlanList = event.target.closest("[data-retry-plan-list]");
+            if (retryPlanList) {
+                if (retryPlanList.dataset.retryPlanList === "diet") loadDietPlans();
+                else loadWorkoutPlans();
                 return;
             }
             const workoutWeekday = event.target.closest("[data-workout-weekday]");
@@ -2998,10 +3665,6 @@
             }
             if (event.target.closest("[data-workout-current-adapt]")) {
                 applyWorkoutCurrentPlanChange("adapt");
-                return;
-            }
-            if (event.target.closest("[data-workout-current-generate]")) {
-                applyWorkoutCurrentPlanChange("generate");
                 return;
             }
             const clickedCard = event.target.closest(".plan-card[data-plan-action=\"view\"]");
@@ -3027,6 +3690,7 @@
             if (action === "set-current" && type === "workout") {
                 openWorkoutCurrentModal(id);
             }
+            if (action === "set-current" && type === "diet") setCurrentDietPlan(id);
             if (action === "delete") deletePlan(type, id);
         });
 
@@ -3053,6 +3717,10 @@
         });
 
         byId("viewDietPlanDetails")?.addEventListener("click", (event) => {
+            if (event.target.closest('[data-diet-action="set-current"]')) {
+                setCurrentDietPlan();
+                return;
+            }
             const tab = event.target.closest("[data-diet-day-index]");
             if (!tab) return;
             const index = Number(tab.dataset.dietDayIndex);
@@ -3076,7 +3744,7 @@
             const control = event.target.closest("[data-workout-action]");
             if (!control) return;
             const action = control.dataset.workoutAction;
-            const exerciseId = control.dataset.exerciseId;
+            const exerciseId = control.dataset.exerciseId || control.closest("[data-exercise-id]")?.dataset.exerciseId;
             if (action === "select-day") {
                 const index = Number(control.dataset.dayIndex);
                 if (!Number.isInteger(index) || index === workoutView.selectedDay) return;
@@ -3090,13 +3758,42 @@
                 requestAnimationFrame(() => byId(`workout-day-tab-${index}`)?.focus());
             } else if (action === "start-session") {
                 await startWorkoutSession();
+            } else if (action === "use-current-plan") {
+                openWorkoutCurrentModal(workoutView.plan.id);
+            } else if (action === "enter-plan-edit") {
+                setWorkoutPlanEditMode(true);
+            } else if (action === "exit-plan-edit") {
+                setWorkoutPlanEditMode(false);
+            } else if (action === "request-plan-review") {
+                openPlanReviewRequest("workout", workoutView.plan.id);
+            } else if (action === "close-active-workout") {
+                closeViewWorkoutPlanModal();
+            } else if (action === "select-session-exercise") {
+                selectSessionExercise(exerciseId);
+            } else if (action === "previous-session-exercise") {
+                navigateSessionExercise(-1);
+            } else if (action === "next-session-exercise") {
+                navigateSessionExercise(1);
+            } else if (action === "toggle-session-sheet") {
+                if (ignoreNextWorkoutSheetClick) {
+                    ignoreNextWorkoutSheetClick = false;
+                    return;
+                }
+                workoutView.sessionSheetExpanded = !workoutView.sessionSheetExpanded;
+                renderWorkoutDetail({ preserveScroll: true, focusSelector: ".workout-sheet-handle" });
             } else if (action === "replacement-options") {
                 await openReplacementOptions(exerciseId);
             } else if (action === "permanent-replacement-options") {
                 await openPermanentReplacementOptions(exerciseId);
+            } else if (action === "show-more-replacements") {
+                const panel = workoutView.replacementPanels.get(String(exerciseId));
+                if (!panel) return;
+                panel.expanded = true;
+                renderWorkoutDetail({ preserveScroll: true, focusSelector: `#replacement-panel-${exerciseId}` });
             } else if (action === "close-replacements") {
                 workoutView.replacementPanels.delete(String(exerciseId));
-                renderWorkoutDetail({ preserveScroll: true, focusSelector: `[data-workout-action="replacement-options"][data-exercise-id="${exerciseId}"]` });
+                const triggerAction = workoutView.editMode ? "permanent-replacement-options" : "replacement-options";
+                renderWorkoutDetail({ preserveScroll: true, focusSelector: `[data-workout-action="${triggerAction}"][data-exercise-id="${exerciseId}"]` });
             } else if (action === "apply-replacement") {
                 await applyReplacement(exerciseId, control.dataset.catalogKey);
             } else if (action === "apply-permanent-replacement") {
@@ -3110,7 +3807,32 @@
             } else if (action === "restore-exercise") {
                 await restoreExercise(exerciseId);
             } else if (action === "complete-exercise") {
-                await completeWorkoutExercise(exerciseId);
+                await completeWorkoutExercise(exerciseId, {
+                    startRest: true,
+                    restSeconds: displayedExercise(findSelectedExercise(exerciseId)).exercise.rest_seconds,
+                });
+            } else if (action === "toggle-set-complete") {
+                const row = control.closest(".workout-set-row");
+                if (!row) return;
+                const completed = row.dataset.workoutSetCompleted !== "true";
+                await setWorkoutSetCompleted(row, exerciseId, completed);
+            } else if (action === "complete-current-set") {
+                const row = control.closest("[data-workout-exercise-card]")?.querySelector(`.workout-set-row[data-workout-set-index="${control.dataset.workoutSetIndex}"]`);
+                await setWorkoutSetCompleted(row, exerciseId, true);
+            } else if (action === "remove-set") {
+                removeWorkoutSet(control.closest(".workout-set-row"), exerciseId);
+            } else if (action === "skip-exercise") {
+                skipSessionExercise(exerciseId);
+            } else if (action === "resume-exercise") {
+                resumeSessionExercise(exerciseId);
+            } else if (action === "adjust-rest") {
+                adjustWorkoutRest(Number(control.dataset.restSeconds));
+            } else if (action === "skip-rest") {
+                workoutView.rest = null;
+                persistWorkoutDraftLocally(workoutView.session?.id);
+                renderWorkoutDetail({ preserveScroll: true });
+            } else if (action === "retry-session") {
+                await loadActiveWorkoutSession();
             } else if (action === "finish-session") {
                 await finishWorkoutSession();
             } else if (action === "cancel-session") {
@@ -3173,16 +3895,7 @@
                 closeViewWorkoutPlanModal();
                 window.openExerciseProgress?.(control.dataset.exerciseKey);
             } else if (action === "set-exercise-goal") {
-                await createExerciseGoalFromSummary(control.dataset.exerciseKey, control.dataset.exerciseName);
-            } else if (action === "save-workout-profile") {
-                workoutView.completedSummary = null;
-                workoutView.shareOpen = false;
-                workoutView.shareDraft = null;
-                workoutView.sharePhotoToken += 1;
-                workoutView.summaryOrigin = "workout";
-                closeViewWorkoutPlanModal();
-                showTab("activities");
-                showToast("Atividade salva no seu perfil.", "success");
+                await createExerciseGoalFromSummary(control.dataset.exerciseKey, control.dataset.exerciseName, control);
             } else if (action === "delete-activity") {
                 await deleteWorkoutActivity(workoutView.completedSummary?.session_id);
             } else if (action === "close-summary") {
@@ -3238,7 +3951,7 @@
         });
         byId("viewWorkoutPlanDetails")?.addEventListener("input", (event) => {
             if (event.target.matches("[data-workout-set-load], [data-workout-set-repetitions], [data-workout-set-warmup]")) {
-                const exerciseId = event.target.closest("[data-workout-swipe-card]")?.dataset.exerciseId;
+                const exerciseId = event.target.closest("[data-workout-exercise-card]")?.dataset.exerciseId;
                 captureWorkoutSetDraft(exerciseId);
                 return;
             }
@@ -3272,6 +3985,10 @@
             await loadActiveWorkoutSession();
             requestAnimationFrame(() => byId(`workout-day-tab-${index}`)?.focus());
         });
+        byId("viewWorkoutPlanDetails")?.addEventListener("pointerdown", startWorkoutPlayerGesture);
+        byId("viewWorkoutPlanDetails")?.addEventListener("pointermove", moveWorkoutPlayerGesture);
+        byId("viewWorkoutPlanDetails")?.addEventListener("pointerup", endWorkoutPlayerGesture);
+        byId("viewWorkoutPlanDetails")?.addEventListener("pointercancel", endWorkoutPlayerGesture);
     }
 
     window.openPlanWizard = openPlanWizard;
@@ -3285,6 +4002,7 @@
     window.renderWorkoutTodayCard = renderWorkoutTodayCard;
     window.openWorkoutTodayPlan = openWorkoutTodayPlan;
     window.openWorkoutCurrentModal = openWorkoutCurrentModal;
+    window.toggleWorkoutPlansLibrary = toggleWorkoutPlansLibrary;
     window.viewDietPlan = viewDietPlan;
     window.viewWorkoutPlan = viewWorkoutPlan;
     window.openWorkoutActivity = openWorkoutActivity;

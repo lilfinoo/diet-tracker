@@ -23,13 +23,16 @@ from src.services.diet_plans import (
 from src.services.workout_plans import (
     PlanValidationError,
     normalize_workout_output,
+    validate_workout_exercise_selection,
     validate_workout_questionnaire,
+    workout_day_slots,
     workout_day_specs,
 )
+from tests.helpers import registration_payload
 
 
 def register_premium(app, client):
-    client.post("/api/register", json={"username": "guided", "password": "strong-password"})
+    client.post("/api/register", json=registration_payload("guided"))
     with app.app_context():
         user = User.query.filter_by(username="guided").one()
         user.is_premium = True
@@ -78,6 +81,10 @@ def generated_workout():
         ["leg_press_45", "supino_maquina", "remada_maquina", "prancha_frontal"],
         ["agachamento_goblet", "supino_reto_halteres", "remada_unilateral_halter", "bird_dog"],
     ]
+    day_slot_ids = [
+        ["FB_1_coverage_1", "FB_1_coverage_2", "FB_1_coverage_3", "FB_1_complement_4"],
+        ["FB_2_coverage_1", "FB_2_coverage_2", "FB_2_coverage_3", "FB_2_complement_4"],
+    ]
     return {
         "type": "workout_plan",
         "title": "Full Body para iniciantes",
@@ -87,6 +94,7 @@ def generated_workout():
                 "focus": "Corpo inteiro",
                 "exercises": [
                     {
+                        "slot_id": day_slot_ids[day_index][exercise_index],
                         "catalog_key": key,
                         "sets": 3,
                         "reps": "8-12",
@@ -95,10 +103,32 @@ def generated_workout():
                         "effort_guidance": "2 repetições em reserva",
                         "notes": "Execução controlada",
                     }
-                    for key in keys
+                    for exercise_index, key in enumerate(keys)
                 ],
             }
-            for keys in day_keys
+            for day_index, keys in enumerate(day_keys)
+        ],
+    }
+
+
+def generated_abcde_workout():
+    day_keys = [
+        ["supino_reto_barra", "supino_inclinado_halteres", "crucifixo_halteres", "prancha_frontal"],
+        ["puxada_alta_frente", "remada_curvada_barra", "remada_unilateral_halter", "dead_bug"],
+        ["agachamento_livre", "levantamento_terra_romeno", "mesa_flexora", "panturrilha_em_pe_maquina"],
+        ["desenvolvimento_militar_barra", "elevacao_lateral_halteres", "remada_maquina", "bird_dog"],
+        ["rosca_direta_barra", "triceps_na_polia", "rosca_martelo", "prancha_frontal"],
+    ]
+    return {
+        "type": "workout_plan",
+        "title": "ABCDE",
+        "description": "Treino dividido em cinco dias.",
+        "days": [
+            {
+                "focus": f"Treino {day_index}",
+                "exercises": prescribed_exercises(*keys),
+            }
+            for day_index, keys in enumerate(day_keys, start=1)
         ],
     }
 
@@ -397,6 +427,104 @@ def test_workout_validation_accepts_complementary_chest_angles():
     ]
 
 
+def test_abcde_shoulder_day_accepts_horizontal_pull_for_rear_deltoid():
+    questionnaire = workout_questionnaire(
+        days_per_week=5,
+        split_type="abcde",
+        experience_level="advanced",
+    )
+
+    normalized = normalize_workout_output(generated_abcde_workout(), questionnaire)
+
+    assert normalized["days"][3]["exercises"][2]["catalog_key"] == "remada_maquina"
+
+
+def test_workout_selection_rejects_duplicate_without_mutating_plan():
+    generated = generated_workout()
+    generated["days"][0]["exercises"][3] = generated["days"][0]["exercises"][1].copy()
+    original = [exercise.copy() for exercise in generated["days"][0]["exercises"]]
+
+    with pytest.raises(PlanValidationError) as error:
+        validate_workout_exercise_selection(generated, workout_questionnaire())
+
+    assert "days.1.duplicates.supino_maquina" in error.value.errors
+    assert generated["days"][0]["exercises"] == original
+
+
+def test_workout_selection_rejects_group_excess_without_trimming():
+    generated = generated_workout()
+    generated["days"][0]["exercises"] = prescribed_exercises(
+        "supino_reto_halteres",
+        "supino_maquina",
+        "flexao_de_bracos",
+        "leg_press_45",
+        "remada_maquina",
+    )
+
+    with pytest.raises(PlanValidationError) as error:
+        validate_workout_exercise_selection(generated, workout_questionnaire())
+
+    assert error.value.errors["days.1.groups.horizontal_push"].endswith("o máximo neste dia é 2.")
+    assert len(generated["days"][0]["exercises"]) == 5
+
+
+def test_abcde_90_slots_build_a_complete_valid_plan():
+    questionnaire = workout_questionnaire(
+        days_per_week=5,
+        split_type="abcde",
+        experience_level="advanced",
+        session_duration=90,
+    )
+    days = []
+    for spec in workout_day_specs("abcde", 5):
+        slots = workout_day_slots(questionnaire, spec)
+        used_keys = set()
+        exercises = []
+        for slot in slots:
+            catalog_key = next(key for key in slot["allowed_catalog_keys"] if key not in used_keys)
+            used_keys.add(catalog_key)
+            exercises.append({"slot_id": slot["slot_id"], **prescribed_exercises(catalog_key)[0]})
+        days.append({
+            "focus": spec["title"],
+            "exercises": exercises,
+        })
+    generated = {
+        "type": "workout_plan",
+        "title": "ABCDE 90 minutos",
+        "description": "Plano preenchido por slots.",
+        "days": days,
+    }
+
+    validate_workout_exercise_selection(generated, questionnaire)
+    normalized = normalize_workout_output(generated, questionnaire)
+
+    assert [len(day["exercises"]) for day in normalized["days"]] == [6, 6, 6, 6, 6]
+    chest_keys = {exercise["catalog_key"] for exercise in normalized["days"][0]["exercises"]}
+    assert {"supino_reto_barra", "supino_inclinado_barra"} <= chest_keys
+    assert normalized["days"][3]["exercises"][4]["catalog_key"].startswith("remada_")
+
+
+def test_workout_recommendation_keeps_bodyweight_abcde_selectable(app, client):
+    register_premium(app, client)
+
+    response = client.post(
+        "/api/workout_plans/recommendation",
+        json=workout_questionnaire(
+            days_per_week=5,
+            split_type="abcde",
+            equipment=["bodyweight"],
+        ),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["selected_split"] == "abcde"
+    assert payload["recommended_split"] == "full_body"
+    assert payload["quality"] == "limited"
+    assert payload["adaptation_count"] > 0
+    assert payload["warnings"]
+
+
 def test_guided_workout_creation_and_temporary_replacement(app, client, monkeypatch):
     register_premium(app, client)
     monkeypatch.setattr("src.routes.plan_routes.generate_workout_plan", lambda *args: generated_workout())
@@ -447,7 +575,7 @@ def test_guided_workout_creation_and_temporary_replacement(app, client, monkeypa
     assert replace_response.get_json()["override"]["equipment"] == options[0]["equipment"]
 
     other_client = app.test_client()
-    other_client.post("/api/register", json={"username": "other", "password": "strong-password"})
+    other_client.post("/api/register", json=registration_payload("other"))
     forbidden = other_client.post(
         f"/api/workout_sessions/{session_id}/exercises/{exercise['id']}/replacement_options",
         json={"unavailable_equipment": ["machine"]},
@@ -553,8 +681,104 @@ def test_finished_workout_summary_uses_performed_sets_and_is_idempotent(app, cli
         assert WorkoutSetPerformance.query.count() == 5
 
     other_client = app.test_client()
-    other_client.post("/api/register", json={"username": "summary-other", "password": "strong-password"})
+    other_client.post("/api/register", json=registration_payload("summary-other"))
     assert other_client.post(f"/api/workout_sessions/{session['id']}/finish").status_code == 404
+
+
+def test_active_workout_draft_survives_reload_and_clears_on_completion(app, client, monkeypatch):
+    register_premium(app, client)
+    monkeypatch.setattr("src.routes.plan_routes.generate_workout_plan", lambda *args: generated_workout())
+    plan = client.post("/api/workout_plans/generate", json=workout_questionnaire()).get_json()["plan"]
+    day = plan["days"][0]
+    exercise = day["exercises"][0]
+    session = client.post(
+        f"/api/workout_plans/{plan['id']}/days/{day['id']}/sessions"
+    ).get_json()["session"]
+    draft = {
+        "sets": [
+            {"load_kg": "80.5", "repetitions": "8", "is_warmup": False, "completed": True},
+            {"load_kg": "", "repetitions": "", "is_warmup": True, "completed": False},
+        ]
+    }
+
+    saved = client.put(
+        f"/api/workout_sessions/{session['id']}/exercises/{exercise['id']}/draft",
+        json=draft,
+    )
+    assert saved.status_code == 200
+    recovered = client.get("/api/workout_sessions/active").get_json()["session"]
+    assert recovered["draft_sets"][str(exercise["id"])] == draft["sets"]
+
+    completed = client.post(
+        f"/api/workout_sessions/{session['id']}/exercises/{exercise['id']}/complete",
+        json={"sets": [{"load_kg": 80.5, "repetitions": 8, "is_warmup": False}]},
+    )
+    assert completed.status_code == 200
+    assert str(exercise["id"]) not in completed.get_json()["session"]["draft_sets"]
+    assert client.put(
+        f"/api/workout_sessions/{session['id']}/exercises/{exercise['id']}/draft",
+        json=draft,
+    ).status_code == 409
+
+
+def test_workout_today_ignores_old_completion(app, client, monkeypatch):
+    register_premium(app, client)
+    monkeypatch.setattr("src.routes.plan_routes.generate_workout_plan", lambda *args: generated_workout())
+    plan = client.post("/api/workout_plans/generate", json=workout_questionnaire()).get_json()["plan"]
+    today = datetime.utcnow().date()
+    weekdays = [today.weekday(), (today.weekday() + 1) % 7]
+    assert client.put(
+        f"/api/workout_plans/{plan['id']}/current",
+        json={"weekdays": weekdays},
+    ).status_code == 200
+    current_day = plan["days"][0]
+    with app.app_context():
+        user = User.query.filter_by(username="guided").one()
+        historical = WorkoutSession(
+            user_id=user.id,
+            workout_plan_id=plan["id"],
+            workout_day_id=current_day["id"],
+            started_at=datetime.utcnow() - timedelta(days=7, hours=1),
+            completed_at=datetime.utcnow() - timedelta(days=7),
+            completed_local_date=today - timedelta(days=7),
+        )
+        db.session.add(historical)
+        db.session.commit()
+
+    payload = client.get("/api/workouts/today").get_json()
+    assert payload["state"] == "scheduled"
+    assert payload.get("completed_session") is None
+
+
+def test_workout_today_returns_completed_activity_and_allows_new_session(app, client, monkeypatch):
+    register_premium(app, client)
+    monkeypatch.setattr("src.routes.plan_routes.generate_workout_plan", lambda *args: generated_workout())
+    plan = client.post("/api/workout_plans/generate", json=workout_questionnaire()).get_json()["plan"]
+    today = datetime.utcnow().date()
+    assert client.put(
+        f"/api/workout_plans/{plan['id']}/current",
+        json={"weekdays": [today.weekday(), (today.weekday() + 1) % 7]},
+    ).status_code == 200
+    day = plan["days"][0]
+    exercise = day["exercises"][0]
+    first_session = client.post(
+        f"/api/workout_plans/{plan['id']}/days/{day['id']}/sessions"
+    ).get_json()["session"]
+    assert client.post(
+        f"/api/workout_sessions/{first_session['id']}/exercises/{exercise['id']}/complete",
+        json={"sets": [{"load_kg": 50, "repetitions": 10}]},
+    ).status_code == 200
+    assert client.post(f"/api/workout_sessions/{first_session['id']}/finish").status_code == 200
+
+    today_state = client.get("/api/workouts/today").get_json()
+    assert today_state["state"] == "partial"
+    assert today_state["completed_session"]["id"] == first_session["id"]
+    assert client.get(f"/api/activities/{first_session['id']}").status_code == 200
+
+    second_session = client.post(
+        f"/api/workout_plans/{plan['id']}/days/{day['id']}/sessions"
+    ).get_json()["session"]
+    assert second_session["id"] != first_session["id"]
 
 
 def test_workout_summary_omits_volume_when_a_performed_set_has_no_load(app, client, monkeypatch):
@@ -681,6 +905,95 @@ def test_guided_workout_retries_on_validation_error(app, client, monkeypatch):
         assert WorkoutPlan.query.count() == 1
 
 
+def test_guided_workout_passes_validation_errors_to_the_retry(app, client, monkeypatch):
+    register_premium(app, client)
+    corrections = []
+
+    def generate(*args):
+        corrections.append(args[2] if len(args) > 2 else None)
+        if len(corrections) == 1:
+            return {"type": "workout_plan", "days": []}
+        return {
+            "days": [
+                {"day_number": day_number, **day}
+                for day_number, day in enumerate(generated_workout()["days"], start=1)
+            ]
+        }
+
+    monkeypatch.setattr("src.routes.plan_routes.generate_workout_plan", generate)
+
+    response = client.post("/api/workout_plans/generate", json=workout_questionnaire())
+
+    assert response.status_code == 201
+    assert corrections[0] is None
+    assert corrections[1]["invalid_day_numbers"] == [1, 2]
+    assert "days" in corrections[1]["validation_errors"]
+    assert corrections[1]["previous_plan"] == {"type": "workout_plan", "days": []}
+
+
+def test_guided_workout_retry_preserves_valid_days(app, client, monkeypatch):
+    register_premium(app, client)
+    first_plan = generated_workout()
+    first_plan["days"][0]["exercises"] = first_plan["days"][0]["exercises"][:3]
+    valid_second_day = first_plan["days"][1].copy()
+    valid_second_day["focus"] = "Dia válido preservado"
+    first_plan["days"][1] = valid_second_day
+    corrections = []
+
+    def generate(*args):
+        correction = args[2] if len(args) > 2 else None
+        corrections.append(correction)
+        if correction is None:
+            return first_plan
+        return {"days": [{"day_number": 1, **generated_workout()["days"][0]}]}
+
+    monkeypatch.setattr("src.routes.plan_routes.generate_workout_plan", generate)
+
+    response = client.post("/api/workout_plans/generate", json=workout_questionnaire())
+
+    assert response.status_code == 201
+    assert corrections[1]["invalid_day_numbers"] == [1]
+    assert corrections[1]["previous_plan"]["days"][1] == valid_second_day
+    assert response.get_json()["plan"]["days"][1]["focus"] == "Dia válido preservado"
+
+
+def test_guided_workout_retries_duplicate_and_group_errors_for_same_day(app, client, monkeypatch):
+    register_premium(app, client)
+    initial = generated_workout()
+    initial["days"][0]["exercises"][3] = initial["days"][0]["exercises"][1].copy()
+    valid_second_day = initial["days"][1]
+    corrections = []
+
+    def generate(*args):
+        correction = args[2] if len(args) > 2 else None
+        corrections.append(correction)
+        if correction is None:
+            return initial
+        if len(corrections) == 2:
+            bad_repair = generated_workout()["days"][0]
+            bad_repair["exercises"] = prescribed_exercises(
+                "supino_reto_halteres",
+                "supino_maquina",
+                "flexao_de_bracos",
+                "leg_press_45",
+                "remada_maquina",
+            )
+            return {"days": [{"day_number": 1, **bad_repair}]}
+        return {"days": [{"day_number": 1, **generated_workout()["days"][0]}]}
+
+    monkeypatch.setattr("src.routes.plan_routes.generate_workout_plan", generate)
+
+    response = client.post("/api/workout_plans/generate", json=workout_questionnaire())
+
+    assert response.status_code == 201
+    assert corrections[1]["invalid_day_numbers"] == [1]
+    assert "days.1.duplicates.supino_maquina" in corrections[1]["validation_errors"]
+    assert corrections[2]["invalid_day_numbers"] == [1]
+    assert "days.1.groups.horizontal_push" in corrections[2]["validation_errors"]
+    assert corrections[2]["previous_plan"]["days"][1] == valid_second_day
+    assert response.get_json()["plan"]["days"][1]["focus"] == valid_second_day["focus"]
+
+
 def test_guided_workout_returns_502_when_retries_exhausted(app, client, monkeypatch):
     register_premium(app, client)
 
@@ -716,6 +1029,22 @@ def test_guided_diet_creation(app, client, monkeypatch):
         assert DietPlan.query.one().meals_per_day == 3
 
 
+def test_diet_plan_is_current_only_after_explicit_selection(app, client, monkeypatch):
+    register_premium(app, client)
+    monkeypatch.setattr("src.routes.plan_routes.generate_diet_plan", lambda *args: generated_diet(args[2]))
+    plan = client.post("/api/diet_plans/generate", json=diet_questionnaire()).get_json()["plan"]
+
+    assert client.get("/api/diet_plans/current").get_json() == {"plan": None}
+    plans = client.get("/api/diet_plans").get_json()
+    assert plans[0]["is_current"] is False
+
+    selected = client.put(f"/api/diet_plans/{plan['id']}/current")
+    assert selected.status_code == 200
+    assert selected.get_json()["plan"]["is_current"] is True
+    assert client.get("/api/diet_plans/current").get_json()["plan"]["id"] == plan["id"]
+    assert client.get("/api/diet_plans").get_json()[0]["is_current"] is True
+
+
 def test_guided_diet_persists_custom_targets_and_questionnaire(app, client, monkeypatch):
     register_premium(app, client)
     monkeypatch.setattr("src.routes.plan_routes.generate_diet_plan", lambda *args: generated_diet(args[2]))
@@ -736,7 +1065,7 @@ def test_guided_diet_persists_custom_targets_and_questionnaire(app, client, monk
 
 
 def test_guided_diet_requires_complete_adult_profile(app, client, monkeypatch):
-    client.post("/api/register", json={"username": "incomplete", "password": "strong-password"})
+    client.post("/api/register", json=registration_payload("incomplete"))
     with app.app_context():
         user = User.query.filter_by(username="incomplete").one()
         user.is_premium = True
@@ -747,8 +1076,16 @@ def test_guided_diet_requires_complete_adult_profile(app, client, monkeypatch):
     response = client.post("/api/diet_plans/generate", json=diet_questionnaire())
 
     assert response.status_code == 400
-    assert "profile.age" in response.get_json()["fields"]
+    assert set(response.get_json()["fields"]) == {
+        "profile.age",
+        "profile.weight",
+        "profile.height",
+        "profile.gender",
+        "profile.activity_level",
+    }
     assert called["value"] is False
+    with app.app_context():
+        assert User.query.filter_by(username="incomplete").one().ai_trial_uses == 0
 
 
 def test_guided_diet_retries_with_validation_feedback(app, client, monkeypatch):
@@ -797,7 +1134,7 @@ def test_guided_diet_does_not_persist_after_invalid_attempts(app, client, monkey
 
 
 def test_guided_generation_allows_free_ai_trial(app, client, monkeypatch):
-    client.post("/api/register", json={"username": "free", "password": "strong-password"})
+    client.post("/api/register", json=registration_payload("free"))
     monkeypatch.setattr("src.routes.plan_routes.generate_workout_plan", lambda *args: generated_workout())
 
     response = client.post("/api/workout_plans/generate", json=workout_questionnaire())
@@ -845,6 +1182,37 @@ def test_diet_plan_meal_edit(app, client, monkeypatch):
     meal = response.get_json()["meal"]
     assert meal["description"] == "2 ovos mexidos, 1 fatia de pão integral"
     assert meal["notes"] == "Sem café"
+    assert meal["items"] == []
+
+
+def test_diet_plan_meal_edit_keeps_explicit_items_aligned(app, client, monkeypatch):
+    register_premium(app, client)
+    plan = _create_diet_plan(client, monkeypatch)
+    meal_id = plan["meals"][0]["id"]
+
+    response = client.patch(
+        f"/api/diet_plans/{plan['id']}/meals/{meal_id}",
+        json={"description": "Texto substituído", "items": ["Arroz", "Feijão"]},
+    )
+
+    assert response.status_code == 200
+    meal = response.get_json()["meal"]
+    assert meal["description"] == "Arroz, Feijão"
+    assert meal["items"] == ["Arroz", "Feijão"]
+
+
+def test_diet_plan_meal_edit_rejects_empty_description(app, client, monkeypatch):
+    register_premium(app, client)
+    plan = _create_diet_plan(client, monkeypatch)
+    meal_id = plan["meals"][0]["id"]
+
+    response = client.patch(
+        f"/api/diet_plans/{plan['id']}/meals/{meal_id}",
+        json={"description": "   "},
+    )
+
+    assert response.status_code == 400
+    assert "Descrição" in response.get_json()["error"]
 
 
 def test_diet_plan_day_suggest_and_replace(app, client, monkeypatch):
@@ -890,7 +1258,7 @@ def test_diet_plan_day_replace_requires_owned_plan(app, client, monkeypatch):
     plan = _create_diet_plan(client, monkeypatch)
 
     client.post("/api/logout")
-    client.post("/api/register", json={"username": "other", "password": "strong-password"})
+    client.post("/api/register", json=registration_payload("other"))
 
     response = client.put(f"/api/diet_plans/{plan['id']}/days/1", json={"meals": []})
     assert response.status_code == 404

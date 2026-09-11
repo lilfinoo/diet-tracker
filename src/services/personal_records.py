@@ -5,6 +5,7 @@ from sqlalchemy.orm import selectinload
 
 from src.models.user import (
     PersonalRecordEvent,
+    ProfileHighlight,
     WorkoutSession,
     WorkoutSessionExerciseCompletion,
     db,
@@ -29,10 +30,10 @@ def _event_value(event):
     return _decimal(event.new_value, VALUE_PRECISION) or Decimal("0")
 
 
-def process_session_personal_records(session_record, backfilled=False):
+def process_session_personal_records(session_record, backfilled=False, rebuild_keys=None):
     if session_record.completed_at is None:
         return []
-    if (session_record.pr_processed_version or 0) >= 1:
+    if rebuild_keys is None and (session_record.pr_processed_version or 0) >= 1:
         return PersonalRecordEvent.query.filter_by(
             workout_session_id=session_record.id
         ).order_by(PersonalRecordEvent.id).all()
@@ -65,6 +66,8 @@ def process_session_personal_records(session_record, backfilled=False):
 
     for completion in session_record.completions:
         exercise_key = (completion.exercise_catalog_key or "").strip()
+        if rebuild_keys is not None and exercise_key not in rebuild_keys:
+            continue
         if not exercise_key or exercise_key == "__unresolved__":
             continue
         for performed_set in completion.performed_sets:
@@ -101,17 +104,18 @@ def process_session_personal_records(session_record, backfilled=False):
                 load_kg,
             )
 
-    if not candidates:
+    if not candidates and rebuild_keys is None:
         session_record.pr_processed_version = 1
         db.session.flush()
         return []
 
-    exercise_keys = {candidate["exercise_key"] for candidate in candidates.values()}
+    exercise_keys = rebuild_keys if rebuild_keys is not None else {candidate["exercise_key"] for candidate in candidates.values()}
     known_events = PersonalRecordEvent.query.filter(
         PersonalRecordEvent.user_id == session_record.user_id,
         PersonalRecordEvent.exercise_key.in_(exercise_keys),
     ).all()
 
+    retained_ids = set()
     ordered_candidates = sorted(
         candidates.values(),
         key=lambda item: (
@@ -128,7 +132,8 @@ def process_session_personal_records(session_record, backfilled=False):
             and event.metric_type == candidate["metric_type"]
             and event.metric_key == candidate["metric_key"]
         ]
-        if any(event.workout_session_id == session_record.id for event in matching):
+        existing = next((event for event in matching if event.workout_session_id == session_record.id), None)
+        if existing is not None and rebuild_keys is None:
             continue
 
         previous_events = [
@@ -144,7 +149,7 @@ def process_session_personal_records(session_record, backfilled=False):
         if previous is not None and candidate["value"] <= _event_value(previous):
             continue
 
-        event = PersonalRecordEvent(
+        attributes = dict(
             user_id=session_record.user_id,
             exercise_key=candidate["exercise_key"],
             exercise_name=candidate["exercise_name"],
@@ -166,12 +171,29 @@ def process_session_personal_records(session_record, backfilled=False):
             is_backfilled=bool(backfilled),
             achieved_at=session_record.completed_at,
         )
-        db.session.add(event)
-        known_events.append(event)
+        if existing is None:
+            event = PersonalRecordEvent(**attributes)
+            db.session.add(event)
+            known_events.append(event)
+        else:
+            event = existing
+            attributes.pop("is_backfilled")
+            for field, value in attributes.items():
+                setattr(event, field, value)
+        if rebuild_keys is not None:
+            db.session.flush()
+            retained_ids.add(event.id)
 
+    if rebuild_keys is not None:
+        for event in list(known_events):
+            if event.workout_session_id == session_record.id and event.id not in retained_ids:
+                ProfileHighlight.query.filter_by(personal_record_event_id=event.id).delete(synchronize_session="fetch")
+                db.session.delete(event)
+                known_events.remove(event)
     db.session.flush()
-    session_events = PersonalRecordEvent.query.filter_by(
-        workout_session_id=session_record.id
+    session_events = PersonalRecordEvent.query.filter(
+        PersonalRecordEvent.workout_session_id == session_record.id,
+        PersonalRecordEvent.exercise_key.in_(exercise_keys),
     ).all()
     by_exercise = defaultdict(list)
     for event in session_events:
@@ -179,7 +201,16 @@ def process_session_personal_records(session_record, backfilled=False):
         by_exercise[event.exercise_key].append(event)
 
     for events in by_exercise.values():
+        exercise_key = events[0].exercise_key
+        has_prior_record = any(
+            event.exercise_key == exercise_key
+            and (event.achieved_at, event.workout_session_id) < (session_record.completed_at, session_record.id)
+            and event.is_highlighted
+            for event in known_events
+        )
         eligible = [event for event in events if not event.is_initial]
+        if not eligible and not has_prior_record:
+            eligible = events
         if eligible:
             highlighted = min(
                 eligible,
@@ -194,6 +225,10 @@ def process_session_personal_records(session_record, backfilled=False):
             highlighted.is_highlighted = True
 
     db.session.flush()
+    if rebuild_keys is not None:
+        for event in session_events:
+            if not event.is_highlighted:
+                ProfileHighlight.query.filter_by(personal_record_event_id=event.id).delete(synchronize_session="fetch")
     session_record.pr_processed_version = 1
     return sorted(
         session_events,
@@ -280,3 +315,17 @@ def exercise_progress(user_id, exercise_key):
         .all()
     )
     return [serialize_personal_record(event) for event in events]
+
+
+def rebuild_personal_records(user_id, exercise_keys):
+    """Replay affected exercises chronologically, retaining IDs for valid events."""
+    if not exercise_keys:
+        return
+    sessions = WorkoutSession.query.filter(
+        WorkoutSession.user_id == user_id,
+        WorkoutSession.completed_at.isnot(None),
+    ).options(
+        selectinload(WorkoutSession.completions).selectinload(WorkoutSessionExerciseCompletion.performed_sets)
+    ).order_by(WorkoutSession.completed_at, WorkoutSession.id).all()
+    for session_record in sessions:
+        process_session_personal_records(session_record, backfilled=True, rebuild_keys=exercise_keys)

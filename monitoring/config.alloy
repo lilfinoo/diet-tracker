@@ -1,0 +1,26 @@
+prometheus.scrape "diet_tracker" {
+  targets = [{
+    "__address__"     = sys.env("APP_METRICS_HOST"),
+    "__scheme__"      = "https",
+    "__metrics_path__" = "/metrics",
+  }]
+
+  authorization {
+    type        = "Bearer"
+    credentials = sys.env("METRICS_TOKEN")
+  }
+
+  scrape_interval = "30s"
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+}
+
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    url = sys.env("PROMETHEUS_REMOTE_WRITE_URL")
+
+    basic_auth {
+      username = sys.env("PROMETHEUS_USERNAME")
+      password = sys.env("GRAFANA_CLOUD_API_KEY")
+    }
+  }
+}

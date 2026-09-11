@@ -9,9 +9,11 @@ from sqlalchemy.orm import selectinload
 
 from src.models.user import (
     DietEntry,
+    DietAdherenceDay,
     DietPlan,
     Measurement,
     ProfessionalStudentRelationship,
+    ProfessionalReviewRequest,
     User,
     UserProfile,
     WorkoutDay,
@@ -19,7 +21,8 @@ from src.models.user import (
     WorkoutSession,
     db,
 )
-from src.routes.common import json_body, login_required, page_query, _csrf_protect_request
+from src.routes.common import ai_consent_error, ai_consent_required, json_body, login_required, page_query
+from src.legal import PROFESSIONAL_SHARING_VERSION
 from src.services.ai import (
     AIQuotaExceededError,
     AIResponseError,
@@ -28,6 +31,7 @@ from src.services.ai import (
     generate_diet_plan,
     generate_workout_plan,
 )
+from src.services.ai_queue import enqueue_ai_request
 from src.services.diet_plans import (
     calculate_nutrition_targets,
     correction_feedback,
@@ -50,19 +54,18 @@ from src.services.plan_management import (
 from src.services.rate_limit import rate_limit
 from src.services.workout_plans import (
     PlanValidationError,
+    build_workout_contract,
     exercise_catalog,
+    invalid_workout_day_numbers,
+    merge_workout_day_repairs,
     normalize_manual_workout,
     normalize_workout_output,
+    validate_workout_exercise_selection,
     validate_workout_questionnaire,
 )
 
 
 professional_bp = Blueprint("professional", __name__)
-
-
-@professional_bp.before_request
-def protect_professional_mutations():
-    return _csrf_protect_request()
 
 
 @professional_bp.errorhandler(400)
@@ -84,8 +87,8 @@ def professional_required(function):
     @wraps(function)
     @login_required
     def decorated_function(*args, **kwargs):
-        if not g.user.is_professional:
-            return jsonify({"error": "Acesso exclusivo para profissionais habilitados."}), 403
+        if not g.user.has_entitlement("professional"):
+            return jsonify({"error": "A área profissional exige aprovação e assinatura profissional ativa.", "code": "professional_entitlement_required"}), 403
         return function(*args, **kwargs)
 
     return decorated_function
@@ -107,8 +110,7 @@ def professional_scope_required(scope):
         @wraps(function)
         @professional_required
         def decorated_function(*args, **kwargs):
-            # A null scope identifies professionals created before specialties existed.
-            if g.user.professional_scope not in {None, scope, "both"}:
+            if not g.user.has_entitlement(scope):
                 return jsonify({"error": "Seu plano profissional não inclui este recurso."}), 403
             return function(*args, **kwargs)
 
@@ -148,6 +150,11 @@ def _student_context(student_id, lock=False):
     relationship = _relationship_for(g.user.id, student_id, lock=lock)
     if not relationship:
         abort(404, description="Aluno não encontrado.")
+    if (
+        not relationship.data_sharing_consented_at
+        or relationship.data_sharing_consent_version != PROFESSIONAL_SHARING_VERSION
+    ):
+        abort(403, description="O consentimento de compartilhamento do aluno precisa ser renovado.")
     student = db.session.get(User, student_id)
     if not student or student.is_banned:
         abort(404, description="Aluno não encontrado.")
@@ -161,6 +168,8 @@ def _workout_plan_for(student, plan_id, editable=False):
     ).first()
     if not plan or (plan.status == "draft" and plan.author_user_id != g.user.id):
         abort(404, description="Plano não encontrado.")
+    if ProfessionalReviewRequest.query.filter_by(proposal_workout_plan_id=plan.id).first():
+        abort(404, description="Plano não encontrado.")
     if editable and (plan.status != "draft" or plan.author_user_id != g.user.id):
         abort(409, description="Somente rascunhos próprios podem ser editados.")
     return plan
@@ -171,6 +180,8 @@ def _diet_plan_for(student, plan_id, editable=False):
         selectinload(DietPlan.meals)
     ).first()
     if not plan or (plan.status == "draft" and plan.author_user_id != g.user.id):
+        abort(404, description="Plano não encontrado.")
+    if ProfessionalReviewRequest.query.filter_by(proposal_diet_plan_id=plan.id).first():
         abort(404, description="Plano não encontrado.")
     if editable and (plan.status != "draft" or plan.author_user_id != g.user.id):
         abort(409, description="Somente rascunhos próprios podem ser editados.")
@@ -250,18 +261,28 @@ def invitation_details(token):
     if (
         not relationship
         or relationship.invite_expires_at <= datetime.utcnow()
-        or not relationship.professional.is_professional
+        or not relationship.professional
+        or not relationship.professional.has_entitlement("professional")
         or relationship.professional.is_banned
     ):
         return jsonify({"error": "Convite inválido ou expirado."}), 404
     if relationship.professional_user_id == g.user.id:
         return jsonify({"error": "O profissional não pode aceitar o próprio convite."}), 409
-    return jsonify({"invitation": relationship.to_dict()}), 200
+    return jsonify({
+        "invitation": relationship.to_dict(),
+        "data_sharing_consent_version": PROFESSIONAL_SHARING_VERSION,
+    }), 200
 
 
 @professional_bp.route("/invitations/<token>/accept", methods=["POST"])
 @login_required
 def accept_invitation(token):
+    data = json_body()
+    if data.get("data_sharing_consent") is not True or data.get("data_sharing_consent_version") != PROFESSIONAL_SHARING_VERSION:
+        return jsonify({
+            "error": "Confirme o compartilhamento de dados com o profissional.",
+            "code": "data_sharing_consent_required",
+        }), 400
     relationship = ProfessionalStudentRelationship.query.filter_by(
         invite_token_hash=_token_hash(token),
     ).with_for_update().first()
@@ -269,7 +290,8 @@ def accept_invitation(token):
         not relationship
         or relationship.status != "pending"
         or relationship.invite_expires_at <= datetime.utcnow()
-        or not relationship.professional.is_professional
+        or not relationship.professional
+        or not relationship.professional.has_entitlement("professional")
         or relationship.professional.is_banned
     ):
         return jsonify({"error": "Convite inválido ou expirado."}), 404
@@ -281,6 +303,7 @@ def accept_invitation(token):
     ).first()
     if active:
         return jsonify({"error": "Você já possui um profissional ativo."}), 409
+    db.session.get(User, relationship.professional_user_id, with_for_update=True)
     active_students = ProfessionalStudentRelationship.query.filter_by(
         professional_user_id=relationship.professional_user_id,
         status="active",
@@ -290,6 +313,8 @@ def accept_invitation(token):
     relationship.student_user_id = g.user.id
     relationship.status = "active"
     relationship.accepted_at = datetime.utcnow()
+    relationship.data_sharing_consented_at = relationship.accepted_at
+    relationship.data_sharing_consent_version = PROFESSIONAL_SHARING_VERSION
     add_audit(
         relationship.professional,
         g.user,
@@ -310,6 +335,7 @@ def list_students():
     query = ProfessionalStudentRelationship.query.filter_by(
         professional_user_id=g.user.id,
         status="active",
+        data_sharing_consent_version=PROFESSIONAL_SHARING_VERSION,
     ).order_by(ProfessionalStudentRelationship.accepted_at.desc())
     query, limit, offset = page_query(query, default_limit=30)
     relationships = query.all()
@@ -322,18 +348,48 @@ def list_students():
 
 def _student_summary(student, relationship):
     latest_measurement = Measurement.query.filter_by(user_id=student.id).order_by(Measurement.date.desc()).first()
-    latest_workout = WorkoutPlan.query.filter_by(user_id=student.id, status="published").order_by(
-        WorkoutPlan.published_at.desc(), WorkoutPlan.created_at.desc()
-    ).first()
-    latest_diet = DietPlan.query.filter_by(user_id=student.id, status="published").order_by(
-        DietPlan.published_at.desc(), DietPlan.created_at.desc()
-    ).first()
+    latest_workout = None
+    if g.user.has_entitlement("workout"):
+        latest_workout = WorkoutPlan.query.filter_by(user_id=student.id, status="published").order_by(
+            WorkoutPlan.published_at.desc(), WorkoutPlan.created_at.desc()
+        ).first()
+    latest_diet = None
+    if g.user.has_entitlement("diet"):
+        latest_diet = DietPlan.query.filter_by(user_id=student.id, status="published").order_by(
+            DietPlan.published_at.desc(), DietPlan.created_at.desc()
+        ).first()
+    profile = student.profile
+    profile_data = None
+    if profile:
+        profile_data = {
+            "age": profile.age,
+            "gender": profile.gender,
+            "goal": profile.goal,
+            "activity_level": profile.activity_level,
+            "weight": profile.weight,
+            "height": profile.height,
+            "timezone": profile.timezone,
+        }
+        if g.user.has_entitlement("diet"):
+            profile_data["dietary_restrictions"] = profile.dietary_restrictions
+    measurement_data = None
+    if latest_measurement:
+        measurement_data = {
+            "date": latest_measurement.date.isoformat() if latest_measurement.date else None,
+            "weight": latest_measurement.weight,
+        }
+        if g.user.has_entitlement("workout"):
+            measurement_data = latest_measurement.to_dict()
     return {
         "id": student.id,
         "username": student.username,
+        "avatar_url": (
+            f"/api/profiles/by-id/{student.id}/avatar"
+            if student.profile and student.profile.avatar_object_key else None
+        ),
         "has_profile": student.profile is not None,
-        "profile": student.profile.to_dict() if student.profile else None,
-        "latest_measurement": latest_measurement.to_dict() if latest_measurement else None,
+        "profile": profile_data,
+        "latest_measurement": measurement_data,
         "latest_workout_plan": latest_workout.to_dict() if latest_workout else None,
         "latest_diet_plan": latest_diet.to_dict() if latest_diet else None,
         "relationship": relationship.to_dict(),
@@ -345,18 +401,27 @@ def _student_summary(student, relationship):
 def get_student(student_id):
     student, relationship = _student_context(student_id)
     summary = _student_summary(student, relationship)
-    summary["measurements"] = [
-        item.to_dict() for item in Measurement.query.filter_by(user_id=student.id)
-        .order_by(Measurement.date.desc()).limit(20).all()
-    ]
-    summary["recent_diet_entries"] = [
-        item.to_dict() for item in DietEntry.query.filter_by(user_id=student.id)
-        .order_by(DietEntry.date.desc(), DietEntry.created_at.desc()).limit(20).all()
-    ]
-    summary["recent_workout_sessions"] = [
-        item.to_dict() for item in WorkoutSession.query.filter_by(user_id=student.id)
-        .order_by(WorkoutSession.started_at.desc()).limit(20).all()
-    ]
+    if g.user.has_entitlement("workout"):
+        summary["measurements"] = [
+            item.to_dict() for item in Measurement.query.filter_by(user_id=student.id)
+            .order_by(Measurement.date.desc()).limit(20).all()
+        ]
+    if g.user.has_entitlement("diet"):
+        summary["recent_diet_entries"] = [
+            item.to_dict() for item in DietEntry.query.filter_by(user_id=student.id)
+            .order_by(DietEntry.date.desc(), DietEntry.created_at.desc()).limit(20).all()
+        ]
+        summary["recent_diet_adherence"] = [
+            item.to_dict() for item in DietAdherenceDay.query.filter_by(user_id=student.id)
+            .order_by(DietAdherenceDay.local_date.desc()).limit(30).all()
+        ]
+    if g.user.has_entitlement("workout"):
+        summary["recent_workout_sessions"] = [
+            item.to_dict() for item in WorkoutSession.query.filter(
+                WorkoutSession.user_id == student.id,
+                WorkoutSession.completed_at.isnot(None),
+            ).order_by(WorkoutSession.completed_at.desc()).limit(20).all()
+        ]
     return jsonify(summary), 200
 
 
@@ -430,7 +495,8 @@ def professional_workout_plans(student_id):
     ).order_by(WorkoutPlan.created_at.desc()).all()
     return jsonify([
         plan.to_dict() for plan in plans
-        if plan.status != "draft" or plan.author_user_id == g.user.id
+        if (plan.status != "draft" or plan.author_user_id == g.user.id)
+        and not ProfessionalReviewRequest.query.filter_by(proposal_workout_plan_id=plan.id).first()
     ]), 200
 
 
@@ -472,20 +538,61 @@ def create_manual_workout(student_id):
 @professional_bp.route("/professional/students/<uuid:student_id>/workout-plans/generate", methods=["POST"])
 @rate_limit("professional_ai", 8, 60)
 @professional_scope_required("workout")
+@ai_consent_required
 @professional_premium_required
 def generate_professional_workout(student_id):
     student, relationship = _student_context(student_id)
+    if not student.has_current_ai_consent():
+        return ai_consent_error()
+    data = json_body()
     try:
-        questionnaire = validate_workout_questionnaire(json_body())
+        questionnaire = validate_workout_questionnaire(data)
     except PlanValidationError as error:
         return jsonify({"error": "Revise as preferências do treino.", "fields": error.errors}), 400
+    contract = build_workout_contract(questionnaire)
     profile = UserProfile.query.filter_by(user_id=student.id).first()
-    for attempt in range(1, 4):
+    queued = enqueue_ai_request(
+        "professional_workout_plan",
+        data,
+        {"student_id": student.id},
+    )
+    if queued is not None:
+        return queued
+    correction = None
+    previous_generated = None
+    max_attempts = current_app.config["GEMINI_WORKOUT_VALIDATION_ATTEMPTS"]
+    for attempt in range(1, max_attempts + 1):
+        generated = previous_generated
         try:
-            plan_data = normalize_workout_output(generate_workout_plan(questionnaire, profile), questionnaire)
+            response_data = generate_workout_plan(questionnaire, profile, correction, contract)
+            generated = (
+                merge_workout_day_repairs(
+                    previous_generated,
+                    response_data,
+                    correction["invalid_day_numbers"],
+                    questionnaire["days_per_week"],
+                )
+                if correction
+                else response_data
+            )
+            validate_workout_exercise_selection(generated, questionnaire, contract)
+            plan_data = normalize_workout_output(generated, questionnaire, contract)
             break
-        except (PlanValidationError, AIResponseError):
-            if attempt == 3:
+        except PlanValidationError as error:
+            if generated is not None:
+                previous_generated = generated
+                correction = {
+                    "previous_plan": generated,
+                    "validation_errors": error.errors,
+                    "invalid_day_numbers": invalid_workout_day_numbers(
+                        error.errors,
+                        questionnaire["days_per_week"],
+                    ),
+                }
+            if attempt == max_attempts:
+                return jsonify({"error": "O treino gerado ficou incompleto. Tente novamente."}), 502
+        except AIResponseError:
+            if attempt == max_attempts:
                 return jsonify({"error": "O treino gerado ficou incompleto. Tente novamente."}), 502
         except AIQuotaExceededError as error:
             return jsonify({"error": str(error)}), 429
@@ -502,6 +609,7 @@ def generate_professional_workout(student_id):
             source="ai",
             relationship=relationship,
         )
+        plan.ai_task_id = getattr(g, "ai_task_id", None)
         db.session.commit()
     except (IntegrityError, TypeError, ValueError):
         db.session.rollback()
@@ -562,7 +670,8 @@ def professional_diet_plans(student_id):
     ).all()
     return jsonify([
         plan.to_dict() for plan in plans
-        if plan.status != "draft" or plan.author_user_id == g.user.id
+        if (plan.status != "draft" or plan.author_user_id == g.user.id)
+        and not ProfessionalReviewRequest.query.filter_by(proposal_diet_plan_id=plan.id).first()
     ]), 200
 
 
@@ -613,13 +722,24 @@ def create_manual_diet(student_id):
 @professional_bp.route("/professional/students/<uuid:student_id>/diet-plans/generate", methods=["POST"])
 @rate_limit("professional_ai", 8, 60)
 @professional_scope_required("diet")
+@ai_consent_required
 @professional_premium_required
 def generate_professional_diet(student_id):
     student, relationship = _student_context(student_id)
+    if not student.has_current_ai_consent():
+        return ai_consent_error()
+    data = json_body()
     try:
-        questionnaire, profile, targets = _validated_diet_context(student, json_body())
+        questionnaire, profile, targets = _validated_diet_context(student, data)
     except PlanValidationError as error:
         return jsonify({"error": "Revise o perfil e as preferências alimentares.", "fields": error.errors}), 400
+    queued = enqueue_ai_request(
+        "professional_diet_plan",
+        data,
+        {"student_id": student.id},
+    )
+    if queued is not None:
+        return queued
     correction = None
     max_attempts = current_app.config["GEMINI_DIET_VALIDATION_ATTEMPTS"]
     for attempt in range(1, max_attempts + 1):
@@ -651,6 +771,7 @@ def generate_professional_diet(student_id):
             source="ai",
             relationship=relationship,
         )
+        plan.ai_task_id = getattr(g, "ai_task_id", None)
         db.session.commit()
     except (IntegrityError, TypeError, ValueError):
         db.session.rollback()
@@ -678,9 +799,12 @@ def update_professional_diet(student_id, plan_id):
 @professional_bp.route("/professional/students/<uuid:student_id>/diet-plans/<int:plan_id>/suggest", methods=["POST"])
 @rate_limit("professional_ai", 8, 60)
 @professional_scope_required("diet")
+@ai_consent_required
 @professional_premium_required
 def suggest_professional_diet_day(student_id, plan_id):
     student, _ = _student_context(student_id)
+    if not student.has_current_ai_consent():
+        return ai_consent_error()
     plan = _diet_plan_for(student, plan_id, editable=True)
     data = json_body()
     try:
@@ -700,6 +824,13 @@ def suggest_professional_diet_day(student_id, plan_id):
         for meal in plan.meals if meal.day_of_week == f"Dia {day_index}"
     ]
     profile = UserProfile.query.filter_by(user_id=student.id).first()
+    queued = enqueue_ai_request(
+        "professional_diet_day",
+        data,
+        {"student_id": student.id, "plan_id": plan.id},
+    )
+    if queued is not None:
+        return queued
     correction = None
     max_attempts = current_app.config["GEMINI_DIET_VALIDATION_ATTEMPTS"]
     for attempt in range(1, max_attempts + 1):

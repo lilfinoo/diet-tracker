@@ -1,10 +1,12 @@
+from src.services.body_progress import body_summary
+from src.services.performance import performed_exercises, exercise_sessions, historical_load
 from datetime import timedelta
 
 from flask import Blueprint, g, jsonify, request
 
-from src.models.user import AchievementUnlock, ExerciseGoal, PersonalRecordEvent, UserProfile, WorkoutSession, WorkoutSessionExerciseCompletion, db
-from src.routes.common import _csrf_protect_request
-from src.routes.common import _activity_list_item, _ensure_user_workout_history, json_body, login_required
+from src.models.user import AchievementUnlock, ExerciseGoal, PersonalRecordEvent, UserProfile, WorkoutSession, WorkoutSessionExerciseCompletion, WorkoutWeeklyGoal, db
+from src.routes.common import _activity_list_item, _ensure_user_workout_history, json_body, login_required, page_query
+from src.services.consistency import consistency_days
 from src.services.achievements import achievement_catalog, serialize_unlock
 from src.services.badges import serialize_badges, serialize_profile_highlights
 from src.services.personal_records import current_max_load, exercise_progress, serialize_personal_record
@@ -15,7 +17,6 @@ from src.services.workout_progress import (
     current_exercise_goal,
     serialize_exercise_goal,
     serialize_weekly_goal,
-    suggested_days_per_week,
     validate_timezone,
     week_start_for,
     weekly_progress,
@@ -24,11 +25,6 @@ from decimal import Decimal, InvalidOperation
 
 
 progress_bp = Blueprint("progress", __name__)
-
-
-@progress_bp.before_request
-def protect_progress_mutations():
-    return _csrf_protect_request()
 
 
 @progress_bp.route("/progress/weekly", methods=["GET", "PUT"])
@@ -49,7 +45,7 @@ def weekly_goal_progress():
         db.session.add(profile)
     profile.timezone = timezone_name
     current_week = week_start_for(None, timezone_name)
-    has_goal = ExerciseGoal.query.filter_by(user_id=g.user.id).first() is not None
+    has_goal = WorkoutWeeklyGoal.query.filter_by(user_id=g.user.id).first() is not None
     effective_week = current_week + timedelta(days=7) if has_goal else current_week
     try:
         goal = create_weekly_goal(
@@ -138,38 +134,61 @@ def cancel_exercise_goal(goal_id):
 @login_required
 def get_exercise_progress(exercise_key):
     _ensure_user_workout_history(g.user.id)
-    records = exercise_progress(g.user.id, exercise_key)
-    if not records:
+    options = performed_exercises(g.user.id)
+    exercise = next((item for item in options if item['key'] == exercise_key), None)
+    if exercise is None:
         return jsonify({"error": "Histórico do exercício não encontrado."}), 404
-    activities = (
-        WorkoutSession.query.join(WorkoutSessionExerciseCompletion)
-        .filter(
-            WorkoutSession.user_id == g.user.id,
-            WorkoutSession.completed_at.isnot(None),
-            WorkoutSessionExerciseCompletion.exercise_catalog_key == exercise_key,
-        )
-        .order_by(WorkoutSession.completed_at.desc(), WorkoutSession.id.desc())
-        .limit(20)
-        .all()
-    )
+    _, limit, offset = page_query(WorkoutSession.query, default_limit=20)
+    sessions = exercise_sessions(g.user.id, exercise_key, limit, offset)
     return jsonify({
-        "exercise_key": exercise_key,
-        "exercise_name": records[-1]["exercise_name"],
-        "max_load_kg": float(current_max_load(g.user.id, exercise_key) or 0),
-        "records": records,
-        "recent_activities": [_activity_list_item(item) for item in activities],
+        "exercise_key": exercise_key, "exercise_name": exercise['name'],
+        "max_load_kg": historical_load(g.user.id, exercise_key),
+        "records": exercise_progress(g.user.id, exercise_key),
+        "sessions": sessions,
+        "recent_activities": [_activity_list_item(item) for item in WorkoutSession.query.filter(
+            WorkoutSession.user_id == g.user.id,
+            WorkoutSession.id.in_([item['session_id'] for item in sessions['items']]),
+        ).order_by(WorkoutSession.completed_at.desc(), WorkoutSession.id.desc()).all()] if request.args.get('view') != 'sessions' else [],
     }), 200
+
+
+@progress_bp.route("/progress/exercises", methods=["GET"])
+@login_required
+def exercise_options():
+    return jsonify({"items": performed_exercises(g.user.id)}), 200
 
 
 @progress_bp.route("/progress/achievements", methods=["GET"])
 @login_required
 def get_achievements():
     _ensure_user_workout_history(g.user.id)
+    records = PersonalRecordEvent.query.filter_by(
+        user_id=g.user.id,
+        is_highlighted=True,
+    ).order_by(PersonalRecordEvent.achieved_at.desc()).limit(100).all()
     return jsonify({
         "items": achievement_catalog(g.user.id),
         "badges": serialize_badges(g.user.badges),
         "selected": serialize_profile_highlights(g.user.profile_highlights),
+        "personal_records": [serialize_personal_record(item) for item in records],
         "highlight_limit": 3,
+    }), 200
+
+
+@progress_bp.route("/progress/personal-records", methods=["GET"])
+@login_required
+def personal_records():
+    _ensure_user_workout_history(g.user.id)
+    query = PersonalRecordEvent.query.filter_by(
+        user_id=g.user.id,
+        is_highlighted=True,
+    ).order_by(PersonalRecordEvent.achieved_at.desc(), PersonalRecordEvent.id.desc())
+    query, limit, offset = page_query(query, default_limit=50)
+    records = query.all()
+    return jsonify({
+        "items": [serialize_personal_record(item) for item in records],
+        "limit": limit,
+        "offset": offset,
     }), 200
 
 
@@ -177,7 +196,8 @@ def get_achievements():
 @login_required
 def progress_overview():
     _ensure_user_workout_history(g.user.id)
-    recent_sessions = (
+    compact = request.args.get("view") == "summary"
+    recent_sessions = [] if compact else (
         WorkoutSession.query.filter(
             WorkoutSession.user_id == g.user.id,
             WorkoutSession.completed_at.isnot(None),
@@ -186,19 +206,31 @@ def progress_overview():
         .limit(5)
         .all()
     )
-    recent_records = PersonalRecordEvent.query.filter(
+    recent_records = [] if compact else PersonalRecordEvent.query.filter(
         PersonalRecordEvent.user_id == g.user.id,
         PersonalRecordEvent.is_highlighted.is_(True),
-        PersonalRecordEvent.is_initial.is_(False),
     ).order_by(PersonalRecordEvent.achieved_at.desc(), PersonalRecordEvent.id.desc()).limit(5).all()
-    recent_unlocks = AchievementUnlock.query.filter_by(user_id=g.user.id).order_by(
+    recent_unlocks = [] if compact else AchievementUnlock.query.filter_by(user_id=g.user.id).order_by(
         AchievementUnlock.unlocked_at.desc(), AchievementUnlock.id.desc()
     ).limit(5).all()
+    exercises = performed_exercises(g.user.id)
+    recent_performance = None
+    if exercises:
+        selected = exercises[0]
+        recent_performance = {
+            **selected,
+            "sessions": exercise_sessions(g.user.id, selected['key'], limit=1),
+            "max_load_kg": historical_load(g.user.id, selected['key']),
+        }
+    weekly = weekly_progress(g.user.id)
     return jsonify({
-        "weekly": weekly_progress(g.user.id),
+        "body": body_summary(g.user.id),
+        "performance": {"exercises": exercises, "recent": recent_performance},
+        "weekly": weekly,
+        "consistency": consistency_days(g.user.id),
         "exercise_goal": serialize_exercise_goal(current_exercise_goal(g.user.id)),
         "recent_personal_records": [serialize_personal_record(item) for item in recent_records],
         "recent_achievements": [serialize_unlock(item) for item in recent_unlocks],
         "recent_activities": [_activity_list_item(item) for item in recent_sessions],
-        "suggested_weekly_target": suggested_days_per_week(g.user.id),
+        "suggested_weekly_target": (weekly.get("suggestion") or {}).get("days_per_week"),
     }), 200

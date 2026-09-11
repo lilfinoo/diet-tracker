@@ -1,4 +1,8 @@
 from datetime import datetime
+import hashlib
+import json
+
+from sqlalchemy import or_
 
 from src.models.user import (
     DelegatedActionAudit,
@@ -7,6 +11,7 @@ from src.models.user import (
     WorkoutDay,
     WorkoutExercise,
     WorkoutPlan,
+    ProfessionalReviewRequest,
     db,
 )
 
@@ -19,6 +24,127 @@ DIET_MEAL_FIELDS = {
     "day_of_week", "meal_type", "description", "calories", "protein", "carbs", "fat",
     "notes", "items", "prep_instructions", "prep_minutes", "substitutions", "order",
 }
+
+
+def plan_snapshot(plan):
+    if isinstance(plan, WorkoutPlan):
+        return {
+            "type": "workout",
+            "title": plan.title,
+            "description": plan.description,
+            "questionnaire": plan.questionnaire_data or {},
+            "days": [{
+                "code": day.code,
+                "title": day.title,
+                "focus": day.focus,
+                "order": day.order,
+                "exercises": [{key: getattr(exercise, key) for key in WORKOUT_EXERCISE_FIELDS}
+                              for exercise in day.exercises],
+            } for day in plan.days],
+        }
+    return {
+        "type": "diet",
+        "title": plan.title,
+        "description": plan.description,
+        "questionnaire": (plan.generation_context or {}).get("questionnaire") or {},
+        "nutrition_targets": (plan.generation_context or {}).get("nutrition_targets") or {},
+        "profile_snapshot": (plan.generation_context or {}).get("profile_snapshot") or {},
+        "meals": [
+            {key: getattr(meal, key) for key in DIET_MEAL_FIELDS}
+            for meal in sorted(plan.meals, key=lambda item: (item.day_of_week, item.order, item.id or 0))
+        ],
+    }
+
+
+def snapshot_fingerprint(snapshot):
+    encoded = json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def clone_plan_for_review(plan, owner, professional):
+    snapshot = plan_snapshot(plan)
+    if isinstance(plan, WorkoutPlan):
+        return create_workout_plan(
+            owner,
+            professional,
+            snapshot["questionnaire"],
+            {
+                "title": snapshot["title"],
+                "description": snapshot["description"],
+                "days": snapshot["days"],
+            },
+            status="draft",
+            source="manual",
+            supersedes_plan_id=plan.id,
+        )
+    return create_diet_plan(
+        owner,
+        professional,
+        snapshot["questionnaire"],
+        snapshot["nutrition_targets"],
+        {"title": snapshot["title"], "description": snapshot["description"], "meals": snapshot["meals"]},
+        snapshot["profile_snapshot"],
+        status="draft",
+        source="manual",
+        supersedes_plan_id=plan.id,
+    )
+
+
+def professional_review_for_plan(plan):
+    if isinstance(plan, WorkoutPlan):
+        source_field = ProfessionalReviewRequest.source_workout_plan_id
+        proposal_field = ProfessionalReviewRequest.proposal_workout_plan_id
+    else:
+        source_field = ProfessionalReviewRequest.source_diet_plan_id
+        proposal_field = ProfessionalReviewRequest.proposal_diet_plan_id
+    reviews = ProfessionalReviewRequest.query.filter(
+        ProfessionalReviewRequest.status == "completed",
+        or_(source_field == plan.id, proposal_field == plan.id),
+    ).order_by(ProfessionalReviewRequest.completed_at.desc()).all()
+    fingerprint = snapshot_fingerprint(plan_snapshot(plan))
+    for review in reviews:
+        approved_source = review.outcome == "approved_as_is" and getattr(review, source_field.key) == plan.id
+        applied_proposal = (
+            review.outcome == "changes_proposed"
+            and review.student_decision == "applied"
+            and getattr(review, proposal_field.key) == plan.id
+        )
+        expected = review.source_fingerprint if approved_source else review.proposal_fingerprint
+        if (approved_source or applied_proposal) and expected == fingerprint:
+            professional = review.assigned_professional
+            return {
+                "review_id": review.id,
+                "professional": {
+                    "id": professional.id,
+                    "username": professional.username,
+                    "avatar_url": (
+                        f"/api/profiles/by-id/{professional.id}/avatar"
+                        if professional.profile and professional.profile.avatar_object_key
+                        else None
+                    ),
+                } if professional else None,
+                "reviewed_at": review.completed_at.isoformat() if review.completed_at else None,
+            }
+    if (
+        plan.author
+        and plan.author_user_id != plan.user_id
+        and plan.published_by_user_id == plan.author_user_id
+        and plan.professional_verified_fingerprint == fingerprint
+    ):
+        return {
+            "review_id": None,
+            "professional": {
+                "id": plan.author.id,
+                "username": plan.author.username,
+                "avatar_url": (
+                    f"/api/profiles/by-id/{plan.author.id}/avatar"
+                    if plan.author.profile and plan.author.profile.avatar_object_key
+                    else None
+                ),
+            },
+            "reviewed_at": plan.published_at.isoformat() if plan.published_at else None,
+        }
+    return None
 
 
 def create_workout_plan(
@@ -184,6 +310,7 @@ def publish_plan(plan, actor, owner, relationship, resource_type):
     plan.status = "published"
     plan.published_at = datetime.utcnow()
     plan.published_by_user_id = actor.id
+    plan.professional_verified_fingerprint = snapshot_fingerprint(plan_snapshot(plan))
     if plan.supersedes_plan_id:
         model = WorkoutPlan if resource_type == "workout_plan" else DietPlan
         previous = db.session.get(model, plan.supersedes_plan_id)

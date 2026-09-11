@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import json
 
 import click
 from dotenv import load_dotenv
@@ -11,20 +12,38 @@ from sqlalchemy.engine import Engine
 
 load_dotenv()
 
-from src.config import Config, ProductionConfig
+from src.config import Config, ProductionConfig, TestConfig
 from src.models.user import db
 from src.models.user import User
+from src.celery_app import celery_app as celery_app, init_celery
 from src.routes.auth_routes import auth_bp
+from src.routes.account_routes import account_bp
+from src.routes.analytics_routes import analytics_bp
+from src.routes.ai_task_routes import ai_task_bp
+from src.routes.adherence_routes import adherence_bp
+from src.routes.diet_daily_routes import diet_daily_bp
 from src.routes.billing_routes import billing_bp
 from src.routes.admin_routes import admin_bp
 from src.routes.plan_routes import plan_bp
 from src.routes.session_routes import session_bp
+from src.routes.social_routes import social_bp
 from src.routes.progress_routes import progress_bp
 from src.routes.workout_routes import workout_bp
 from src.routes.profile_routes import profile_bp
+from src.routes.review_routes import review_bp
 from src.routes.user_routes import user_bp
 from src.routes.professional_routes import professional_bp
 from src.services.badges import backfill_historical_badges, grant_signup_badges
+from src.metrics import init_metrics
+from src.services.privacy_cleanup import cleanup_expired_private_data
+from src.services.privacy_logging import install_privacy_log_filter
+from src.services.billing_reconciliation import reconcile_asaas
+from src.services.workoutx import (
+    apply_preview_catalog,
+    collect_preview_exercises,
+    import_exercises,
+    preview_catalog_comparison,
+)
 
 
 @event.listens_for(Engine, "connect")
@@ -35,16 +54,36 @@ def enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
         cursor.close()
 
 
-def create_app(config_class=Config):
+def create_app(config_class=None):
+    if config_class is None:
+        app_env = os.getenv("APP_ENV")
+        config_class = {
+            "development": Config,
+            "production": ProductionConfig,
+            "test": TestConfig,
+        }.get(app_env)
+        if config_class is None:
+            raise RuntimeError("APP_ENV must be explicitly set to development, test, or production")
     app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), "copilot"))
     app.config.from_object(config_class)
+    install_privacy_log_filter(app)
 
     if not app.config["SECRET_KEY"]:
         # A random key would silently log users out on each restart. Fail clearly instead.
         raise RuntimeError("SECRET_KEY must be configured")
 
-    if os.getenv("FLASK_ENV") == "production":
-        ProductionConfig.validate()
+    asaas_urls = {
+        "sandbox": "https://api-sandbox.asaas.com/v3",
+        "production": "https://api.asaas.com/v3",
+    }
+    expected_asaas_url = asaas_urls.get(app.config["ASAAS_ENV"])
+    if not expected_asaas_url:
+        raise RuntimeError("ASAAS_ENV must be sandbox or production")
+    if app.config["ASAAS_API_BASE_URL"] != expected_asaas_url:
+        raise RuntimeError("ASAAS_API_BASE_URL must match ASAAS_ENV exactly")
+
+    if app.config["IS_PRODUCTION"]:
+        ProductionConfig.validate(app.config)
 
     cors_origins = app.config["CORS_ORIGINS"]
     if cors_origins:
@@ -52,11 +91,23 @@ def create_app(config_class=Config):
 
     db.init_app(app)
     Migrate(app, db)
+    init_celery(app)
+    init_metrics(app)
+
+    from src.routes.common import _csrf_protect_request
+    app.before_request(_csrf_protect_request)
 
     app.register_blueprint(auth_bp, url_prefix="/api")
+    app.register_blueprint(account_bp, url_prefix="/api")
+    app.register_blueprint(analytics_bp, url_prefix="/api")
+    app.register_blueprint(ai_task_bp, url_prefix="/api")
     app.register_blueprint(billing_bp, url_prefix="/api")
     app.register_blueprint(plan_bp, url_prefix="/api")
     app.register_blueprint(admin_bp, url_prefix="/api")
+    app.register_blueprint(adherence_bp, url_prefix="/api")
+    app.register_blueprint(diet_daily_bp, url_prefix="/api")
+    app.register_blueprint(social_bp, url_prefix="/api")
+    app.register_blueprint(review_bp, url_prefix="/api")
     app.register_blueprint(session_bp, url_prefix="/api")
     app.register_blueprint(progress_bp, url_prefix="/api")
     app.register_blueprint(workout_bp, url_prefix="/api")
@@ -87,7 +138,7 @@ def create_app(config_class=Config):
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "same-origin")
         response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-        if os.getenv("FLASK_ENV") == "production":
+        if app.config["HSTS_ENABLED"]:
             response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         return response
 
@@ -138,6 +189,39 @@ def create_app(config_class=Config):
         granted = backfill_historical_badges()
         db.session.commit()
         click.echo(f"Badges seeded: {len(granted)}")
+
+    @app.cli.command("privacy-cleanup")
+    def privacy_cleanup():
+        """Expire stale AI inputs and enforce analytics retention."""
+        result = cleanup_expired_private_data(
+            app.config["AI_TASK_RETENTION_DAYS"],
+            app.config["ANALYTICS_RETENTION_DAYS"],
+            app.config["AI_JOB_STALE_SECONDS"],
+        )
+        click.echo(", ".join(f"{key}={value}" for key, value in result.items()))
+
+    @app.cli.command("reconcile-asaas")
+    def reconcile_asaas_command():
+        """Reconcile local subscriptions with the Asaas production state."""
+        result = reconcile_asaas()
+        click.echo(", ".join(f"{key}={value}" for key, value in result.items()))
+
+    @app.cli.command("import-workoutx-exercises")
+    def import_workoutx_exercises():
+        """Import the full WorkoutX exercise catalog into the database."""
+        count = import_exercises()
+        click.echo(f"WorkoutX exercises imported: {count}")
+
+    @app.cli.command("collect-workoutx-preview")
+    def collect_workoutx_preview():
+        """Collect a resumable WorkoutX preview without changing the active catalog."""
+        collection = collect_preview_exercises()
+        click.echo(json.dumps({**collection, **preview_catalog_comparison()}, ensure_ascii=False))
+
+    @app.cli.command("apply-workoutx-preview")
+    def apply_workoutx_preview():
+        """Replace the active WorkoutX catalog with the cached preview selection."""
+        click.echo(f"WorkoutX exercises activated: {apply_preview_catalog()}")
 
     @app.route("/admin")
     def serve_admin():

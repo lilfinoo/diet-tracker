@@ -3,20 +3,15 @@ import uuid
 from flask import Blueprint, abort, g, jsonify
 from sqlalchemy.orm import selectinload
 
-from src.models.user import WorkoutDay, WorkoutExercise, WorkoutPlan, WorkoutSession, UserProfile, db
-from src.routes.common import _csrf_protect_request
+from src.models.user import ProfessionalReviewRequest, WorkoutDay, WorkoutExercise, WorkoutPlan, WorkoutSession, UserProfile, db
 from src.routes.common import (_apply_workout_plan_schedule, _editable_workout_plan, _get_or_create_profile, _local_date_for_timezone, _plan_catalog, _prescription, _redistribute_workout_plan_data, _set_catalog_exercise, _workout_questionnaire_for_plan, _workout_today_payload, _version_workout_plan_for_edit, json_body, login_required, page_query)
 from src.services.plan_management import create_workout_plan
+from src.services.analytics import record_event
 from src.services.workout_plans import catalog_by_key, replacement_options
 from src.services.workout_progress import user_timezone
 
 
 workout_bp = Blueprint("workout", __name__)
-
-
-@workout_bp.before_request
-def protect_workout_mutations():
-    return _csrf_protect_request()
 
 
 @workout_bp.route("/workouts/today", methods=["GET"])
@@ -56,6 +51,11 @@ def set_current_workout_plan(plan_id):
     _apply_workout_plan_schedule(profile, plan, weekdays, timezone_name, local_date)
     message = "Plano principal definido para hoje." if was_unconfigured else "Agenda atualizada."
 
+    record_event(
+        "plan_set_current",
+        user_id=user.id,
+        properties={"plan_type": "workout"},
+    )
     db.session.commit()
     return jsonify({
         "message": message,
@@ -104,6 +104,11 @@ def adapt_current_workout_plan(plan_id):
     )
     plan.status = "archived"
     _apply_workout_plan_schedule(profile, adapted_plan, weekdays, timezone_name, local_date)
+    record_event(
+        "plan_set_current",
+        user_id=user.id,
+        properties={"plan_type": "workout"},
+    )
     db.session.commit()
     return jsonify({
         "message": "Treino adaptado à nova agenda.",
@@ -146,7 +151,10 @@ def get_workout_plan_details(plan_id):
         selectinload(WorkoutPlan.days).selectinload(WorkoutDay.exercises),
         selectinload(WorkoutPlan.exercises),
     ).first_or_404()
-    return jsonify(plan.to_dict_full()), 200
+    profile = UserProfile.query.filter_by(user_id=g.user.id).first()
+    data = plan.to_dict_full()
+    data["is_current"] = bool(profile and profile.current_workout_plan_id == plan.id)
+    return jsonify(data), 200
 
 
 @workout_bp.route("/workout_plans/<int:plan_id>/exercises/catalog", methods=["GET"])
@@ -166,7 +174,8 @@ def permanent_replacement_options(plan_id, exercise_id):
         exercise,
         unavailable_equipment=[],
         available_equipment=questionnaire.get("equipment") or ["full_gym"],
-        limit=8,
+        limit=3,
+        present_exercises=exercise.day.exercises if exercise.day else plan.exercises,
     )
     return jsonify({"options": options}), 200
 
@@ -177,16 +186,35 @@ def replace_plan_exercise(plan_id, exercise_id):
     plan = _editable_workout_plan(plan_id)
     exercise = WorkoutExercise.query.filter_by(id=exercise_id, workout_plan_id=plan.id).first_or_404()
     data = json_body()
-    catalog_item = catalog_by_key().get(str(data.get("catalog_key", "")))
-    source = catalog_by_key().get(exercise.catalog_key)
-    allowed_keys = {item["key"] for item in _plan_catalog(plan)}
-    if not catalog_item or catalog_item["key"] not in allowed_keys:
+    catalog_key = str(data.get("catalog_key", ""))
+    catalog_item = catalog_by_key().get(catalog_key)
+    if catalog_item:
+        source = catalog_by_key().get(exercise.catalog_key)
+        allowed_keys = {item["key"] for item in _plan_catalog(plan)}
+        if catalog_item["key"] not in allowed_keys:
+            abort(400, description="Escolha um exercício compatível com o plano.")
+        if source and catalog_item["substitution_group"] != source["substitution_group"]:
+            abort(400, description="A substituição deve manter o mesmo padrão de movimento.")
+        plan, _, exercise_map = _version_workout_plan_for_edit(plan)
+        exercise = exercise_map.get(exercise.id, exercise)
+        _set_catalog_exercise(exercise, catalog_item)
+        for field, value in _prescription(data, exercise).items():
+            setattr(exercise, field, value)
+        db.session.commit()
+        return jsonify({"message": "Exercício substituído no plano.", "plan": plan.to_dict_full()}), 200
+    questionnaire = plan.questionnaire_data or {}
+    option = next((item for item in replacement_options(
+        exercise,
+        unavailable_equipment=[],
+        available_equipment=questionnaire.get("equipment") or ["full_gym"],
+        present_exercises=exercise.day.exercises if exercise.day else plan.exercises,
+    ) if item["catalog_key"] == catalog_key), None)
+    if not option:
         abort(400, description="Escolha um exercício compatível com o plano.")
-    if source and catalog_item["substitution_group"] != source["substitution_group"]:
-        abort(400, description="A substituição deve manter o mesmo padrão de movimento.")
     plan, _, exercise_map = _version_workout_plan_for_edit(plan)
     exercise = exercise_map.get(exercise.id, exercise)
-    _set_catalog_exercise(exercise, catalog_item)
+    for field in ("catalog_key", "name", "movement_pattern", "primary_muscle", "equipment", "difficulty"):
+        setattr(exercise, field, option[field])
     for field, value in _prescription(data, exercise).items():
         setattr(exercise, field, value)
     db.session.commit()
@@ -259,7 +287,11 @@ def delete_workout_plan(plan_id):
     plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=user.id, status="published").with_for_update().first_or_404()
     if WorkoutSession.query.filter_by(workout_plan_id=plan.id, user_id=user.id, completed_at=None).first():
         return jsonify({"error": "Finalize o treino em andamento antes de excluir este plano."}), 409
-    if WorkoutSession.query.filter_by(workout_plan_id=plan.id, user_id=user.id).first():
+    has_review = ProfessionalReviewRequest.query.filter(
+        (ProfessionalReviewRequest.source_workout_plan_id == plan.id)
+        | (ProfessionalReviewRequest.proposal_workout_plan_id == plan.id)
+    ).first()
+    if WorkoutSession.query.filter_by(workout_plan_id=plan.id, user_id=user.id).first() or has_review:
         plan.status = "archived"
         db.session.commit()
         return jsonify({"message": "Plano removido. O histórico de atividades foi preservado."}), 200

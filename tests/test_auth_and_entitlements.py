@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from itsdangerous import URLSafeTimedSerializer
 
 from src.models.user import OAuthIdentity, Subscription, User, db
+from tests.helpers import consent_payload, registration_payload
 
 
 GOOGLE_PAYLOAD = {
@@ -45,7 +46,7 @@ def test_google_first_access_creation_and_relogin(app, client, monkeypatch):
 
     created = client.post(
         "/api/auth/google",
-        json={"signup_token": signup_token, "username": "google-user"},
+        json={"signup_token": signup_token, "username": "google-user", **consent_payload()},
     )
     assert created.status_code == 201
     assert created.get_json()["user"]["username"] == "google-user"
@@ -66,12 +67,12 @@ def test_google_signup_rejects_username_collision(client, monkeypatch):
     _mock_google(monkeypatch)
     assert client.post(
         "/api/register",
-        json={"username": "taken", "password": "strong-password"},
+        json=registration_payload("taken"),
     ).status_code == 201
     signup_token = _begin_google_signup(client)
     response = client.post(
         "/api/auth/google",
-        json={"signup_token": signup_token, "username": "taken"},
+        json={"signup_token": signup_token, "username": "taken", **consent_payload()},
     )
     assert response.status_code == 409
     assert response.get_json()["code"] == "username_taken"
@@ -91,7 +92,7 @@ def test_google_login_blocks_banned_user(app, client, monkeypatch):
     signup_token = _begin_google_signup(client)
     assert client.post(
         "/api/auth/google",
-        json={"signup_token": signup_token, "username": "banned-google"},
+        json={"signup_token": signup_token, "username": "banned-google", **consent_payload()},
     ).status_code == 201
     with app.app_context():
         user = User.query.filter_by(username="banned-google").one()
@@ -118,7 +119,7 @@ def test_public_plans_and_active_subscription_entitlement(app, client):
 
     assert client.post(
         "/api/register",
-        json={"username": "subscriber", "password": "strong-password"},
+        json=registration_payload("subscriber"),
     ).status_code == 201
     with app.app_context():
         user = User.query.filter_by(username="subscriber").one()
@@ -140,10 +141,49 @@ def test_public_plans_and_active_subscription_entitlement(app, client):
     assert subscription.get_json()["plan_code"] == "professional_complete"
 
 
+def test_canceled_and_expired_subscription_entitlement_boundaries(app):
+    with app.app_context():
+        canceled_without_end = User(username="canceled-without-end")
+        canceled_future = User(username="canceled-future")
+        active_expired = User(username="active-expired")
+        db.session.add_all([canceled_without_end, canceled_future, active_expired])
+        db.session.flush()
+        db.session.add_all([
+            Subscription(
+                user_id=canceled_without_end.id,
+                provider="asaas",
+                external_subscription_id="sub_canceled_without_end",
+                status="canceled",
+                plan_code="premium_student",
+            ),
+            Subscription(
+                user_id=canceled_future.id,
+                provider="asaas",
+                external_subscription_id="sub_canceled_future",
+                status="canceled",
+                plan_code="premium_student",
+                current_period_end=datetime.utcnow() + timedelta(days=1),
+            ),
+            Subscription(
+                user_id=active_expired.id,
+                provider="asaas",
+                external_subscription_id="sub_active_expired",
+                status="active",
+                plan_code="premium_student",
+                current_period_end=datetime.utcnow() - timedelta(seconds=1),
+            ),
+        ])
+        db.session.commit()
+
+        assert canceled_without_end.has_entitlement("premium") is False
+        assert canceled_future.has_entitlement("premium") is True
+        assert active_expired.has_entitlement("premium") is False
+
+
 def test_ai_trial_counts_only_successful_responses(app, client, monkeypatch):
     assert client.post(
         "/api/register",
-        json={"username": "trial-user", "password": "strong-password"},
+        json=registration_payload("trial-user"),
     ).status_code == 201
     monkeypatch.setattr(
         "src.routes.profile_routes.calculate_nutrition",

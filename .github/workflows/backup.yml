@@ -1,0 +1,49 @@
+name: Daily PostgreSQL Backup
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-database-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.BACKUP_AWS_REGION }}
+      BACKUP_S3_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+      S3_ENDPOINT_URL: ${{ secrets.BACKUP_S3_ENDPOINT_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
+      - name: Validate required secrets
+        run: |
+          test -n "$DATABASE_URL"
+          test -n "$AWS_ACCESS_KEY_ID"
+          test -n "$AWS_SECRET_ACCESS_KEY"
+          test -n "$AWS_DEFAULT_REGION"
+          test -n "$BACKUP_S3_BUCKET"
+      - name: Create and verify backup
+        run: |
+          set -euo pipefail
+          backup_file="diet-tracker-$(date -u +%Y-%m-%dT%H-%M-%SZ).dump"
+          pg_dump --format=custom --compress=9 --no-owner --no-acl --file="$backup_file" "$DATABASE_URL"
+          pg_restore --list "$backup_file" >/dev/null
+          if [ -n "$S3_ENDPOINT_URL" ]; then
+            aws s3 cp "$backup_file" "s3://$BACKUP_S3_BUCKET/postgres/$backup_file" --endpoint-url "$S3_ENDPOINT_URL"
+            aws s3 cp "$backup_file" "s3://$BACKUP_S3_BUCKET/postgres/latest.dump" --endpoint-url "$S3_ENDPOINT_URL"
+          else
+            aws s3 cp "$backup_file" "s3://$BACKUP_S3_BUCKET/postgres/$backup_file" --sse AES256
+            aws s3 cp "$backup_file" "s3://$BACKUP_S3_BUCKET/postgres/latest.dump" --sse AES256
+          fi

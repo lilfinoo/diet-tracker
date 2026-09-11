@@ -1,5 +1,7 @@
 import hmac
+import math
 import secrets
+import time
 import unicodedata
 from functools import wraps
 
@@ -8,6 +10,7 @@ from itsdangerous import URLSafeTimedSerializer
 from flask import abort, current_app, jsonify, request, session
 
 from src.models.user import User, db
+from src.services.analytics import record_event
 
 
 def _start_session(user):
@@ -15,6 +18,7 @@ def _start_session(user):
     session["user_id"] = user.id
     session["username"] = user.username
     session["csrf_token"] = secrets.token_urlsafe(32)
+    session["authenticated_at"] = int(time.time())
 
 
 def _csrf_token():
@@ -30,7 +34,9 @@ def _csrf_protect_request():
         return None
     if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
         return None
-    if request.endpoint in {"auth.auth_config", "auth.check_session", "auth.login", "auth.register", "auth.google_auth"}:
+    if request.endpoint == "billing.asaas_webhook":
+        return None
+    if request.endpoint in {"auth.login", "auth.register", "auth.google_auth"} and not session.get("user_id"):
         return None
     if not session.get("user_id"):
         return None
@@ -82,17 +88,65 @@ def premium_required(_func=None, *, allow_trial=False):
         def decorated_function(*args, **kwargs):
             from flask import g
             uses_trial = not g.user.has_entitlement("premium")
-            if uses_trial and (not allow_trial or g.user.ai_trial_uses >= 3):
+            if uses_trial and not allow_trial:
+                record_event("premium_limit_reached", user_id=g.user.id, commit=True)
                 return jsonify({"error": "Acesso negado: Requer status Premium", "code": "premium_required"}), 403
-            response = current_app.make_response(f(*args, **kwargs))
-            if uses_trial and 200 <= response.status_code < 300:
-                g.user.ai_trial_uses += 1
+            reserved_trial = False
+            if uses_trial:
+                reserved_trial = bool(User.query.filter(
+                    User.id == g.user.id,
+                    User.ai_trial_uses < 3,
+                ).update({User.ai_trial_uses: User.ai_trial_uses + 1}, synchronize_session=False))
+                db.session.commit()
+                if not reserved_trial:
+                    record_event("premium_limit_reached", user_id=g.user.id, commit=True)
+                    return jsonify({"error": "Acesso negado: Requer status Premium", "code": "premium_required"}), 403
+            try:
+                response = current_app.make_response(f(*args, **kwargs))
+            except Exception:
+                if reserved_trial:
+                    User.query.filter(User.id == g.user.id, User.ai_trial_uses > 0).update(
+                        {User.ai_trial_uses: User.ai_trial_uses - 1},
+                        synchronize_session=False,
+                    )
+                    db.session.commit()
+                raise
+            if reserved_trial and 200 <= response.status_code < 300:
+                record_event("free_premium_use", user_id=g.user.id, commit=True)
+            elif reserved_trial:
+                User.query.filter(User.id == g.user.id, User.ai_trial_uses > 0).update(
+                    {User.ai_trial_uses: User.ai_trial_uses - 1},
+                    synchronize_session=False,
+                )
                 db.session.commit()
             return response
 
         return decorated_function
 
     return decorator(_func) if _func is not None else decorator
+
+
+def ai_consent_required(f):
+    @wraps(f)
+    @login_required
+    def decorated_function(*args, **kwargs):
+        from flask import g
+
+        if not g.user.has_current_ai_consent():
+            return jsonify({
+                "error": "Autorize o processamento por IA antes de usar este recurso.",
+                "code": "ai_consent_required",
+            }), 403
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
+def ai_consent_error():
+    return jsonify({
+        "error": "O titular dos dados precisa autorizar o processamento por IA.",
+        "code": "ai_consent_required",
+    }), 403
 
 
 def json_body():
@@ -150,7 +204,11 @@ def coerce_numbers(data, fields):
     try:
         for field in fields:
             if field in data and data[field] not in (None, ""):
+                if isinstance(data[field], bool):
+                    raise ValueError
                 data[field] = float(data[field])
+                if not math.isfinite(data[field]):
+                    raise ValueError
             elif field in data:
                 data[field] = None
     except (TypeError, ValueError):
@@ -206,43 +264,3 @@ def _google_identity_claims(payload):
         "display_name": str(payload.get("name", ""))[:255] or None,
         "avatar_url": str(payload.get("picture", ""))[:2048] or None,
     }
-
-
-def _start_session(user):
-    session.clear()
-    session["user_id"] = user.id
-    session["username"] = user.username
-    session["csrf_token"] = secrets.token_urlsafe(32)
-
-
-def _csrf_token():
-    token = session.get("csrf_token")
-    if not token:
-        token = secrets.token_urlsafe(32)
-        session["csrf_token"] = token
-    return token
-
-
-def _csrf_exempt():
-    return request.endpoint in {
-        "auth.auth_config",
-        "auth.check_session",
-        "auth.login",
-        "auth.register",
-        "auth.google_auth",
-        "billing.asaas_webhook",
-    }
-
-
-def _csrf_protect_request():
-    if not current_app.config.get("CSRF_PROTECTION", True):
-        return None
-    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
-        return None
-    if _csrf_exempt() or not session.get("user_id"):
-        return None
-    expected = session.get("csrf_token")
-    received = request.headers.get("X-CSRF-Token", "")
-    if not expected or not received or not hmac.compare_digest(str(expected), str(received)):
-        return jsonify({"error": "Token CSRF inválido."}), 403
-    return None

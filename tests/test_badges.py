@@ -2,16 +2,17 @@ from datetime import datetime, timedelta
 
 from src.models.user import User, db
 from src.services.badges import backfill_historical_badges
+from tests.helpers import registration_payload
 
 
 def test_register_grants_pioneer_and_since_always(client):
-    response_one = client.post("/api/register", json={"username": "badge-one", "password": "strong-password"})
+    response_one = client.post("/api/register", json=registration_payload("badge-one"))
     assert response_one.status_code == 201
     user_one = response_one.get_json()["user"]
     assert {badge["code"] for badge in user_one["badges"]} == {"pioneiro", "desde_sempre"}
     assert next(badge for badge in user_one["badges"] if badge["code"] == "pioneiro")["badge_rank"] == 1
 
-    response_two = client.post("/api/register", json={"username": "badge-two", "password": "strong-password"})
+    response_two = client.post("/api/register", json=registration_payload("badge-two"))
     assert response_two.status_code == 201
     user_two = response_two.get_json()["user"]
     assert next(badge for badge in user_two["badges"] if badge["code"] == "pioneiro")["badge_rank"] == 2
@@ -50,7 +51,7 @@ def test_backfill_assigns_first_100_pioneers_and_respects_cutoff(app):
 
 
 def test_profile_badges_endpoint_lists_catalog_and_grants(client):
-    register = client.post("/api/register", json={"username": "badge-profile", "password": "strong-password"})
+    register = client.post("/api/register", json=registration_payload("badge-profile"))
     assert register.status_code == 201
 
     response = client.get("/api/profile/badges")
@@ -61,7 +62,7 @@ def test_profile_badges_endpoint_lists_catalog_and_grants(client):
 
 
 def test_profile_highlights_can_be_saved(client):
-    register = client.post("/api/register", json={"username": "badge-highlights", "password": "strong-password"})
+    register = client.post("/api/register", json=registration_payload("badge-highlights"))
     assert register.status_code == 201
     token = register.get_json()["csrf_token"]
 

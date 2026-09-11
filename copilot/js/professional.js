@@ -31,6 +31,7 @@
             requestError.fields = data.fields || {};
             throw requestError;
         }
+        if (response.status === 202 && data.job_id) return window.waitForAIJob(data);
         return data;
     }
 
@@ -49,25 +50,25 @@
                 <button type="button" class="btn-secondary" onclick="openProfessionalPlan('${type}', '${esc(plan.id)}')"><i class="fas fa-eye"></i> Abrir</button>
                 ${isDraft ? `<button type="button" class="btn-secondary" onclick="editProfessionalPlan('${type}', '${esc(plan.id)}')"><i class="fas fa-pen"></i> Editar</button><button type="button" class="btn-primary" onclick="publishProfessionalPlan('${type}', '${esc(plan.id)}')"><i class="fas fa-paper-plane"></i> Enviar</button>` : ""}
                 ${isDraft && type === "diet" ? `<button type="button" class="btn-secondary" onclick="suggestProfessionalDietChange('${esc(plan.id)}')"><i class="fas fa-wand-magic-sparkles"></i> Sugerir mudança</button>` : ""}
-                <button type="button" class="btn-secondary" onclick="exportProfessionalPlan('${type}', '${esc(plan.id)}', '${esc(studentId)}')"><i class="fab fa-whatsapp"></i></button>
+                <button type="button" class="btn-secondary" onclick="exportProfessionalPlan('${type}', '${esc(plan.id)}', '${esc(studentId)}')" aria-label="Compartilhar ${esc(plan.title)} no WhatsApp"><i class="fab fa-whatsapp" aria-hidden="true"></i></button>
             </div>
         </article>`;
     }
 
     async function loadProfessionalDashboard() {
-        if (!window.currentUser?.is_professional) return;
+        if (!window.currentUser?.professional_entitled) return;
         const dashboard = byId("professionalDashboard");
         const detail = byId("professionalStudentDetail");
         dashboard?.classList.remove("hidden");
         detail?.classList.add("hidden");
         const container = byId("professionalStudents");
-        if (container) container.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Carregando alunos...</div>';
+        if (container) container.innerHTML = '<div class="plans-loading" role="status"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Carregando alunos...</span></div>';
         try {
             const data = await api("/professional/students?limit=100");
             state.students = data.items || [];
             renderProfessionalDashboard();
         } catch (error) {
-            if (container) container.innerHTML = `<div class="empty-state"><p>${esc(error.message)}</p></div>`;
+            if (container) container.innerHTML = `<div class="empty-state"><p>${esc(error.message)}</p><button type="button" class="btn-secondary" onclick="loadProfessionalDashboard()">Tentar novamente</button></div>`;
         }
     }
 
@@ -79,6 +80,19 @@
         if (stats) stats.innerHTML = `
             <article class="stat-card"><span class="stat-card__icon"><i class="fas fa-users"></i></span><div><small>Alunos ativos</small><strong>${state.students.length}</strong></div></article>
             <article class="stat-card"><span class="stat-card__icon stat-card__icon--blue"><i class="fas fa-file-pen"></i></span><div><small>Rascunhos recentes</small><strong>${drafts}</strong></div></article>`;
+        const draftContainer = byId("professionalDrafts");
+        if (draftContainer) {
+            const pending = state.students.flatMap((student) => [
+                student.latest_workout_plan?.status === "draft" ? { student, plan: student.latest_workout_plan, label: "Treino" } : null,
+                student.latest_diet_plan?.status === "draft" ? { student, plan: student.latest_diet_plan, label: "Dieta" } : null
+            ].filter(Boolean));
+            draftContainer.innerHTML = pending.length ? pending.map(({ student, plan, label }) => `
+                <button type="button" onclick="openProfessionalStudent('${esc(student.id)}')">
+                    <span><small>${esc(label)}</small><strong>${esc(plan.title)}</strong></span>
+                    <span><small>Aluno</small><strong>${esc(student.username)}</strong></span>
+                    <i class="fas fa-chevron-right" aria-hidden="true"></i>
+                </button>`).join("") : '<p class="muted">Nenhum rascunho aguardando revisão.</p>';
+        }
         const container = byId("professionalStudents");
         if (!container) return;
         if (!state.students.length) {
@@ -87,7 +101,7 @@
         }
         container.innerHTML = state.students.map((student) => `
             <button type="button" class="professional-student-card" onclick="openProfessionalStudent('${esc(student.id)}')">
-                <span class="professional-student-avatar">${esc(student.username.charAt(0).toUpperCase())}</span>
+                <span class="professional-student-avatar">${student.avatar_url ? `<img src="${esc(student.avatar_url)}" alt="">` : esc(student.username.charAt(0).toUpperCase())}</span>
                 <span><strong>${esc(student.username)}</strong><small>${esc(student.profile?.goal || "Objetivo não informado")}</small></span>
                 <span class="professional-student-meta"><small>Última medida</small><strong>${student.latest_measurement?.weight ? `${esc(student.latest_measurement.weight)} kg` : "Sem registro"}</strong></span>
                 <i class="fas fa-chevron-right"></i>
@@ -100,11 +114,11 @@
         const detail = byId("professionalStudentDetail");
         dashboard?.classList.add("hidden");
         detail?.classList.remove("hidden");
-        if (detail) detail.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Carregando aluno...</div>';
+        if (detail) detail.innerHTML = '<div class="plans-loading" role="status"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Carregando aluno...</span></div>';
         try {
             const scope = window.currentUser?.professional_scope;
-            const allowsWorkout = !scope || scope === "workout" || scope === "both";
-            const allowsDiet = !scope || scope === "diet" || scope === "both";
+            const allowsWorkout = scope === "workout" || scope === "both";
+            const allowsDiet = scope === "diet" || scope === "both";
             const [student, workouts, diets] = await Promise.all([
                 api(`/professional/students/${segment(studentId)}`),
                 allowsWorkout ? api(`/professional/students/${segment(studentId)}/workout-plans`) : Promise.resolve([]),
@@ -125,12 +139,14 @@
         if (!student || !detail) return;
         const measurements = asArray(student.measurements).slice(0, 4);
         const scope = window.currentUser?.professional_scope;
-        const allowsWorkout = !scope || scope === "workout" || scope === "both";
-        const allowsDiet = !scope || scope === "diet" || scope === "both";
+        const allowsWorkout = scope === "workout" || scope === "both";
+        const allowsDiet = scope === "diet" || scope === "both";
+        const workoutSessions = asArray(student.recent_workout_sessions);
+        const dietAdherence = asArray(student.recent_diet_adherence);
         detail.innerHTML = `
             <div class="professional-student-header">
                 <button type="button" class="back-button" onclick="loadProfessionalDashboard()"><i class="fas fa-arrow-left"></i></button>
-                <span class="professional-student-avatar professional-student-avatar--large">${esc(student.username.charAt(0).toUpperCase())}</span>
+                <span class="professional-student-avatar professional-student-avatar--large">${student.avatar_url ? `<img src="${esc(student.avatar_url)}" alt="">` : esc(student.username.charAt(0).toUpperCase())}</span>
                 <div><span class="content-kicker">Aluno ativo</span><h2>${esc(student.username)}</h2><p>${esc(student.profile?.goal || "Perfil ainda incompleto")}</p></div>
                 <button type="button" class="btn-secondary professional-revoke" onclick="revokeProfessionalStudent()"><i class="fas fa-link-slash"></i> Desvincular</button>
             </div>
@@ -145,6 +161,8 @@
                 <header><div><span class="content-kicker">Alimentação</span><h3>Planos alimentares</h3></div><div class="professional-create-actions"><button class="btn-secondary" onclick="createManualProfessionalPlan('diet')"><i class="fas fa-plus"></i> Manual</button><button class="btn-primary" onclick="openProfessionalPlanWizard('diet', '${esc(student.id)}')"><i class="fas fa-wand-magic-sparkles"></i> Gerar com IA</button></div></header>
                 <div class="professional-plan-grid">${state.dietPlans.length ? state.dietPlans.map((plan) => planCard(plan, "diet")).join("") : emptyPlan("alimentar")}</div>
             </section>` : ""}
+            ${allowsWorkout ? `<section class="professional-plan-section"><header><div><span class="content-kicker content-kicker--blue">Conclusões</span><h3>Treinos finalizados</h3></div></header><div class="professional-plan-grid">${workoutSessions.length ? workoutSessions.map((session) => `<article class="professional-plan-card"><strong>${esc(new Date(`${session.completed_at}Z`).toLocaleDateString("pt-BR"))}</strong><p>${asArray(session.completed_exercise_ids).length} exercício(s) concluído(s)</p></article>`).join("") : '<p class="muted">Nenhum treino finalizado recentemente.</p>'}</div></section>` : ""}
+            ${allowsDiet ? `<section class="professional-plan-section"><header><div><span class="content-kicker">Aderência</span><h3>Dias alimentares</h3></div></header><div class="professional-plan-grid">${dietAdherence.length ? dietAdherence.map((day) => `<article class="professional-plan-card"><strong>${esc(new Date(`${day.local_date}T12:00:00`).toLocaleDateString("pt-BR"))} · ${esc(day.plan_day)}</strong><p>${day.status === "completed" ? "Dia concluído" : "Em andamento"} · ${asArray(day.meal_checkins).filter((item) => item.status === "completed").length} feita(s), ${asArray(day.meal_checkins).filter((item) => item.status === "substituted").length} substituída(s), ${asArray(day.meal_checkins).filter((item) => item.status === "skipped").length} pulada(s)</p></article>`).join("") : '<p class="muted">Nenhum dia alimentar acompanhado.</p>'}</div></section>` : ""}
             <section class="professional-plan-section"><header><div><span class="content-kicker">Evolução</span><h3>Medidas recentes</h3></div></header><div class="professional-measure-grid">${measurements.length ? measurements.map(renderMeasurement).join("") : '<p class="muted">O aluno ainda não registrou medidas.</p>'}</div></section>`;
     }
 
@@ -244,10 +262,25 @@
         } catch (error) { showToast(error.message, "error"); }
     }
 
+    async function openProfessionalReviewEditor(review) {
+        const type = review.plan_type;
+        if (type === "workout") await ensureExercises();
+        const plan = review.proposal || review.original;
+        state.editor = {
+            type,
+            reviewId: review.id,
+            planId: null,
+            questionnaire: plan.questionnaire || defaultQuestionnaire(type),
+            plan,
+        };
+        renderProfessionalEditor();
+        openAppModal(byId("professionalPlanEditorModal"));
+    }
+
     function renderProfessionalEditor() {
         const editor = state.editor;
         const title = byId("professionalPlanEditorTitle");
-        if (title) title.textContent = `${editor.planId ? "Editar" : "Criar"} plano ${editor.type === "workout" ? "de treino" : "alimentar"}`;
+        if (title) title.textContent = `${editor.reviewId ? "Propor alterações no" : editor.planId ? "Editar" : "Criar"} plano ${editor.type === "workout" ? "de treino" : "alimentar"}`;
         const body = byId("professionalPlanEditorBody");
         if (!body) return;
         body.innerHTML = editor.type === "workout" ? workoutEditorHtml(editor) : dietEditorHtml(editor);
@@ -273,8 +306,9 @@
     }
 
     function workoutExerciseHtml(exercise, dayIndex, exerciseIndex) {
-        const options = state.exercises.map((item) => `<option value="${esc(item.catalog_key)}"${item.catalog_key === exercise.catalog_key ? " selected" : ""}>${esc(item.name)} · ${esc(item.equipment)}</option>`).join("");
-        return `<div class="professional-exercise-row" data-exercise-index="${exerciseIndex}"><label>Exercício<select class="exercise-key"><option value="">Selecione</option>${options}</select></label><label>Séries<input class="exercise-sets" type="number" min="1" max="10" value="${esc(exercise.sets || 3)}"></label><label>Repetições<input class="exercise-reps" value="${esc(exercise.reps || "8-12")}"></label><label>Descanso (s)<input class="exercise-rest" type="number" min="0" max="600" value="${esc(exercise.rest_seconds ?? 60)}"></label><label>Carga<input class="exercise-weight" value="${esc(exercise.weight || "")}"></label><label>Observação<input class="exercise-notes" value="${esc(exercise.notes || "")}"></label><button type="button" class="icon-add-button professional-remove" onclick="removeProfessionalExercise(this)" aria-label="Remover"><i class="fas fa-trash"></i></button></div>`;
+        const customOption = String(exercise.catalog_key || "").startsWith("custom:") ? `<option value="${esc(exercise.catalog_key)}" data-exercise-name="${esc(exercise.name)}" selected>${esc(exercise.name)} · Personalizado</option>` : "";
+        const options = state.exercises.map((item) => `<option value="${esc(item.catalog_key)}" data-exercise-name="${esc(item.name)}"${item.catalog_key === exercise.catalog_key ? " selected" : ""}>${esc(item.name)} · ${esc(item.equipment)}</option>`).join("");
+        return `<div class="professional-exercise-row" data-exercise-index="${exerciseIndex}"><label>Exercício<select class="exercise-key"><option value="">Selecione</option>${customOption}${options}</select></label><label>Séries<input class="exercise-sets" type="number" min="1" max="10" value="${esc(exercise.sets || 3)}"></label><label>Repetições<input class="exercise-reps" value="${esc(exercise.reps || "8-12")}"></label><label>Descanso (s)<input class="exercise-rest" type="number" min="0" max="600" value="${esc(exercise.rest_seconds ?? 60)}"></label><label>Carga<input class="exercise-weight" value="${esc(exercise.weight || "")}"></label><label>Observação<input class="exercise-notes" value="${esc(exercise.notes || "")}"></label><button type="button" class="icon-add-button professional-remove" onclick="removeProfessionalExercise(this)" aria-label="Remover"><i class="fas fa-trash"></i></button></div>`;
     }
 
     function dietEditorHtml(editor) {
@@ -346,7 +380,7 @@
                 code: String.fromCharCode(65 + dayIndex),
                 title: day.querySelector(`[id="dayTitle-${dayIndex}"]`).value,
                 focus: day.querySelector(`[id="dayFocus-${dayIndex}"]`).value,
-                exercises: Array.from(day.querySelectorAll(".professional-exercise-row")).map((row) => ({ catalog_key: row.querySelector(".exercise-key").value, sets: Number(row.querySelector(".exercise-sets").value), reps: row.querySelector(".exercise-reps").value, rest_seconds: Number(row.querySelector(".exercise-rest").value), weight: row.querySelector(".exercise-weight").value, notes: row.querySelector(".exercise-notes").value }))
+                exercises: Array.from(day.querySelectorAll(".professional-exercise-row")).map((row) => ({ catalog_key: row.querySelector(".exercise-key").value, name: row.querySelector(".exercise-key").selectedOptions[0]?.dataset.exerciseName, sets: Number(row.querySelector(".exercise-sets").value), reps: row.querySelector(".exercise-reps").value, rest_seconds: Number(row.querySelector(".exercise-rest").value), weight: row.querySelector(".exercise-weight").value, notes: row.querySelector(".exercise-notes").value }))
             }));
             const daysPerWeek = Number(byId("editorDays").value);
             const original = editor.questionnaire || defaultQuestionnaire("workout");
@@ -365,15 +399,18 @@
     async function saveProfessionalEditor(event) {
         event.preventDefault();
         const editor = state.editor;
-        if (!editor || !state.student) return;
+        if (!editor || (!state.student && !editor.reviewId)) return;
         const resource = editor.type === "workout" ? "workout-plans" : "diet-plans";
-        const path = `/professional/students/${segment(state.student.id)}/${resource}${editor.planId ? `/${segment(editor.planId)}` : ""}`;
+        const path = editor.reviewId
+            ? `/professional/plan-reviews/${segment(editor.reviewId)}/proposal`
+            : `/professional/students/${segment(state.student.id)}/${resource}${editor.planId ? `/${segment(editor.planId)}` : ""}`;
         const message = byId("professionalPlanEditorMessage");
         try {
-            await api(path, { method: editor.planId ? "PUT" : "POST", body: collectEditorPayload() });
+            await api(path, { method: editor.reviewId || editor.planId ? "PUT" : "POST", body: collectEditorPayload() });
             closeProfessionalPlanEditor();
             showToast("Rascunho salvo.", "success");
-            openProfessionalStudent(state.student.id);
+            if (editor.reviewId) window.openPlanReviewDetails?.(editor.reviewId);
+            else openProfessionalStudent(state.student.id);
         } catch (error) {
             if (message) message.textContent = `${error.message}${Object.values(error.fields || {}).length ? ` ${Object.values(error.fields).join(" ")}` : ""}`;
         }
@@ -480,8 +517,16 @@
         try {
             const details = await api(`/invitations/${segment(token)}`);
             if (!window.confirm(`Aceitar o acompanhamento de ${details.invitation.professional.username}? O profissional poderá consultar seus dados e criar planos para você.`)) return;
-            await api(`/invitations/${segment(token)}/accept`, { method: "POST", body: {} });
-            window.history.replaceState({}, "", window.location.pathname);
+            await api(`/invitations/${segment(token)}/accept`, {
+                method: "POST",
+                body: {
+                    data_sharing_consent: true,
+                    data_sharing_consent_version: details.data_sharing_consent_version,
+                },
+            });
+            const url = new URL(window.location.href);
+            url.searchParams.delete("invite");
+            window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
             showToast("Convite aceito.", "success");
         } catch (error) { showToast(error.message, "error"); }
     }
@@ -536,6 +581,7 @@
         copyProfessionalExport,
         shareProfessionalExport,
         loadOwnProfessionalRelationship,
-        revokeOwnProfessionalRelationship
+        revokeOwnProfessionalRelationship,
+        openProfessionalReviewEditor
     });
 }());

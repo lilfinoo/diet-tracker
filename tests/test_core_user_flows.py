@@ -1,12 +1,14 @@
 from datetime import datetime, timedelta, timezone
 
+from tests.helpers import registration_payload
+
 
 PASSWORD = "strong-password"
 
 
 def register(client, username):
     response = client.post(
-        "/api/register", json={"username": username, "password": PASSWORD}
+        "/api/register", json=registration_payload(username, PASSWORD)
     )
     assert response.status_code == 201
 

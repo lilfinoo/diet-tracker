@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#06101f">
     <title>Fit-Tracker.AI</title>
-    <link rel="icon" href="assets/logoIsolada.png">
+    <link rel="icon" href="/assets/logoIsolada.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260828-achievements">
-    <link rel="stylesheet" href="fluid.css?v=20260828-achievements">
+    <link rel="stylesheet" href="/styles.css?v=20260910-diet-guided-fix">
+    <link rel="stylesheet" href="/fluid.css?v=20260828-achievements">
 </head>
 <body>
     <a class="skip-link" href="#appContent">Ir para o conteúdo</a>
@@ -22,7 +22,7 @@
             <div class="login-card">
                     <div class="login-header">
                         <div class="logo-container">
-                            <span class="brand-mark brand-mark--image" aria-hidden="true"><img src="assets/logoIsolada.png" alt=""></span>
+                            <span class="brand-mark brand-mark--image" aria-hidden="true"><img src="/assets/logoIsolada.png" alt=""></span>
                             <h1 class="logo-text" id="authModalTitle">Fit-Tracker.AI</h1>
                         </div>
                         <p class="login-subtitle" id="authContext">Entre para salvar seus dados e acompanhar sua evolução.</p>
@@ -62,6 +62,20 @@
                     
                     <form id="registerForm" class="auth-form hidden">
                         <div class="field-group">
+                            <label class="field-label" for="registerName"><i class="fas fa-id-card"></i> Nome</label>
+                            <div class="field-input">
+                                <i class="fas fa-id-card field-input__icon" aria-hidden="true"></i>
+                                <input type="text" id="registerName" maxlength="255" placeholder="Como devemos chamar você" autocomplete="name" required>
+                            </div>
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label" for="registerEmail"><i class="fas fa-envelope"></i> E-mail</label>
+                            <div class="field-input">
+                                <i class="fas fa-envelope field-input__icon" aria-hidden="true"></i>
+                                <input type="email" id="registerEmail" maxlength="320" placeholder="voce@exemplo.com" autocomplete="email" required>
+                            </div>
+                        </div>
+                        <div class="field-group">
                             <label class="field-label" for="registerUsername"><i class="fas fa-user"></i> Nome de usuário</label>
                             <div class="field-input">
                                 <i class="fas fa-user field-input__icon" aria-hidden="true"></i>
@@ -84,6 +98,9 @@
                                 <button type="button" class="field-reveal" data-reveal-target="confirmPassword" aria-label="Mostrar confirmação de senha"><i class="fas fa-eye"></i></button>
                             </div>
                         </div>
+                        <label class="legal-check"><input type="checkbox" id="registerTerms" required><span>Li e aceito os <a href="/terms.html" target="_blank" rel="noopener">Termos de Uso</a>.</span></label>
+                        <label class="legal-check"><input type="checkbox" id="registerPrivacy" required><span>Li e aceito a <a href="/privacy.html" target="_blank" rel="noopener">Política de Privacidade</a>.</span></label>
+                        <label class="legal-check"><input type="checkbox" id="registerAiConsent"><span>Autorizo, opcionalmente, o envio dos dados que eu fornecer a recursos de IA para gerar análises e planos. Posso revogar depois.</span></label>
                         <button type="submit" class="btn-primary btn-primary--block">
                             <i class="fas fa-user-plus"></i>
                             Criar Conta
@@ -98,7 +115,10 @@
                             <p>Escolha o nome que será mostrado na sua conta.</p>
                             <label for="googleUsername">Nome de usuário</label>
                             <input type="text" id="googleUsername" autocomplete="username" maxlength="80" required placeholder="Como você quer ser chamado?">
-                            <button type="submit" class="btn-primary btn-primary--block">Concluir cadastro</button>
+                            <label class="legal-check"><input type="checkbox" id="googleTerms" required><span>Aceito os <a href="/terms.html" target="_blank" rel="noopener">Termos de Uso</a>.</span></label>
+                            <label class="legal-check"><input type="checkbox" id="googlePrivacy" required><span>Aceito a <a href="/privacy.html" target="_blank" rel="noopener">Política de Privacidade</a>.</span></label>
+                            <label class="legal-check"><input type="checkbox" id="googleAiConsent"><span>Autorizo, opcionalmente, o processamento dos dados que eu fornecer por recursos de IA.</span></label>
+                            <button type="submit" id="googleSignupSubmit" class="btn-primary btn-primary--block">Concluir cadastro</button>
                         </form>
                     </div>
                     
@@ -211,8 +231,8 @@
     <div id="mainScreen" class="screen">
         <header class="app-header">
             <div class="app-header__inner">
-                <a class="app-brand" href="#" onclick="showTab('diet'); return false" aria-label="Ir para o início">
-                    <span class="brand-mark brand-mark--image" aria-hidden="true"><img src="assets/logoIsolada.png" alt=""></span>
+                <a class="app-brand" href="/app/hoje" onclick="showTab('diet'); return false" aria-label="Ir para o início">
+                    <span class="brand-mark brand-mark--image" aria-hidden="true"><img src="/assets/logoIsolada.png" alt=""></span>
                     <span><strong>Fit-Tracker.AI</strong><small>Saúde e performance</small></span>
                 </a>
                 <div class="app-header__actions">
@@ -227,7 +247,9 @@
                     </div>
                     <button id="adminPanelBtn" class="header-icon-button hidden" onclick="window.location.href='/admin'" aria-label="Abrir painel administrativo"><i class="fas fa-shield-halved"></i></button>
                     <button id="professionalPanelBtn" class="professional-header-button hidden" onclick="showTab('professional')"><i class="fas fa-user-tie" aria-hidden="true"></i><span>Área profissional</span></button>
+                    <button id="networkHeaderButton" class="header-icon-button hidden" onclick="openNetworkCenter()" aria-label="Abrir rede e solicitações"><i class="fas fa-users"></i><span id="networkRequestCount" class="network-request-count hidden">0</span></button>
                     <button id="userHeaderButton" class="header-icon-button hidden" onclick="showTab('stats')" aria-label="Abrir perfil">
+                        <img id="headerUserAvatar" class="user-avatar-image hidden" alt="">
                         <span id="headerUserInitial" class="user-initial">U</span>
                     </button>
                 </div>
@@ -237,135 +259,155 @@
         <div class="app-shell">
             <nav class="nav-tabs" aria-label="Navegação principal">
                 <div class="nav-tabs-inner">
-                    <button class="nav-btn active" onclick="showTab('diet')" aria-current="page"><i class="fas fa-house"></i><span>Início</span></button>
-                    <button class="nav-btn" onclick="showTab('diet_plans')"><i class="fas fa-bowl-food"></i><span>Dieta</span></button>
-                    <button class="nav-btn" onclick="showTab('workout_plans')"><i class="fas fa-dumbbell"></i><span>Treino</span></button>
-                    <button class="nav-btn" onclick="showTab('stats')"><i class="fas fa-user"></i><span>Perfil</span></button>
+                    <button class="nav-btn active" data-app-view="diet" onclick="showTab('diet')" aria-current="page"><i class="fas fa-house"></i><span>Início</span></button>
+                    <button class="nav-btn" data-app-view="diet_plans" onclick="showTab('diet_plans')"><i class="fas fa-utensils"></i><span>Dieta</span></button>
+                    <button class="nav-btn" data-app-view="workout_plans" onclick="showTab('workout_plans')"><i class="fas fa-dumbbell"></i><span>Treino</span></button>
+                    <button class="nav-btn" data-app-view="progress" onclick="showTab('progress')"><i class="fas fa-chart-line"></i><span>Progresso</span></button>
+                    <button class="nav-btn" data-app-view="stats" onclick="showTab('stats')"><i class="fas fa-user"></i><span>Perfil</span></button>
                 </div>
             </nav>
 
-            <main id="appContent" class="app-content">
+            <main id="appContent" class="app-content" tabindex="-1">
+                <p id="routeStatus" class="sr-only" role="status" aria-live="polite"></p>
                 <div id="dietTab" class="tab-content">
-                    <section class="home-greeting">
-                        <div class="home-greeting__avatar"><span id="homeUserInitial">U</span><span class="online-dot"></span></div>
-                        <div>
-                            <h1 id="welcomeUser">Olá!</h1>
-                            <p id="homeDate">Continue construindo sua evolução.</p>
-                        </div>
-                    </section>
-
-                    <section class="home-actions" aria-label="Ações rápidas">
-                        <div class="home-actions__grid">
-                            <button type="button" class="home-action home-action--primary" onclick="showAddDietModal()"><span><i class="fas fa-plus"></i></span><strong>Registrar refeição</strong><small>O que você comeu?</small></button>
-                            <button type="button" class="home-action" onclick="document.getElementById('todayCardapioSection')?.scrollIntoView({ behavior: 'smooth' })"><span><i class="fas fa-calendar-day"></i></span><strong>Dieta de hoje</strong><small>Seu cardápio</small></button>
-                            <button type="button" class="home-action" onclick="showTab('workout_plans')"><span><i class="fas fa-dumbbell"></i></span><strong>Treino</strong><small>Iniciar sessão</small></button>
-                            <button type="button" class="home-action home-action--ghost" onclick="showTab('stats')"><span><i class="fas fa-chart-line"></i></span><strong>Progresso</strong><small>Sua evolução</small></button>
-                        </div>
-                        <button type="button" class="home-ai-action" onclick="showTab('chat')"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i><span>Pedir ajuda à IA</span><small id="homeAiAccessLabel">3 usos grátis</small></button>
-                    </section>
-
-                    <section id="workoutTodayCard" class="workout-today-card" aria-live="polite"></section>
-
-                    <section class="daily-summary" aria-labelledby="dailySummaryTitle">
-                        <header class="section-heading section-heading--compact">
-                            <div><span class="eyebrow">Meta diária</span><h2 id="dailySummaryTitle">Resumo do dia</h2></div>
-                            <button type="button" class="text-button" onclick="editDailyNutritionTargets()">Editar metas</button>
+                    <header class="today-heading">
+                        <div><h1>Hoje</h1><p id="homeDate"></p></div>
+                        <button class="home-greeting__avatar" type="button" onclick="showTab('stats')" aria-label="Abrir conta"><img id="homeUserAvatar" class="user-avatar-image hidden" alt=""><span id="homeUserInitial">U</span></button>
+                    </header>
+                    <section id="todayNutrition" class="today-nutrition hidden" aria-label="Nutrição registrada hoje" aria-live="polite">
+                        <header class="today-nutrition__heading">
+                            <span>Registrado hoje</span>
+                            <small id="todayNutritionCount"></small>
                         </header>
-                        <div id="guestDailySummary" class="guest-presentation hidden"><i class="fas fa-chart-pie"></i><div><strong>Acompanhe calorias e macros diariamente</strong><p>Entre para registrar refeições e comparar seu consumo com metas personalizadas.</p></div><button type="button" class="btn-primary" onclick="openAuthModal('Crie uma conta para acompanhar suas metas.', 'register')">Começar</button></div>
-                        <div id="dailyMacroGrid" class="macro-grid">
-                            <article class="macro-card macro-card--calories"><span class="macro-card__icon"><i class="fas fa-fire"></i></span><strong id="todayCalories">0</strong><small id="todayCaloriesTarget">de 2.200 kcal</small><b>Calorias</b><span class="macro-progress"><i id="todayCaloriesProgress"></i></span></article>
-                            <article class="macro-card macro-card--protein"><span class="macro-card__icon"><i class="fas fa-drumstick-bite"></i></span><strong id="todayProtein">0 g</strong><small id="todayProteinTarget">de 160 g</small><b>Proteínas</b><span class="macro-progress"><i id="todayProteinProgress"></i></span></article>
-                            <article class="macro-card macro-card--carbs"><span class="macro-card__icon"><i class="fas fa-wheat-awn"></i></span><strong id="todayCarbs">0 g</strong><small id="todayCarbsTarget">de 220 g</small><b>Carboidratos</b><span class="macro-progress"><i id="todayCarbsProgress"></i></span></article>
-                            <article class="macro-card macro-card--fat"><span class="macro-card__icon"><i class="fas fa-droplet"></i></span><strong id="todayFat">0 g</strong><small id="todayFatTarget">de 70 g</small><b>Gorduras</b><span class="macro-progress"><i id="todayFatProgress"></i></span></article>
+                        <div class="today-macro-grid" role="group" aria-label="Resumo de macros">
+                            <button type="button" class="today-macro today-macro--calories" data-today-macro="calories" aria-expanded="false" aria-controls="todayMacroDetails">
+                                <span id="todayCaloriesProgress" class="today-macro__ring" aria-hidden="true"><span class="today-macro__icon"><i data-lucide="flame"></i></span></span>
+                                <span class="today-macro__summary"><strong id="todayCalories"></strong><small>Calorias</small><span id="todayCaloriesTarget" class="today-macro__target sr-only"></span></span>
+                            </button>
+                            <button type="button" class="today-macro today-macro--protein" data-today-macro="protein" aria-expanded="false" aria-controls="todayMacroDetails">
+                                <span id="todayProteinProgress" class="today-macro__ring" aria-hidden="true"><span class="today-macro__icon"><i data-lucide="beef"></i></span></span>
+                                <span class="today-macro__summary"><strong id="todayProtein"></strong><small>Proteínas</small><span id="todayProteinTarget" class="today-macro__target sr-only"></span></span>
+                            </button>
+                            <button type="button" class="today-macro today-macro--carbs" data-today-macro="carbs" aria-expanded="false" aria-controls="todayMacroDetails">
+                                <span id="todayCarbsProgress" class="today-macro__ring" aria-hidden="true"><span class="today-macro__icon"><i data-lucide="wheat"></i></span></span>
+                                <span class="today-macro__summary"><strong id="todayCarbs"></strong><small>Carboidratos</small><span id="todayCarbsTarget" class="today-macro__target sr-only"></span></span>
+                            </button>
+                            <button type="button" class="today-macro today-macro--fat" data-today-macro="fat" aria-expanded="false" aria-controls="todayMacroDetails">
+                                <span id="todayFatProgress" class="today-macro__ring" aria-hidden="true"><span class="today-macro__icon"><i data-lucide="droplet"></i></span></span>
+                                <span class="today-macro__summary"><strong id="todayFat"></strong><small>Gorduras</small><span id="todayFatTarget" class="today-macro__target sr-only"></span></span>
+                            </button>
                         </div>
+                        <div id="todayMacroDetails" class="today-macro-details" aria-hidden="true"><div class="today-macro-details__inner"></div></div>
                     </section>
-
-                    <section class="today-cardapio" id="todayCardapioSection" aria-labelledby="todayCardapioTitle">
-                        <header class="section-heading section-heading--compact">
-                            <div><span class="eyebrow">Cardápio de hoje</span><h2 id="todayCardapioTitle">Plano do dia</h2></div>
-                            <div class="today-cardapio__rotate" id="todayDayChips" aria-label="Dia da rotação"></div>
-                        </header>
-                        <div id="todayCardapioBody" class="today-cardapio__body" aria-live="polite"></div>
+                    <section id="workoutTodayCard" aria-live="polite"></section>
+                    <section id="todayCardapioSection" class="today-food" aria-labelledby="todayCardapioTitle">
+                        <header class="today-food-heading"><h2 id="todayCardapioTitle">Alimentação</h2><button class="text-button" type="button" onclick="showTab('diet_plans')">Ver dia</button></header>
+                        <p id="todayMealCount" class="today-muted"></p>
+                        <div id="todayCardapioBody" aria-live="polite"></div>
                     </section>
-
-                    <section class="diary-panel" aria-labelledby="todayMealsTitle">
-                        <header class="section-heading">
-                            <div><span class="eyebrow">Diário alimentar</span><h2 id="todayMealsTitle">Refeições registradas</h2></div>
-                            <button onclick="showAddDietModal()" class="icon-add-button" aria-label="Adicionar refeição"><i class="fas fa-plus"></i></button>
-                        </header>
-                        <div class="filters compact-filters">
-                            <label><span>De</span><input type="date" id="dietStartDate" onchange="loadDietEntries()"></label>
-                            <label><span>Até</span><input type="date" id="dietEndDate" onchange="loadDietEntries()"></label>
-                            <button onclick="clearDietFilters()" class="filter-reset" aria-label="Limpar período"><i class="fas fa-rotate-left"></i></button>
-                        </div>
-                        <div id="dietTableBody" class="meal-entry-list" aria-live="polite"></div>
-                        <button onclick="showAddDietModal()" class="btn-add dashboard-add"><i class="fas fa-plus"></i> Adicionar refeição</button>
-                    </section>
-
                 </div>
 
                 <div id="diet_plansTab" class="tab-content hidden">
-                    <div class="content-header">
-                        <div class="content-heading">
-                            <h2>Planos de dieta</h2>
-                            <p>Cardápios personalizados para sua meta e rotina.</p>
+                    <header class="diet-daily-header">
+                        <div><h1>Alimentação</h1><p id="dietDailyDateLabel"></p></div>
+                        <div class="diet-daily-date-nav" aria-label="Navegar entre dias">
+                            <button type="button" onclick="changeDietDailyDate(-1)" aria-label="Dia anterior"><i data-lucide="chevron-left" aria-hidden="true"></i></button>
+                            <button type="button" onclick="openDietDailyCalendar()" aria-label="Escolher data"><i data-lucide="calendar-days" aria-hidden="true"></i></button>
+                            <input type="date" id="dietDailyDate" aria-label="Data do diário alimentar" onchange="selectDietDailyDate(this.value)">
+                            <button type="button" onclick="changeDietDailyDate(1)" aria-label="Próximo dia"><i data-lucide="chevron-right" aria-hidden="true"></i></button>
                         </div>
-                    </div>
-                    <div id="dietPlansTable" class="plans-grid" aria-live="polite"><div id="dietPlansTableBody"></div></div>
-                    <button type="button" class="fab fab--diet-plans" data-plan-wizard="diet" aria-label="Criar plano de dieta com IA"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i></button>
+                    </header>
+                    <button id="dietDailyTodayButton" type="button" class="diet-daily-today hidden" onclick="selectDietDailyDate()">Voltar para hoje</button>
+
+                    <section id="dietDailyMacros" class="diet-daily-macros hidden" aria-label="Resumo nutricional do dia" aria-live="polite"></section>
+
+                    <section class="diet-daily-meals" aria-labelledby="dietDailyMealsTitle">
+                        <header>
+                            <div><span class="eyebrow">Diário alimentar</span><h2 id="dietDailyMealsTitle">Refeições do dia</h2></div>
+                            <button type="button" class="diet-daily-add" onclick="showAddDietModalForDailyDate()"><i data-lucide="plus" aria-hidden="true"></i> Registrar outra refeição</button>
+                        </header>
+                        <div id="dietDailyMealsBody" class="diet-daily-meals__list" aria-live="polite"></div>
+                    </section>
+
+                    <section id="dietDailyPlan" class="diet-daily-plan" aria-labelledby="dietDailyPlanTitle" aria-live="polite"></section>
+                    <section id="dietPlansLibrary" class="diet-plans-library hidden" aria-labelledby="dietPlansLibraryTitle">
+                        <header><div><span class="eyebrow">Biblioteca</span><h2 id="dietPlansLibraryTitle">Meus planos</h2></div><button type="button" class="text-button" onclick="toggleDietPlansLibrary(false)">Fechar</button></header>
+                        <div id="dietPlansTable" class="plans-grid" aria-live="polite"><div id="dietPlansTableBody"></div></div>
+                    </section>
                 </div>
 
                 <div id="workout_plansTab" class="tab-content hidden">
-                    <div class="content-header">
+                    <div class="content-header workout-page-header">
                         <div class="content-heading">
-                            <h2>Planos de treino</h2>
-                            <p>Escolha uma divisão e acompanhe cada sessão.</p>
+                            <span class="content-kicker content-kicker--blue">Sua rotina</span>
+                            <h2>Treino</h2>
+                            <p>Veja a sessão de hoje e comece quando estiver pronto.</p>
                         </div>
                     </div>
-                    <div class="plan-filter-bar" aria-label="Filtros de treino">
-                        <label><span class="sr-only">Objetivo</span><select id="workoutGoalFilter"><option value="">Todos os objetivos</option><option value="hypertrophy">Hipertrofia</option><option value="strength">Força</option><option value="conditioning">Condicionamento</option><option value="fat_loss">Perda de gordura</option><option value="mobility">Mobilidade</option></select></label>
-                        <label><span class="sr-only">Experiência</span><select id="workoutExperienceFilter"><option value="">Toda experiência</option><option value="beginner">Iniciante</option><option value="intermediate">Intermediário</option><option value="advanced">Avançado</option></select></label>
-                        <label><span class="sr-only">Dias</span><select id="workoutDaysFilter"><option value="">Todos os dias</option><option value="2">2 dias</option><option value="3">3 dias</option><option value="4">4 dias</option><option value="5">5 dias</option><option value="6">6 dias</option></select></label>
-                    </div>
-                    <div id="workoutPlansTable" class="plans-grid plans-grid--workout" aria-live="polite"><div id="workoutPlansTableBody"></div></div>
-                    <button type="button" class="fab fab--workout-plans" data-plan-wizard="workout" aria-label="Criar plano de treino com IA"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i></button>
+                    <section id="workoutPlanHub" class="workout-today-card" aria-live="polite"></section>
+                    <section id="workoutPlansLibrary" class="workout-plans-library hidden" aria-labelledby="workoutPlansLibraryTitle">
+                        <header>
+                            <div><span class="content-kicker">Biblioteca</span><h2 id="workoutPlansLibraryTitle" tabindex="-1">Meus planos</h2></div>
+                            <button type="button" class="text-button" onclick="toggleWorkoutPlansLibrary(false)">Fechar</button>
+                        </header>
+                        <div class="plan-filter-bar" aria-label="Filtros de treino">
+                            <label><span class="sr-only">Objetivo</span><select id="workoutGoalFilter"><option value="">Todos os objetivos</option><option value="hypertrophy">Hipertrofia</option><option value="strength">Força</option><option value="conditioning">Condicionamento</option><option value="fat_loss">Perda de gordura</option><option value="mobility">Mobilidade</option></select></label>
+                            <label><span class="sr-only">Experiência</span><select id="workoutExperienceFilter"><option value="">Toda experiência</option><option value="beginner">Iniciante</option><option value="intermediate">Intermediário</option><option value="advanced">Avançado</option></select></label>
+                            <label><span class="sr-only">Dias</span><select id="workoutDaysFilter"><option value="">Todos os dias</option><option value="2">2 dias</option><option value="3">3 dias</option><option value="4">4 dias</option><option value="5">5 dias</option><option value="6">6 dias</option></select></label>
+                        </div>
+                        <div id="workoutPlansTable" class="plans-grid plans-grid--workout" aria-live="polite"><div id="workoutPlansTableBody"></div></div>
+                        <button type="button" class="btn-primary workout-library-create" data-plan-wizard="workout"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> Criar novo plano</button>
+                    </section>
                 </div>
 
                 <div id="chatTab" class="tab-content hidden">
                     <div class="content-header">
                         <div class="content-heading"><span class="content-kicker">Assistente premium</span><h2>Converse com sua IA</h2><p>Tire dúvidas e inicie planos personalizados.</p></div>
-                        <button onclick="clearChat()" class="btn-secondary"><i class="fas fa-trash"></i> Limpar</button>
+                        <div class="chat-header-actions"><button type="button" onclick="returnFromAssistant()" class="btn-secondary"><i class="fas fa-arrow-left"></i> Voltar</button><button onclick="clearChat()" class="btn-secondary" title="Limpa apenas as mensagens exibidas nesta tela"><i class="fas fa-trash"></i> Limpar tela</button></div>
                     </div>
                     <div class="chat-container">
                         <div id="chatMessages" class="chat-messages" role="log" aria-live="polite" aria-relevant="additions text">
                             <div class="chat-message bot-message"><div class="message-avatar"><i class="fas fa-wand-magic-sparkles"></i></div><div class="message-content"><p>Olá! Sou seu assistente fitness. Posso ajudar com alimentação, treino e planejamento.</p></div></div>
                         </div>
                         <div class="chat-quick-actions">
-                            <button type="button" class="btn" id="quickDietBtn"><i class="fas fa-bowl-food"></i> Criar dieta</button>
+                            <button type="button" class="btn" id="quickDietBtn"><i class="fas fa-utensils"></i> Criar dieta</button>
                             <button type="button" class="btn" id="quickWorkoutBtn"><i class="fas fa-dumbbell"></i> Criar treino</button>
                         </div>
                         <div class="chat-input-container">
                             <div class="audio-controls"><button type="button" id="voiceButton" class="voice-btn" title="Falar com a IA" aria-label="Falar com a IA"><i class="fas fa-microphone"></i></button><button type="button" id="speakButton" class="speak-btn" title="Ouvir última resposta" aria-label="Ouvir última resposta da IA"><i class="fas fa-volume-high"></i></button></div>
                             <input type="text" id="chatInput" placeholder="Pergunte sobre sua rotina...">
-                            <button onclick="sendChatMessage()" class="send-btn" aria-label="Enviar mensagem"><i class="fas fa-arrow-up"></i></button>
+                            <button id="chatSendButton" type="button" onclick="sendChatMessage()" class="send-btn" aria-label="Enviar mensagem"><i class="fas fa-arrow-up"></i></button>
                         </div>
                     </div>
                 </div>
 
                 <div id="measurementsTab" class="tab-content profile-subpage hidden">
                     <header class="profile-subpage-header">
-                        <button class="profile-subpage-back" type="button" onclick="showTab('stats')" aria-label="Voltar ao perfil"><i class="fas fa-arrow-left"></i></button>
+                        <button class="profile-subpage-back" type="button" onclick="showTab('progress')" aria-label="Voltar ao progresso"><i class="fas fa-arrow-left"></i></button>
                         <div><span class="content-kicker">Evolução corporal</span><h2>Suas medidas</h2><p>Compare registros e entenda sua mudança ao longo do tempo.</p></div>
                         <button type="button" onclick="showAddMeasurementModal()" class="profile-subpage-action"><i class="fas fa-plus"></i><span>Nova medição</span></button>
                     </header>
+                    <div class="body-controls">
+                        <label for="bodyMetric">Métrica<select id="bodyMetric" onchange="loadMeasurementSummary()">
+                            <option value="weight">Peso</option><option value="body_fat">Gordura</option>
+                            <option value="waist">Cintura</option><option value="chest">Peito</option>
+                            <option value="arm">Braço</option><option value="thigh">Coxa</option>
+                            <option value="muscle_mass">Massa muscular</option>
+                        </select></label>
+                        <label for="bodyPeriod">Período<select id="bodyPeriod" onchange="setBodyPeriod(this.value)">
+                            <option value="all">Todo o histórico</option><option value="30">Últimos 30 dias</option>
+                            <option value="90">Últimos 90 dias</option><option value="365">Último ano</option>
+                            <option value="custom">Personalizado</option>
+                        </select></label>
+                    </div>
                     <section id="measurementSummary" class="measurement-summary" aria-live="polite">
                         <div class="plans-loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Carregando resumo...</span></div>
                     </section>
-                    <details class="profile-filter-disclosure">
+                    <details id="bodyDateFilters" class="profile-filter-disclosure">
                         <summary><span><i class="fas fa-sliders" aria-hidden="true"></i> Filtrar período</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
                         <div class="filters compact-filters">
-                            <label><span>De</span><input type="date" id="measurementStartDate" onchange="loadMeasurements()"></label>
-                            <label><span>Até</span><input type="date" id="measurementEndDate" onchange="loadMeasurements()"></label>
+                            <label><span>De</span><input type="date" id="measurementStartDate" onchange="changeBodyDates()"></label>
+                            <label><span>Até</span><input type="date" id="measurementEndDate" onchange="changeBodyDates()"></label>
                             <button onclick="clearMeasurementFilters()" class="filter-reset" aria-label="Limpar período"><i class="fas fa-rotate-left"></i></button>
                         </div>
                     </details>
@@ -374,16 +416,24 @@
 
                 <div id="activitiesTab" class="tab-content profile-subpage hidden">
                     <header class="profile-subpage-header profile-subpage-header--simple">
-                        <button class="profile-subpage-back" type="button" onclick="showTab('stats')" aria-label="Voltar ao perfil"><i class="fas fa-arrow-left"></i></button>
+                        <button class="profile-subpage-back" type="button" onclick="showTab('progress')" aria-label="Voltar ao progresso"><i class="fas fa-arrow-left"></i></button>
                         <div><span class="content-kicker">Seu histórico</span><h2>Atividades</h2><p>Treinos concluídos, séries executadas e progressos reais.</p></div>
                     </header>
                     <section id="exerciseProgressPanel" class="exercise-progress-panel hidden" aria-live="polite"></section>
                     <div id="activitiesList" class="activities-list" aria-live="polite"></div>
                 </div>
 
+                <div id="personalRecordsTab" class="tab-content profile-subpage hidden">
+                    <header class="profile-subpage-header profile-subpage-header--simple">
+                        <button class="profile-subpage-back" type="button" onclick="showTab('progress')" aria-label="Voltar ao progresso"><i class="fas fa-arrow-left"></i></button>
+                        <div><span class="content-kicker">Suas melhores marcas</span><h2>Recordes pessoais</h2><p>Escolha quais resultados deseja fixar no seu perfil.</p></div>
+                    </header>
+                    <div id="personalRecordsList" class="achievement-card-grid" aria-live="polite"></div>
+                </div>
+
                 <div id="achievementsTab" class="tab-content profile-subpage hidden">
                     <header class="profile-subpage-header profile-subpage-header--simple achievements-heading">
-                        <button class="profile-subpage-back" type="button" onclick="showTab('stats')" aria-label="Voltar ao perfil"><i class="fas fa-arrow-left"></i></button>
+                        <button class="profile-subpage-back" type="button" onclick="showTab('progress')" aria-label="Voltar ao progresso"><i class="fas fa-arrow-left"></i></button>
                         <div><span class="content-kicker">Sua trajetória</span><h2>Conquistas</h2><p>Marcos reais de consistência, evolução e história no Fit-Tracker.AI.</p></div>
                     </header>
                     <section class="achievement-hero" id="achievementHero" aria-live="polite"></section>
@@ -407,61 +457,61 @@
                     </section>
                 </div>
 
+                <div id="progressTab" class="tab-content hidden">
+                    <div class="content-header">
+                        <div class="content-heading"><span class="content-kicker">Sua evolução</span><h2>Evolução</h2><p>Seu ritmo, suas mudanças e o próximo passo.</p></div>
+                    </div>
+                    <section id="progressGuestPanel" class="profile-guest-panel hidden">
+                        <span><i class="fas fa-chart-line" aria-hidden="true"></i></span>
+                        <div><h3>Sua evolução em um só lugar</h3><p>Entre para acompanhar medidas, treinos, metas e conquistas.</p></div>
+                        <button type="button" onclick="openAuthModal('Entre para acessar seu progresso e histórico.', 'login')">Entrar ou criar conta</button>
+                    </section>
+                    <div id="progressAuthenticatedContent">
+                        <section id="workoutProgressOverview" class="profile-dashboard-section workout-progress-overview" aria-live="polite"></section>
+                        <nav class="evolution-explore" aria-label="Explorar histórico">
+                            <h3>Explorar seu histórico</h3>
+                            <button type="button" onclick="showTab('activities')"><i data-lucide="history" aria-hidden="true"></i>Atividades</button>
+                            <button type="button" onclick="showTab('personalRecords')"><i data-lucide="trophy" aria-hidden="true"></i>Recordes pessoais</button>
+                            <button type="button" onclick="showTab('achievements')"><i data-lucide="award" aria-hidden="true"></i>Conquistas</button>
+                        </nav>
+                    </div>
+                </div>
+
                 <div id="statsTab" class="tab-content hidden">
                     <div class="profile-dashboard">
+                        <header class="profile-page-heading"><span class="content-kicker">Seu espaço</span><h1>Perfil</h1></header>
                         <section class="profile-identity-card">
                             <div class="profile-identity-card__top">
-                                <div class="profile-identity-avatar"><span id="profileUserInitial">U</span></div>
-                                <div class="profile-identity-copy"><span class="content-kicker">Seu espaço</span><h2 id="profileUserName">Perfil</h2><p id="profileMembership">Plano gratuito</p></div>
-                                <button id="editProfileBtn" type="button" class="profile-icon-action" onclick="openProfileEditor()" aria-label="Editar dados e objetivos"><i class="fas fa-pen"></i></button>
+                                <button type="button" class="profile-identity-avatar" onclick="openNetworkCenter('settings')" aria-label="Alterar foto de perfil"><img id="profileUserAvatar" class="user-avatar-image hidden" alt=""><span id="profileUserInitial">U</span><span class="profile-avatar-camera"><i data-lucide="camera" aria-hidden="true"></i></span></button>
+                                <div class="profile-identity-copy"><h2 id="profileUserName">Perfil</h2><p id="profileMembership">Plano gratuito</p></div>
                             </div>
                             <div id="profileBadges" class="profile-badges" aria-live="polite"></div>
-                            <button type="button" id="profileUpgradePill" class="profile-plan-cta hidden" onclick="openPlansModal()"><i class="fas fa-bolt" aria-hidden="true"></i><span><strong>Conheça o Premium</strong><small>Mais recursos para sua evolução</small></span><i class="fas fa-arrow-right" aria-hidden="true"></i></button>
+                            <button id="editProfileBtn" type="button" class="profile-edit-action" onclick="openProfileEditor()"><i data-lucide="user-round-pen" aria-hidden="true"></i><span>Editar dados e objetivos</span><i data-lucide="chevron-right" aria-hidden="true"></i></button>
                         </section>
 
                         <section id="profileGuestPanel" class="profile-guest-panel hidden">
-                            <span><i class="fas fa-chart-line" aria-hidden="true"></i></span>
-                            <div><h3>Sua evolução em um só lugar</h3><p>Entre para acompanhar medidas, treinos, metas e conquistas.</p></div>
-                            <button type="button" id="profileLoginAction" onclick="openAuthModal('Entre para acessar seu perfil e histórico.', 'login')">Entrar ou criar conta</button>
+                            <span><i data-lucide="user-round" aria-hidden="true"></i></span>
+                            <div><h3>Seu perfil e preferências</h3><p>Entre para gerenciar seus dados, assinatura, privacidade e conta.</p></div>
+                            <button type="button" id="profileLoginAction" onclick="openAuthModal('Entre para acessar seu perfil.', 'login')">Entrar ou criar conta</button>
                         </section>
 
                         <div id="profileAuthenticatedContent">
-                            <section class="profile-dashboard-section profile-quick-section">
-                                <div class="profile-section-heading"><div><span class="content-kicker">Acesso rápido</span><h3>O que você quer fazer?</h3></div></div>
-                                <div class="profile-quick-actions">
-                                    <button type="button" onclick="showTab('measurements'); showAddMeasurementModal()"><span><i class="fas fa-plus"></i></span><strong>Nova medida</strong></button>
-                                    <button type="button" onclick="showTab('activities')"><span><i class="fas fa-person-running"></i></span><strong>Atividades</strong></button>
-                                    <button type="button" onclick="showTab('achievements')"><span><i class="fas fa-award"></i></span><strong>Conquistas</strong></button>
-                                </div>
-                            </section>
-
-                            <section id="workoutProgressOverview" class="profile-dashboard-section workout-progress-overview" aria-live="polite"></section>
-
-                            <section class="profile-dashboard-section">
-                                <div class="profile-section-heading"><div><span class="content-kicker">Visão geral</span><h3>Sua evolução</h3></div></div>
-                                <div class="profile-evolution-grid">
-                                    <button type="button" class="profile-evolution-card profile-evolution-card--wide" onclick="showTab('measurements')"><span class="profile-evolution-card__icon"><i class="fas fa-weight-scale"></i></span><div><small>Última medição</small><div id="latestMeasurement">Carregando...</div></div><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
-                                    <article class="profile-evolution-card"><span class="profile-evolution-card__icon"><i class="fas fa-bowl-food"></i></span><div><small>Registros alimentares</small><strong id="totalDietEntries">0</strong><p>no total</p></div></article>
-                                    <article class="profile-evolution-card"><span class="profile-evolution-card__icon profile-evolution-card__icon--blue"><i class="fas fa-chart-line"></i></span><div><small>Ritmo recente</small><strong id="recentDietEntries">0</strong><p>nos últimos 7 dias</p></div></article>
-                                </div>
-                            </section>
-
-                            <section class="profile-dashboard-section profile-recent-section">
-                                <div class="profile-section-heading"><div><span class="content-kicker">Histórico</span><h3>Atividades recentes</h3></div><button type="button" onclick="showTab('activities')">Ver todas</button></div>
-                                <div id="profileRecentActivities" class="profile-recent-activities" aria-live="polite"></div>
-                            </section>
-
+                            <nav class="profile-shortcuts" aria-label="Assinatura e rede">
+                                <button type="button" onclick="openPlansModal()"><span class="profile-shortcut-icon"><i data-lucide="credit-card" aria-hidden="true"></i></span><strong>Planos e assinatura</strong><span class="profile-shortcut-caption">Gerenciar plano<i data-lucide="chevron-right" aria-hidden="true"></i></span></button>
+                                <button type="button" onclick="openNetworkCenter()"><span class="profile-shortcut-icon"><i data-lucide="users-round" aria-hidden="true"></i></span><strong>Minha rede</strong><span class="profile-shortcut-caption">Pessoas e solicitações<i data-lucide="chevron-right" aria-hidden="true"></i></span></button>
+                            </nav>
                             <section class="profile-dashboard-section profile-settings-section">
-                                <div class="profile-section-heading"><div><span class="content-kicker">Conta</span><h3>Preferências e acesso</h3></div></div>
+                                <div class="profile-section-heading"><h3>Preferências e acesso</h3></div>
                                 <div class="profile-settings-list" aria-label="Opções do perfil">
-                                    <button type="button" onclick="openProfileEditor()"><span><i class="far fa-id-card"></i></span><div><strong>Dados e objetivos</strong><small>Preferências usadas pela IA</small></div><i class="fas fa-chevron-right"></i></button>
-                                    <button type="button" onclick="openPlansModal()"><span><i class="fas fa-credit-card"></i></span><div><strong>Planos e assinatura</strong><small>Plano atual e recursos disponíveis</small></div><i class="fas fa-chevron-right"></i></button>
-                                    <button type="button" id="profileProfessionalRelationship" class="hidden" onclick="revokeOwnProfessionalRelationship()"><span><i class="fas fa-user-tie"></i></span><div><strong id="profileProfessionalName">Profissional vinculado</strong><small>Gerenciar autorização de acompanhamento</small></div><i class="fas fa-chevron-right"></i></button>
-                                    <button type="button" onclick="openExerciseCredits()"><span><i class="fas fa-image"></i></span><div><strong>Créditos das imagens</strong><small>Autores, fontes e licenças</small></div><i class="fas fa-chevron-right"></i></button>
-                                    <button type="button" id="profileAdminLink" class="hidden" onclick="window.location.href='/admin'"><span><i class="fas fa-shield-halved"></i></span><div><strong>Painel administrativo</strong><small>Gestão da plataforma</small></div><i class="fas fa-chevron-right"></i></button>
-                                    <button type="button" id="profileLogoutAction" class="profile-settings-list__danger" onclick="logout()"><span><i class="fas fa-arrow-right-from-bracket"></i></span><div><strong>Sair da conta</strong><small>Encerrar esta sessão</small></div><i class="fas fa-chevron-right"></i></button>
+                                    <button type="button" onclick="openPrivacySettings()"><span><i data-lucide="shield-check" aria-hidden="true"></i></span><div><strong>Privacidade e IA</strong><small>Seus dados e consentimentos</small></div><i data-lucide="chevron-right" aria-hidden="true"></i></button>
+                                    <button type="button" id="profileProfessionalRelationship" class="hidden" onclick="revokeOwnProfessionalRelationship()"><span><i data-lucide="contact-round" aria-hidden="true"></i></span><div><strong id="profileProfessionalName">Profissional vinculado</strong><small>Gerenciar acesso ao acompanhamento</small></div><i data-lucide="chevron-right" aria-hidden="true"></i></button>
+                                    <button type="button" id="profileAdminLink" class="hidden" onclick="window.location.href='/admin'"><span><i data-lucide="shield-user" aria-hidden="true"></i></span><div><strong>Painel administrativo</strong><small>Gestão da plataforma</small></div><i data-lucide="chevron-right" aria-hidden="true"></i></button>
                                 </div>
                             </section>
+                            <div class="profile-account-actions" aria-label="Sessão e conta">
+                                <button type="button" id="profileLogoutAction" onclick="logout()"><i data-lucide="log-out" aria-hidden="true"></i><span>Sair da conta</span></button>
+                                <button type="button" class="profile-delete-action" onclick="openDeleteAccount()"><i data-lucide="trash-2" aria-hidden="true"></i><span>Excluir conta</span></button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -473,6 +523,10 @@
                             <button type="button" class="btn-primary" onclick="openProfessionalInvite()"><i class="fas fa-user-plus"></i> Convidar aluno</button>
                         </div>
                         <div id="professionalStats" class="stats-grid"></div>
+                        <section class="professional-draft-section" aria-labelledby="professionalDraftsTitle">
+                            <div class="section-header"><div><span class="content-kicker">Pendências</span><h3 id="professionalDraftsTitle">Rascunhos para revisar</h3></div></div>
+                            <div id="professionalDrafts" class="professional-draft-list" aria-live="polite"></div>
+                        </section>
                         <div id="professionalStudents" class="professional-student-grid" aria-live="polite"></div>
                     </section>
                     <section id="professionalStudentDetail" class="hidden" aria-live="polite"></section>
@@ -487,19 +541,62 @@
             <i class="fas fa-chevron-right" aria-hidden="true"></i>
         </button>
 
-        <div id="exerciseCreditsModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="exerciseCreditsTitle">
-            <div class="modal-content exercise-credits-sheet">
-                <div class="modal-header">
-                    <div>
-                        <span class="content-kicker">Mídia de exercícios</span>
-                        <h3 id="exerciseCreditsTitle">Créditos das imagens</h3>
-                        <p>Imagens importadas do wger e armazenadas localmente para uso offline.</p>
-                    </div>
-                    <button type="button" class="btn-close" onclick="closeExerciseCredits()" aria-label="Fechar créditos">&times;</button>
-                </div>
-                <div class="exercise-credits-notice"><i class="fas fa-scale-balanced"></i><p>Cada imagem mantém a licença e atribuição informadas pelo autor no wger. Exercícios sem mídia confiável usam ilustrações locais.</p></div>
-                <div id="exerciseCreditsList" class="exercise-credits-list"></div>
+        <div id="privacySettingsModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="privacySettingsTitle">
+            <div class="modal-content account-sheet">
+                <div class="modal-header"><div><span class="content-kicker">Sua conta</span><h3 id="privacySettingsTitle">Privacidade e IA</h3><p>Consulte os documentos aceitos e altere a autorização opcional de IA.</p></div><button type="button" class="btn-close" onclick="closeAppModal(document.getElementById('privacySettingsModal'))" aria-label="Fechar">&times;</button></div>
+                <div id="consentStatus" class="account-consent-status"></div>
+                <label class="legal-check"><input type="checkbox" id="accountTerms"><span>Aceito os <a href="/terms.html" target="_blank" rel="noopener">Termos de Uso vigentes</a>.</span></label>
+                <label class="legal-check"><input type="checkbox" id="accountPrivacy"><span>Aceito a <a href="/privacy.html" target="_blank" rel="noopener">Política de Privacidade vigente</a>.</span></label>
+                <label class="legal-check"><input type="checkbox" id="accountAiConsent"><span>Autorizo o envio a provedores de IA dos textos, dados de perfil e fotos usados nesses recursos. A revogação bloqueia novas solicitações à IA.</span></label>
+                <div class="modal-actions"><button type="button" class="btn-primary" onclick="savePrivacySettings()">Salvar escolhas</button></div>
             </div>
+        </div>
+
+        <div id="deleteAccountModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="deleteAccountTitle">
+            <div class="modal-content account-sheet">
+                <div class="modal-header"><div><span class="content-kicker">Ação definitiva</span><h3 id="deleteAccountTitle">Excluir conta</h3><p>Assinaturas ativas devem ser canceladas antes. Esta ação não pode ser desfeita.</p></div><button type="button" class="btn-close" onclick="closeAppModal(document.getElementById('deleteAccountModal'))" aria-label="Fechar">&times;</button></div>
+                <label class="field-group"><span class="field-label">Digite seu nome de usuário</span><input id="deleteAccountUsername" autocomplete="off"></label>
+                <label id="deleteAccountPasswordGroup" class="field-group"><span class="field-label">Senha atual</span><input type="password" id="deleteAccountPassword" autocomplete="current-password"></label>
+                <p id="deleteGoogleNotice" class="auth-helper hidden">Sua entrada recente com Google será usada para confirmar esta ação.</p>
+                <label class="legal-check"><input type="checkbox" id="deleteAccountConfirm"><span>Entendo que minha conta e meus dados serão excluídos definitivamente.</span></label>
+                <div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeAppModal(document.getElementById('deleteAccountModal'))">Cancelar</button><button type="button" class="btn-danger" onclick="deleteAccount()">Excluir definitivamente</button></div>
+            </div>
+        </div>
+
+        <div id="networkModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="networkModalTitle" aria-hidden="true">
+            <div class="modal-content network-sheet">
+                <div class="modal-header"><div><span class="content-kicker">Sua rede</span><h3 id="networkModalTitle">Pessoas e solicitações</h3><p>Seu perfil público não expõe dieta, medidas ou histórico de saúde.</p></div><button type="button" class="btn-close" onclick="closeAppModal(document.getElementById('networkModal'))" aria-label="Fechar">&times;</button></div>
+                <div class="network-settings">
+                    <div class="network-avatar-editor"><img id="networkAvatarPreview" class="hidden" alt="Sua foto"><span id="networkAvatarFallback">U</span><label class="btn-secondary">Escolher foto<input id="networkAvatarInput" type="file" accept="image/jpeg,image/png,image/webp" hidden></label><button id="networkAvatarRemove" type="button" class="btn-link">Remover</button></div>
+                    <label class="legal-check"><input id="publicProfileToggle" type="checkbox"><span>Permitir que outros usuários encontrem meu perfil</span></label>
+                    <label id="externalReviewsSetting" class="legal-check hidden"><input id="externalReviewsToggle" type="checkbox"><span>Aceitar revisões avulsas de treino</span></label>
+                    <label id="externalDietReviewsSetting" class="legal-check hidden"><input id="externalDietReviewsToggle" type="checkbox"><span>Aceitar revisões avulsas de dieta</span></label>
+                </div>
+                <div class="network-search"><label for="networkSearchInput">Encontrar usuário</label><div><input id="networkSearchInput" type="search" minlength="2" maxlength="80" placeholder="Digite o username"><button id="networkSearchButton" type="button" class="btn-primary">Buscar</button></div></div>
+                <div id="networkSearchResults" class="network-list" aria-live="polite"></div>
+                <section><div class="section-header"><div><span class="content-kicker">Caixa de entrada</span><h4>Solicitações</h4></div></div><div id="networkInbox" class="network-list" aria-live="polite"></div></section>
+                <section><div class="section-header"><div><span class="content-kicker">Planos</span><h4>Revisões profissionais</h4></div></div><div id="reviewInbox" class="network-list" aria-live="polite"></div></section>
+            </div>
+        </div>
+
+        <div id="planReviewRequestModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="planReviewRequestTitle" aria-hidden="true">
+            <div class="modal-content review-sheet">
+                <div class="modal-header"><div><span class="content-kicker">Avaliação especializada</span><h3 id="planReviewRequestTitle">Solicitar revisão profissional</h3><p>O profissional verá somente este plano e o contexto autorizado.</p></div><button type="button" class="btn-close" onclick="closeAppModal(document.getElementById('planReviewRequestModal'))" aria-label="Fechar">&times;</button></div>
+                <form id="planReviewRequestForm">
+                    <input id="reviewPlanType" type="hidden"><input id="reviewPlanId" type="hidden">
+                    <fieldset class="wizard-fieldset"><legend>Quem deve revisar?</legend><label class="review-target-card"><input type="radio" name="reviewTargetMode" value="linked"><span><strong>Meu personal</strong><small id="linkedProfessionalLabel">Verificando vínculo...</small></span></label><label class="review-target-card"><input type="radio" name="reviewTargetMode" value="specific"><span><strong>Escolher outro profissional</strong><small>Revisão avulsa, sem vínculo permanente</small></span></label><label class="review-target-card"><input type="radio" name="reviewTargetMode" value="open"><span><strong>Solicitação aberta</strong><small>Sem garantia de disponibilidade ou prazo</small></span></label></fieldset>
+                    <label id="reviewSpecificGroup" class="field-group hidden"><span class="field-label">Username do profissional</span><input id="reviewSpecificUsername" maxlength="80" placeholder="Digite o username exato"></label>
+                    <fieldset class="wizard-fieldset"><legend>O que deseja analisar?</legend><div id="reviewFocusOptions" class="review-focus-grid"></div></fieldset>
+                    <label class="field-group"><span class="field-label">Observações ou dificuldades</span><textarea id="reviewStudentNote" rows="4" maxlength="2000"></textarea></label>
+                    <label class="legal-check"><input id="reviewDataConsent" type="checkbox" required><span>Autorizo o compartilhamento deste plano, objetivo, experiência, equipamentos e limitações com o profissional responsável.</span></label>
+                    <p id="planReviewRequestMessage" class="auth-message" aria-live="polite"></p>
+                    <div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeAppModal(document.getElementById('planReviewRequestModal'))">Cancelar</button><button type="submit" class="btn-primary">Enviar solicitação</button></div>
+                </form>
+            </div>
+        </div>
+
+        <div id="planReviewDetailsModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="planReviewDetailsTitle" aria-hidden="true">
+            <div class="modal-content review-details-sheet"><div class="modal-header"><div><span class="content-kicker">Revisão profissional</span><h3 id="planReviewDetailsTitle">Detalhes da revisão</h3></div><button type="button" class="btn-close" onclick="closeAppModal(document.getElementById('planReviewDetailsModal'))" aria-label="Fechar">&times;</button></div><div id="planReviewDetails" aria-live="polite"></div></div>
         </div>
 
         <div id="plansModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="plansModalTitle" aria-hidden="true">
@@ -511,6 +608,19 @@
                 <div id="plansGrid" class="pricing-grid" aria-live="polite"><p>Carregando planos...</p></div>
                 <div id="subscriptionManage"></div>
                 <p id="billingNotice" class="billing-notice">O pagamento será habilitado após a configuração do provedor.</p>
+            </div>
+        </div>
+
+        <div id="billingPaymentModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="billingPaymentTitle" aria-hidden="true">
+            <div class="modal-content billing-payment-sheet">
+                <div class="modal-header">
+                    <div><span class="content-kicker">Pagamento seguro</span><h3 id="billingPaymentTitle">Como deseja pagar?</h3><p>Escolha entre renovação automática no cartão ou 30 dias de acesso por PIX.</p></div>
+                    <button type="button" class="btn-close" onclick="closeBillingPaymentModal()" aria-label="Fechar pagamento">&times;</button>
+                </div>
+                <div class="billing-payment-options">
+                    <button type="button" onclick="confirmBillingCheckout('credit_card')"><span><i class="fas fa-credit-card" aria-hidden="true"></i></span><div><strong>Cartão de crédito</strong><small>Assinatura mensal com renovação automática.</small></div><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
+                    <button type="button" onclick="confirmBillingCheckout('pix')"><span><i class="fas fa-qrcode" aria-hidden="true"></i></span><div><strong>PIX</strong><small>Pagamento único com acesso por 30 dias. Sem renovação automática.</small></div><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
+                </div>
             </div>
         </div>
 
@@ -546,126 +656,120 @@
                 <div class="modal-actions">
                     <button type="button" class="btn-secondary" onclick="closeAppModal(document.getElementById('workoutCurrentDecisionModal'))">Cancelar</button>
                     <button type="button" class="btn-secondary" data-workout-current-adapt>Adaptar treino atual</button>
-                    <button type="button" class="btn-primary" data-workout-current-generate>Gerar novo com IA</button>
                 </div>
             </div>
         </div>
 
         <div id="dietModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="dietModalTitle" aria-hidden="true">
             <div class="modal-content">
-                <h2 id="dietModalTitle"><i class="fas fa-utensils"></i> Adicionar Refeição</h2>
-                <form id="dietForm">
+                <div class="diet-entry-heading">
+                    <button type="button" id="dietFlowBack" class="diet-entry-close" aria-label="Voltar"><i data-lucide="arrow-left" aria-hidden="true"></i></button>
+                    <span id="dietFlowProgress" role="status">Etapa 1 de 4</span>
+                    <button type="button" class="diet-entry-close" onclick="closeDietModal()" aria-label="Fechar registro"><i data-lucide="x" aria-hidden="true"></i></button>
+                </div>
+                <h2 id="dietModalTitle" tabindex="-1">Como você quer registrar?</h2>
+                <section id="dietDiscardPanel" hidden aria-labelledby="dietDiscardTitle">
+                    <h3 id="dietDiscardTitle">Descartar as alterações?</h3>
+                    <p class="diet-entry-help">Esta refeição ainda não foi salva.</p>
+                    <button type="button" id="dietKeepDraft" class="btn-primary">Continuar preenchendo</button>
+                    <button type="button" id="dietDiscardDraft" class="diet-flow-link">Descartar e fechar</button>
+                </section>
+                <form id="dietForm" novalidate>
                     <input type="hidden" id="dietId">
-                    <select id="dietMeal" class="field-hidden" hidden required>
-                        <option value="">Selecione...</option>
-                        <option value="Café da manhã">Café da manhã</option>
-                        <option value="Lanche da manhã">Lanche da manhã</option>
-                        <option value="Almoço">Almoço</option>
-                        <option value="Lanche da tarde">Lanche da tarde</option>
-                        <option value="Jantar">Jantar</option>
-                        <option value="Ceia">Ceia</option>
-                    </select>
-
-                    <section class="profile-section">
-                        <div class="profile-section__label"><span class="profile-section__icon"><i class="fas fa-clock"></i></span><div><strong>Quando?</strong><small>Refeição do dia</small></div></div>
-                        <div class="quick-chips" id="dietDateChips" aria-label="Data da refeição">
-                            <button type="button" class="chip-btn" data-day-offset="0"><i class="fas fa-sun"></i> Hoje</button>
-                            <button type="button" class="chip-btn" data-day-offset="-1"><i class="fas fa-arrow-rotate-left"></i> Ontem</button>
-                        </div>
-                        <div class="form-group">
-                            <label for="dietDate" class="field-label">Data específica</label>
-                            <input type="date" id="dietDate" class="field-input" required>
-                        </div>
+                    <section data-diet-step="1">
+                        <p class="diet-entry-help">Comece pelo que você comeu.</p>
+                        <button type="button" class="diet-method" data-diet-method="photo"><i data-lucide="camera" aria-hidden="true"></i><span><strong>Usar foto</strong><small>Mostre seu prato e complemente se quiser</small></span><i data-lucide="chevron-right" aria-hidden="true"></i></button>
+                        <button type="button" class="diet-method" data-diet-method="text"><i data-lucide="pencil" aria-hidden="true"></i><span><strong>Escrever</strong><small>Conte os alimentos e as quantidades</small></span><i data-lucide="chevron-right" aria-hidden="true"></i></button>
                     </section>
-
-                    <section class="profile-section">
-                        <div class="profile-section__label"><span class="profile-section__icon"><i class="fas fa-bowl-food"></i></span><div><strong>Tipo de refeição</strong><small>Escolha uma opção</small></div></div>
-                        <div class="choice-grid choice-grid--2" id="mealTypeCards" role="radiogroup" aria-label="Tipo de refeição">
-                            <button type="button" class="choice-card" data-value="Café da manhã" role="radio"><span class="choice-card__icon"><i class="fas fa-mug-hot"></i></span><span class="choice-card__label">Café da manhã</span></button>
-                            <button type="button" class="choice-card" data-value="Lanche da manhã" role="radio"><span class="choice-card__icon"><i class="fas fa-apple-whole"></i></span><span class="choice-card__label">Lanche da manhã</span></button>
-                            <button type="button" class="choice-card" data-value="Almoço" role="radio"><span class="choice-card__icon"><i class="fas fa-sun"></i></span><span class="choice-card__label">Almoço</span></button>
-                            <button type="button" class="choice-card" data-value="Lanche da tarde" role="radio"><span class="choice-card__icon"><i class="fas fa-mug-saucer"></i></span><span class="choice-card__label">Lanche da tarde</span></button>
-                            <button type="button" class="choice-card" data-value="Jantar" role="radio"><span class="choice-card__icon"><i class="fas fa-moon"></i></span><span class="choice-card__label">Jantar</span></button>
-                            <button type="button" class="choice-card" data-value="Ceia" role="radio"><span class="choice-card__icon"><i class="fas fa-moon"></i></span><span class="choice-card__label">Ceia</span></button>
+                    <section data-diet-step="2" hidden>
+                        <div id="dietPhotoArea" hidden>
+                            <button type="button" id="dietPhotoBtn" class="btn-secondary"><i data-lucide="image-plus" aria-hidden="true"></i> Escolher ou trocar foto</button>
+                            <input type="file" id="dietPhotoInput" accept="image/*" hidden>
+                            <div id="dietPhotoPreview" hidden><img id="dietPhotoPreviewImg" alt="Prévia da refeição"><button type="button" id="dietPhotoRemove" class="btn-secondary">Remover foto</button></div>
+                            <p class="diet-entry-help">A foto é usada na análise e não fica salva no registro.</p>
                         </div>
+                        <label for="dietSourceText" id="dietSourceLabel">Descreva sua refeição</label>
+                        <textarea id="dietSourceText" rows="5" maxlength="2000" placeholder="Ex.: 2 colheres de arroz, feijão e um filé de frango"></textarea>
+                        <p class="diet-entry-help">Informe as quantidades que souber.</p>
                     </section>
-
-                    <section class="profile-section">
-                        <div class="profile-section__label"><span class="profile-section__icon"><i class="fas fa-utensils"></i></span><div><strong>O que você comeu?</strong><small>Descreva ou tire uma foto</small></div></div>
-                        <div class="field-input">
-                            <i class="fas fa-utensils field-input__icon" aria-hidden="true"></i>
-                            <input type="text" id="dietDescription" class="field-input__core" placeholder="Ex: 2 fatias de pão integral com queijo">
+                    <section data-diet-step="3" hidden>
+                        <img id="dietReviewPhoto" alt="Foto analisada da refeição" hidden>
+                        <label for="dietDescription" id="dietReviewLabel">O que identificamos</label>
+                        <textarea id="dietDescription" rows="4" maxlength="2000" required></textarea>
+                        <p class="diet-entry-help" id="dietEstimateHint">Valores estimados. Confira alimentos e quantidades.</p>
+                        <div id="dietNutrientSummary" aria-live="polite">
+                            <strong id="dietSummaryCalories"></strong>
+                            <div class="diet-summary-macros"><span id="dietSummaryProtein"></span><span id="dietSummaryCarbs"></span><span id="dietSummaryFat"></span></div>
                         </div>
-                        <div class="diet-photo-row">
-                            <button type="button" class="btn-secondary diet-photo-btn" id="dietPhotoBtn">
-                                <i class="fas fa-camera"></i> Foto do prato
-                            </button>
-                            <input type="file" id="dietPhotoInput" accept="image/*" capture="environment" class="hidden">
-                            <div class="diet-photo-preview hidden" id="dietPhotoPreview">
-                                <img id="dietPhotoPreviewImg" alt="Prévia da refeição">
-                                <button type="button" class="diet-photo-remove" id="dietPhotoRemove" aria-label="Remover foto"><i class="fas fa-times"></i></button>
-                            </div>
-                        </div>
-                    </section>
-
-                    <section class="profile-section">
-                        <div class="profile-section__label"><span class="profile-section__icon"><i class="fas fa-wand-magic-sparkles"></i></span><div><strong>Macros estimados</strong><small>Ajuste ou gere com IA</small></div></div>
-                        <button type="button" class="btn-secondary macros-ai" id="generateMacrosBtn">
-                            <span id="generateMacrosBtnText"><i class="fas fa-robot"></i> Gerar Macros com IA</span>
-                            <span id="generateMacrosLoading" class="hidden"><i class="fas fa-spinner fa-spin"></i> Gerando...</span>
-                        </button>
-                        <span id="precisionBadge" class="precision-low"></span>
+                        <details id="dietNutritionDetails"><summary>Ajustar nutrientes</summary>
                         <div class="macro-grid">
                             <div class="macro-stepper">
                                 <span class="macro-stepper__icon"><i class="fas fa-fire"></i></span>
                                 <label for="dietCalories">Calorias</label>
-                                <div class="stepper" data-field="dietCalories" data-step="10">
-                                    <button type="button" class="stepper__btn stepper__minus" aria-label="Diminuir calorias"><i class="fas fa-minus"></i></button>
-                                    <input type="number" id="dietCalories" class="stepper__input" step="10" min="0" value="" placeholder="0">
-                                    <button type="button" class="stepper__btn stepper__plus" aria-label="Aumentar calorias"><i class="fas fa-plus"></i></button>
+                                <div class="stepper" data-field="dietCalories" data-step="any">
+                                    <input type="number" id="dietCalories" class="stepper__input" inputmode="decimal" step="any" min="0" max="20000" value="" placeholder="0">
                                 </div>
                             </div>
                             <div class="macro-stepper">
                                 <span class="macro-stepper__icon"><i class="fas fa-drumstick-bite"></i></span>
                                 <label for="dietProtein">Proteínas (g)</label>
-                                <div class="stepper" data-field="dietProtein" data-step="1">
-                                    <button type="button" class="stepper__btn stepper__minus" aria-label="Diminuir proteínas"><i class="fas fa-minus"></i></button>
-                                    <input type="number" id="dietProtein" class="stepper__input" step="1" min="0" value="" placeholder="0">
-                                    <button type="button" class="stepper__btn stepper__plus" aria-label="Aumentar proteínas"><i class="fas fa-plus"></i></button>
+                                <div class="stepper" data-field="dietProtein" data-step="any">
+                                    <input type="number" id="dietProtein" class="stepper__input" inputmode="decimal" step="any" min="0" max="5000" value="" placeholder="0">
                                 </div>
                             </div>
                             <div class="macro-stepper">
                                 <span class="macro-stepper__icon"><i class="fas fa-wheat-awn"></i></span>
                                 <label for="dietCarbs">Carboidratos (g)</label>
-                                <div class="stepper" data-field="dietCarbs" data-step="1">
-                                    <button type="button" class="stepper__btn stepper__minus" aria-label="Diminuir carboidratos"><i class="fas fa-minus"></i></button>
-                                    <input type="number" id="dietCarbs" class="stepper__input" step="1" min="0" value="" placeholder="0">
-                                    <button type="button" class="stepper__btn stepper__plus" aria-label="Aumentar carboidratos"><i class="fas fa-plus"></i></button>
+                                <div class="stepper" data-field="dietCarbs" data-step="any">
+                                    <input type="number" id="dietCarbs" class="stepper__input" inputmode="decimal" step="any" min="0" max="5000" value="" placeholder="0">
                                 </div>
                             </div>
                             <div class="macro-stepper">
                                 <span class="macro-stepper__icon"><i class="fas fa-droplet"></i></span>
                                 <label for="dietFat">Gorduras (g)</label>
-                                <div class="stepper" data-field="dietFat" data-step="1">
-                                    <button type="button" class="stepper__btn stepper__minus" aria-label="Diminuir gorduras"><i class="fas fa-minus"></i></button>
-                                    <input type="number" id="dietFat" class="stepper__input" step="1" min="0" value="" placeholder="0">
-                                    <button type="button" class="stepper__btn stepper__plus" aria-label="Aumentar gorduras"><i class="fas fa-plus"></i></button>
+                                <div class="stepper" data-field="dietFat" data-step="any">
+                                    <input type="number" id="dietFat" class="stepper__input" inputmode="decimal" step="any" min="0" max="5000" value="" placeholder="0">
                                 </div>
                             </div>
                         </div>
+                    </details>
+
                     </section>
+                    <section data-diet-step="4" hidden>
+                        <p id="dietFinalDescription"></p>
+                        <button type="button" id="dietReviewAgain" class="diet-flow-link">Corrigir alimento</button>
+                    <div class="diet-entry-context">
+                        <div class="form-group">
+                            <label for="dietDate">Data</label>
+                            <input type="date" id="dietDate" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="dietMeal">Refeição</label>
+                            <select id="dietMeal" required>
+                                <option value="">Selecione</option>
+                                <option>Café da manhã</option>
+                                <option>Lanche da manhã</option>
+                                <option>Almoço</option>
+                                <option>Lanche da tarde</option>
+                                <option>Jantar</option>
+                                <option>Ceia</option>
+                            </select>
+                        </div>
+                    </div>
 
                     <details class="collapse">
-                        <summary><i class="fas fa-note-sticky"></i> Observações (opcional)</summary>
+                        <summary><i data-lucide="notebook-pen" aria-hidden="true"></i> Observações (opcional)</summary>
                         <textarea id="dietNotes" rows="2" class="field-textarea" placeholder="Observações opcionais..."></textarea>
                     </details>
 
-                    <div class="sheet-actions">
-                        <button type="button" onclick="closeDietModal()" class="btn-secondary">Cancelar</button>
-                        <button type="submit" id="dietSaveBtn" class="btn-primary"><span>Salvar refeição</span><span id="dietSaveLoading" class="hidden"><i class="fas fa-spinner fa-spin"></i></span></button>
+                    </section>
+                    <div id="dietMessage" class="modal-message" role="status" aria-live="polite"></div>
+                    <div class="sheet-actions" id="dietFlowActions" hidden>
+                        <button type="button" id="dietFlowNext" class="btn-primary">Analisar refeição</button>
+                        <button type="submit" id="dietSaveBtn" class="btn-primary" hidden><span>Salvar refeição</span><span id="dietSaveLoading" class="hidden">Salvando…</span></button>
+                        <button type="button" id="dietFlowManual" class="diet-flow-link" hidden>Continuar sem estimativa</button>
                     </div>
                 </form>
-                <div id="dietMessage" class="modal-message" role="status" aria-live="polite"></div>
             </div>
         </div>
 
@@ -772,9 +876,6 @@
                     <h3 id="viewDietPlanTitle">Plano de Dieta</h3>
                 </div>
                 <div id="viewDietPlanDetails" class="plan-details-container"></div>
-                <div class="modal-actions">
-                    <button onclick="closeViewDietPlanModal()" class="btn-secondary">Fechar</button>
-                </div>
             </div>
         </div>
 
@@ -829,9 +930,6 @@
                     <h3 id="viewWorkoutPlanTitle">Plano de Treino</h3>
                 </div>
                 <div id="viewWorkoutPlanDetails" class="plan-details-container"></div>
-                <div class="modal-actions">
-                    <button onclick="closeViewWorkoutPlanModal()" class="btn-secondary">Fechar</button>
-                </div>
             </div>
         </div>
 
@@ -863,12 +961,19 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.js"></script>
-    <script src="fluid.js?v=20260828-achievements"></script>
-    <script src="js/exercise-media.js?v=20260828-achievements"></script>
-    <script src="js/utils.js?v=20260828-achievements"></script>
-    <script src="script.js?v=20260828-google-login-fix"></script>
-    <script src="js/plans.js?v=20260828-achievements"></script>
-    <script src="js/progress.js?v=20260828-achievements"></script>
-    <script src="js/professional.js?v=20260828-achievements"></script>
+    <script src="/vendor/lucide.min.js?v=1.42.0"></script>
+    <script src="/js/icons.js?v=20260907-lucide-today"></script>
+    <script src="/fluid.js?v=20260828-achievements"></script>
+    <script src="/js/exercise-media.js?v=20260828-achievements"></script>
+    <script src="/js/utils.js?v=20260829-operations"></script>
+    <script src="/js/analytics.js?v=20260829-funnel"></script>
+    <script src="/js/body-evolution.js?v=20260909"></script>
+    <script src="/script.js?v=20260910-diet-guided"></script>
+    <script src="/js/diet-entry.js?v=20260910-guided-fix"></script>
+    <script src="/js/plans.js?v=20260829-operations"></script>
+    <script src="/js/progress.js?v=20260910-progress-mobile"></script>
+    <script src="/js/social.js?v=20260903-network"></script>
+    <script src="/js/reviews.js?v=20260903-reviews"></script>
+    <script src="/js/professional.js?v=20260829-operations"></script>
 </body>
 </html>

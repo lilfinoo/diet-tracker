@@ -1,19 +1,18 @@
 import json
+import math
 import re
 import time
 from typing import Optional
 
+import httpx
 from flask import current_app
 from google import genai
 from google.genai import types
 
 from src.services.diet_plans import diet_restriction_policy
 from src.services.workout_plans import (
-    allowed_groups_for_day,
+    build_workout_contract,
     catalog_by_key,
-    catalog_for_prompt,
-    required_training_roles_for_day,
-    workout_day_specs,
 )
 
 
@@ -35,6 +34,33 @@ class AIQuotaExceededError(AIServiceError):
 
 class AIServiceUnavailableError(AIServiceError):
     """Raised when Gemini temporarily cannot accept a request."""
+
+
+def _provider_error_category(error):
+    status_code = getattr(error, "status_code", None) or getattr(error, "code", None)
+    try:
+        status_code = int(status_code)
+    except (TypeError, ValueError):
+        status_code = None
+    provider_status = getattr(error, "status", None)
+    provider_status = provider_status.upper() if isinstance(provider_status, str) else None
+
+    if status_code == 429 or provider_status == "RESOURCE_EXHAUSTED":
+        return "quota_rate_limit", status_code
+    if (
+        isinstance(error, (TimeoutError, httpx.TimeoutException))
+        or status_code in {408, 500, 502, 503, 504}
+        or provider_status in {"DEADLINE_EXCEEDED", "UNAVAILABLE"}
+    ):
+        return "timeout_unavailable", status_code
+    if status_code in {400, 401, 403, 404} or provider_status in {
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "PERMISSION_DENIED",
+        "UNAUTHENTICATED",
+    }:
+        return "authentication_configuration", status_code
+    return "unknown_provider_error", status_code
 
 
 def _json_object(content: str) -> dict:
@@ -119,14 +145,20 @@ def _completion(
     except AIServiceError:
         raise
     except Exception as error:
-        error_text = str(error)
-        status_code = getattr(error, "status_code", None) or getattr(error, "code", None)
-        if status_code == 429 or "RESOURCE_EXHAUSTED" in error_text:
-            delay_match = re.search(r"retry in\s+(\d+)", error_text, re.IGNORECASE)
-            delay = f" em cerca de {delay_match.group(1)} segundos" if delay_match else " mais tarde"
-            raise AIQuotaExceededError(f"A cota da IA foi atingida. Tente novamente{delay}.") from error
-        if status_code == 503 or "UNAVAILABLE" in error_text:
-            raise AIServiceUnavailableError("A IA está temporariamente com alta demanda.") from error
+        category, status_code = _provider_error_category(error)
+        current_app.logger.warning(
+            "Gemini request failed category=%s http_status=%s",
+            category,
+            status_code,
+        )
+        if category == "quota_rate_limit":
+            raise AIQuotaExceededError(
+                "O limite de uso da IA foi atingido. Tente novamente mais tarde."
+            ) from error
+        if category == "timeout_unavailable":
+            raise AIServiceUnavailableError(
+                "A IA está temporariamente indisponível."
+            ) from error
         raise AIServiceError("Gemini provider request failed") from error
 
 
@@ -144,21 +176,27 @@ def calculate_nutrition(
     if food_description:
         prompt = f"""Analise a seguinte descrição de alimentos e forneça informações nutricionais.
 Descrição: {food_description}
-Responda somente com JSON: {{"calories": número, "protein": número, "carbs": número, "fat": número}}.
+Responda somente com JSON: {{"description": "descrição dos alimentos em português", "calories": número, "protein": número, "carbs": número, "fat": número}}.
 Seja preciso e considere porções típicas mencionadas."""
         if is_vague:
             prompt += "\nSe não houver quantidades, assuma porções médias brasileiras."
     else:
         prompt = """Analise a foto do prato e forneça informações nutricionais.
-Responda somente com JSON: {"calories": número, "protein": número, "carbs": número, "fat": número}.
+Responda somente com JSON: {"description": "descrição dos alimentos em português", "calories": número, "protein": número, "carbs": número, "fat": número}.
 Assuma porções médias brasileiras se não houver referência de tamanho."""
     if has_image:
         prompt += "\nA foto do prato está anexada: identifique os alimentos e estime as quantidades."
+    prompt += (
+        "\nRetorne description com até 2000 caracteres, com os alimentos identificados e "
+        "considerando o complemento do usuário. Sinalize identificações incertas e "
+        "quantidades inferidas como aproximadas. Não apresente suposições como certezas. "
+        "Se não conseguir identificar alimentos, retorne description vazia."
+    )
     data = _json_object(
         _completion(
             "Você é nutricionista. Retorne somente JSON válido.",
             prompt,
-            512,
+            1024,
             0.3,
             json_response=True,
             model=current_app.config["GEMINI_STRUCTURED_MODEL"],
@@ -167,13 +205,25 @@ Assuma porções médias brasileiras se não houver referência de tamanho."""
         )
     )
     try:
-        return {
+        description = data.get("description", "")
+        if not isinstance(description, str) or len(description) > 2000:
+            raise ValueError
+        result = {
+            "description": description.strip(),
             "calories": float(data["calories"]),
             "protein": float(data["protein"]),
             "carbs": float(data["carbs"]),
             "fat": float(data["fat"]),
             "precision": "alta" if has_image or not is_vague else "baixa",
         }
+        if any(
+            not math.isfinite(result[field]) or result[field] < 0
+            for field in ("calories", "protein", "carbs", "fat")
+        ) or result["calories"] > 20_000 or any(
+            result[field] > 5_000 for field in ("protein", "carbs", "fat")
+        ):
+            raise ValueError
+        return result
     except (KeyError, TypeError, ValueError) as error:
         raise AIResponseError("Gemini nutrition response had invalid values") from error
 
@@ -231,28 +281,80 @@ def _profile_context(profile):
     }
 
 
-def generate_workout_plan(questionnaire: dict, profile) -> dict:
-    day_specs = workout_day_specs(questionnaire["split_type"], questionnaire["days_per_week"])
-    for spec in day_specs:
-        spec["allowed_groups"] = sorted(allowed_groups_for_day(questionnaire["split_type"], spec["code"]))
-        spec["required_training_roles"] = [
-            sorted(alternatives)
-            for alternatives in required_training_roles_for_day(questionnaire["split_type"], spec["code"])
+def generate_workout_plan(questionnaire: dict, profile, correction=None, contract=None) -> dict:
+    contract = contract or build_workout_contract(questionnaire)
+    day_specs = contract["effective"]["days"]
+    prompt_catalog = contract["exercise_catalog"]
+    required_days = day_specs
+    if correction:
+        invalid_day_numbers = correction["invalid_day_numbers"]
+        required_days = [
+            {**day_specs[day_number - 1], "day_number": day_number}
+            for day_number in invalid_day_numbers
         ]
     payload = {
         "questionnaire": questionnaire,
         "profile": _profile_context(profile),
-        "required_days": day_specs,
-        "exercise_catalog": catalog_for_prompt(questionnaire),
+        "required_days": required_days,
+        "exercise_catalog": prompt_catalog,
+        "contract_quality": contract["quality"],
+        "contract_adaptations": contract["adaptations"],
+        "contract_warnings": contract["warnings"],
         "programming_constraints": {
             "20_30_minutes": "3 a 5 exercícios",
             "45_60_minutes": "4 a 7 exercícios",
             "75_90_minutes": "6 a 8 exercícios",
         },
     }
+    if correction:
+        payload["repair"] = correction
+    uses_slots = bool(required_days) and all(day.get("slots") for day in required_days)
+    exercise_required = ["catalog_key", "sets", "reps", "rest_seconds"]
+    exercise_properties = {
+        "catalog_key": {"type": "string"},
+        "sets": {"type": "integer", "minimum": 1, "maximum": 6},
+        "reps": {"type": "string", "minLength": 1, "maxLength": 30},
+        "weight": {"type": "string"},
+        "rest_seconds": {"type": "integer", "minimum": 20, "maximum": 300},
+        "effort_guidance": {"type": "string"},
+        "notes": {"type": "string"},
+    }
+    if uses_slots:
+        allowed_catalog_keys = sorted({
+            catalog_key
+            for day in required_days
+            for slot in day["slots"]
+            for catalog_key in slot["allowed_catalog_keys"]
+        })
+        if len(allowed_catalog_keys) <= 50:
+            exercise_properties["catalog_key"]["enum"] = allowed_catalog_keys
+        exercise_required.insert(0, "slot_id")
+        exercise_properties["slot_id"] = {"type": "string"}
+    day_required = ["focus", "exercises"]
+    day_properties = {
+        "focus": {"type": "string"},
+        "exercises": {
+            "type": "array",
+            **({
+                "minItems": min(day["minimum_exercises"] for day in required_days),
+                "maxItems": max(day["maximum_exercises"] for day in required_days),
+            } if uses_slots else {}),
+            "items": {
+                "type": "object",
+                "required": exercise_required,
+                "properties": exercise_properties,
+            },
+        },
+    }
+    if correction:
+        day_required.insert(0, "day_number")
+        day_properties["day_number"] = {
+            "type": "integer",
+            "enum": correction["invalid_day_numbers"],
+        }
     schema = {
         "type": "object",
-        "required": ["type", "title", "description", "days"],
+        "required": ["days"] if correction else ["type", "title", "description", "days"],
         "properties": {
             "type": {"type": "string", "enum": ["workout_plan"]},
             "title": {"type": "string"},
@@ -261,32 +363,15 @@ def generate_workout_plan(questionnaire: dict, profile) -> dict:
                 "type": "array",
                 "items": {
                     "type": "object",
-                    "required": ["focus", "exercises"],
-                    "properties": {
-                        "focus": {"type": "string"},
-                        "exercises": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "required": ["catalog_key", "sets", "reps", "rest_seconds"],
-                                "properties": {
-                                    "catalog_key": {"type": "string"},
-                                    "sets": {"type": "integer"},
-                                    "reps": {"type": "string"},
-                                    "weight": {"type": "string"},
-                                    "rest_seconds": {"type": "integer"},
-                                    "effort_guidance": {"type": "string"},
-                                    "notes": {"type": "string"},
-                                },
-                            },
-                        },
-                    },
+                    "required": day_required,
+                    "properties": day_properties,
                 },
             },
         },
     }
     system_instruction = """Você monta programas individualizados de musculação em português com base em treinamento resistido e anatomia funcional.
-Use SOMENTE catalog_key presente em exercise_catalog. Siga exatamente required_days, focus_guidance, required_groups, allowed_groups e a ordem dos dias. Nunca invente exercício, ID ou equipamento.
+Use SOMENTE catalog_key presente em exercise_catalog. Siga exatamente required_days, focus_guidance, required_groups, allowed_groups, required_training_roles e a ordem dos dias. Cada lista interna de required_groups e required_training_roles representa alternativas: escolha ao menos uma opção de cada lista. Nunca invente exercício, ID ou equipamento.
+Quando required_day contiver slots, preencha cada slot exatamente uma vez com um catalog_key da respectiva allowed_catalog_keys e retorne o slot_id em cada exercício. A quantidade e a distribuição já estão decididas pelos slots; não adicione, remova ou troque slots.
 
 RACIOCÍNIO SILENCIOSO OBRIGATÓRIO:
 Antes de responder, determine objetivo, experiência, frequência, duração, prioridades, manutenção, volume semanal por músculo, distribuição do volume, padrões necessários, sobreposição entre compostos e isoladores e capacidade de recuperação. Depois selecione o menor conjunto de exercícios capaz de entregar estímulo suficiente. Não exponha esse raciocínio na resposta.
@@ -299,10 +384,10 @@ VOLUME, FREQUÊNCIA E RECUPERAÇÃO:
 
 SELEÇÃO E COBERTURA:
 - Cada exercício deve acrescentar função, região, comprimento muscular ou estímulo relevante. Trocar barra por halter ou máquina sem mudar o estímulo não conta como variedade.
-- Quando training_role não for nulo, não repita a mesma função no dia. Use no máximo dois exercícios do mesmo group, exceto em dia específico de peito com funções biomecânicas diferentes.
-- Peito: combine pressão horizontal e inclinada; adicione declinado, fly ou crossover apenas quando o volume justificar. Supino declinado é uma opção útil para ênfase esternocostal/inferior, não uma obrigação. Não empilhe variações equivalentes de supino.
+- catalog_key deve ser único dentro de cada dia: nunca repita o mesmo exercício. Respeite exatamente selection_limits de cada required_day, incluindo o máximo de exercícios de cada group e o máximo por training_role. Em particular, horizontal_pull tem limite 2 quando selection_limits indicar 2.
+- Peito: quando o contrato efetivo mantiver required_training_roles, cumpra cada função indicada. No dia A da divisão ABCDE com catálogo completo, use três funções distintas: pressão reta, pressão inclinada e uma opção entre declinado, fly ou crossover. Quando o contrato registrar adaptação, siga os slots efetivos sem reintroduzir funções indisponíveis. Não empilhe variações equivalentes de supino.
 - Costas: cubra puxada vertical e remada horizontal; considere extensão do ombro/dorsal e deltoide posterior quando o catálogo e o volume permitirem. Não use várias remadas equivalentes.
-- Ombros: considere anterior, lateral e posterior. Supinos já contam para anterior; normalmente priorize trabalho específico lateral/posterior em vez de elevação frontal redundante.
+- Ombros: considere anterior, lateral e posterior. Supinos já contam para anterior; no dia específico de ombros, movimentos horizontal_pull do catálogo são permitidos para complementar o deltoide posterior quando o volume justificar. Priorize trabalho lateral/posterior em vez de elevação frontal redundante.
 - Tríceps: pressões já contam indiretamente; quando houver volume direto suficiente, combine extensão junto ao corpo e acima da cabeça para a cabeça longa.
 - Bíceps: puxadas contam indiretamente; poucas variações complementares são suficientes, podendo combinar flexão tradicional e pegada neutra.
 - Quadríceps: combine dominante de joelho e, quando útil, extensão isolada. Posteriores: inclua flexão de joelho e hinge; agachamento não substitui esses dois padrões.
@@ -329,6 +414,13 @@ NÍVEL E SEGURANÇA:
 
 AUDITORIA SILENCIOSA FINAL:
 Confirme objetivo, volume direto e indireto, frequência, cobertura regional, redundância, recuperação, prioridades, nível, duração, equipamentos e limitações. Corrija qualquer falha antes de retornar somente o JSON do schema."""
+    if correction:
+        system_instruction += """
+
+REPARO OBRIGATÓRIO E LIMITADO:
+O payload contém repair.previous_plan, repair.validation_errors e repair.invalid_day_numbers.
+Retorne somente o objeto {"days": [...]} com exatamente os dias listados em repair.invalid_day_numbers, identificados por day_number.
+Corrija esses dias usando os respectivos required_days. Não retorne nem altere título, descrição ou qualquer dia que não esteja listado para reparo."""
     contents = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     primary_model = current_app.config["GEMINI_WORKOUT_MODEL"]
     fallback_model = current_app.config["GEMINI_WORKOUT_FALLBACK_MODEL"]
