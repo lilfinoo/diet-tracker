@@ -82,7 +82,7 @@ def upgrade():
 
     bind.execute(sa.text(
         "UPDATE analytics_event SET subject_id = "
-        "(SELECT analytics_subject_id FROM user WHERE user.id = analytics_event.user_id) "
+        "(SELECT analytics_subject_id FROM \"user\" WHERE \"user\".id = analytics_event.user_id) "
         "WHERE user_id IS NOT NULL"
     ))
     op.create_index(
@@ -178,7 +178,7 @@ def downgrade():
         )
     bind.execute(sa.text(
         "UPDATE analytics_event SET user_id = "
-        "(SELECT id FROM user WHERE user.analytics_subject_id = analytics_event.subject_id) "
+        "(SELECT id FROM \"user\" WHERE \"user\".analytics_subject_id = analytics_event.subject_id) "
         "WHERE subject_id IS NOT NULL"
     ))
     op.create_index(
