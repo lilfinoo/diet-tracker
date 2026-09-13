@@ -11,7 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.css">
-    <link rel="stylesheet" href="/styles.css?v=20260910-diet-guided-fix">
+    <link rel="stylesheet" href="/styles.css?v=20260913-shopping-list">
     <link rel="stylesheet" href="/fluid.css?v=20260828-achievements">
 </head>
 <body>
@@ -879,6 +879,16 @@
             </div>
         </div>
 
+        <div id="shoppingListModal" class="modal plan-modal shopping-list-modal" role="dialog" aria-modal="true" aria-labelledby="shoppingListTitle">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button onclick="closeShoppingListModal()" class="btn-close" aria-label="Fechar lista de compras"><i class="fas fa-arrow-left"></i></button>
+                    <h3 id="shoppingListTitle">Lista de compras</h3>
+                </div>
+                <div id="shoppingListDetails" class="shopping-list-details"></div>
+            </div>
+        </div>
+
         <div id="editPlanMealModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="editPlanMealTitle">
             <div class="modal-content">
                 <div class="modal-header">
@@ -965,15 +975,15 @@
     <script src="/js/icons.js?v=20260907-lucide-today"></script>
     <script src="/fluid.js?v=20260828-achievements"></script>
     <script src="/js/exercise-media.js?v=20260828-achievements"></script>
-    <script src="/js/utils.js?v=20260829-operations"></script>
+    <script src="/js/utils.js?v=20260913-diet-portions"></script>
     <script src="/js/analytics.js?v=20260829-funnel"></script>
     <script src="/js/body-evolution.js?v=20260909"></script>
-    <script src="/script.js?v=20260910-diet-guided"></script>
+    <script src="/script.js?v=20260913-diet-portions"></script>
     <script src="/js/diet-entry.js?v=20260910-guided-fix"></script>
-    <script src="/js/plans.js?v=20260829-operations"></script>
+    <script src="/js/plans.js?v=20260913-diet-portions"></script>
     <script src="/js/progress.js?v=20260910-progress-mobile"></script>
     <script src="/js/social.js?v=20260903-network"></script>
-    <script src="/js/reviews.js?v=20260903-reviews"></script>
-    <script src="/js/professional.js?v=20260829-operations"></script>
+    <script src="/js/reviews.js?v=20260913-diet-portions"></script>
+    <script src="/js/professional.js?v=20260913-diet-portions"></script>
 </body>
 </html>

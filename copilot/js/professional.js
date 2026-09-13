@@ -431,7 +431,7 @@
         const details = byId(type === "workout" ? "viewWorkoutPlanDetails" : "viewDietPlanDetails");
         const title = byId(type === "workout" ? "viewWorkoutPlanTitle" : "viewDietPlanTitle");
         if (title) title.textContent = plan.title;
-        if (details) details.innerHTML = `<div class="professional-preview"><p>${esc(plan.description || "")}</p>${type === "workout" ? asArray(plan.days).map((day) => `<section><h4>${esc(day.title)}</h4><p>${esc(day.focus || "")}</p>${asArray(day.exercises).map((exercise) => `<article><strong>${esc(exercise.name)}</strong><span>${esc(exercise.sets)} x ${esc(exercise.reps)} · ${esc(exercise.rest_seconds)}s</span><small>${esc(exercise.notes || "")}</small></article>`).join("")}</section>`).join("") : [1, 2, 3].map((day) => `<section><h4>Dia ${day}</h4>${asArray(plan.meals).filter((meal) => meal.day_of_week === `Dia ${day}`).map((meal) => `<article><strong>${esc(meal.meal_type)}</strong><span>${esc(asArray(meal.items).join(", ") || meal.description)}</span><small>${esc(meal.calories)} kcal · P ${esc(meal.protein)}g · C ${esc(meal.carbs)}g · G ${esc(meal.fat)}g</small></article>`).join("")}</section>`).join("")}</div>`;
+        if (details) details.innerHTML = `<div class="professional-preview"><p>${esc(plan.description || "")}</p>${type === "workout" ? asArray(plan.days).map((day) => `<section><h4>${esc(day.title)}</h4><p>${esc(day.focus || "")}</p>${asArray(day.exercises).map((exercise) => `<article><strong>${esc(exercise.name)}</strong><span>${esc(exercise.sets)} x ${esc(exercise.reps)} · ${esc(exercise.rest_seconds)}s</span><small>${esc(exercise.notes || "")}</small></article>`).join("")}</section>`).join("") : [1, 2, 3].map((day) => `<section><h4>Dia ${day}</h4>${asArray(plan.meals).filter((meal) => meal.day_of_week === `Dia ${day}`).map((meal) => `<article><strong>${esc(meal.meal_type)}</strong><span>${esc(window.formatDietPlanItemsText?.(meal) || asArray(meal.items).join(", ") || meal.description)}</span><small>${esc(meal.calories)} kcal · P ${esc(meal.protein)}g · C ${esc(meal.carbs)}g · G ${esc(meal.fat)}g</small></article>`).join("")}</section>`).join("")}</div>`;
         openAppModal(modal);
     }
 
@@ -458,7 +458,7 @@
             showToast("Gerando uma sugestão que preserva metas e restrições...", "info");
             const base = `/professional/students/${segment(state.student.id)}/diet-plans/${segment(planId)}`;
             const suggestion = await api(`${base}/suggest`, { method: "POST", body: { day, feedback } });
-            const preview = suggestion.meals.map((meal) => `${meal.meal_type}: ${asArray(meal.items).join(", ")} (${meal.calories} kcal)`).join("\n\n");
+            const preview = suggestion.meals.map((meal) => `${meal.meal_type}: ${window.formatDietPlanItemsText?.(meal) || asArray(meal.items).join(", ")} (${meal.calories} kcal)`).join("\n\n");
             if (!window.confirm(`Sugestão para o Dia ${day}:\n\n${preview}\n\nAplicar esta mudança ao rascunho?`)) return;
             await api(`${base}/days/${day}`, { method: "PUT", body: { meals: suggestion.meals } });
             showToast("Sugestão aplicada ao rascunho.", "success");
@@ -495,7 +495,7 @@
         [1, 2, 3].forEach((day) => {
             lines.push(`*DIA ${day}*`);
             asArray(plan.meals).filter((meal) => meal.day_of_week === `Dia ${day}`).forEach((meal) => {
-                lines.push(`*${meal.meal_type}*`, asArray(meal.items).join(", ") || meal.description, `${meal.calories} kcal | P ${meal.protein}g | C ${meal.carbs}g | G ${meal.fat}g`);
+                lines.push(`*${meal.meal_type}*`, window.formatDietPlanItemsText?.(meal) || asArray(meal.items).join(", ") || meal.description, `${meal.calories} kcal | P ${meal.protein}g | C ${meal.carbs}g | G ${meal.fat}g`);
             });
             lines.push("");
         });

@@ -16545,3 +16545,258 @@ button.profile-recent-card { width: 100%; text-align: left; color: inherit; font
 #dietModal .diet-summary-macros { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; font-size: 14px; line-height: 1.4; color: var(--text-secondary, #b4bfd0); }
 #dietModal #dietDiscardPanel button { display: block; width: 100%; min-height: 48px; margin-top: 12px; }
 #dietModal #dietKeepDraft { background: var(--action-strong, #2563eb); color: #fff; box-shadow: none; }
+
+/* Gerador de treino: mantém o modal da dieta intacto e concentra a experiência no celular. */
+.plan-wizard-modal--workout {
+    --plan-accent: #60a5fa;
+    --plan-blue: #93c5fd;
+    --plan-surface: #0f172a;
+    --plan-surface-raised: #172033;
+    background: rgba(2, 6, 23, 0.82);
+}
+
+.plan-wizard-modal--workout .plan-wizard {
+    border-color: rgba(96, 165, 250, 0.24) !important;
+    background: linear-gradient(155deg, #111c31 0%, #0b1220 68%, #080f1d 100%) !important;
+}
+
+.plan-wizard-modal--workout .plan-wizard__header {
+    align-items: center;
+    min-height: 4.75rem;
+    padding-block: 1rem;
+    background: rgba(8, 15, 29, 0.8);
+}
+
+.plan-wizard-modal--workout .plan-wizard__heading { align-items: center; }
+.plan-wizard-modal--workout .plan-wizard__icon { width: 2.6rem; height: 2.6rem; flex-basis: 2.6rem; color: #bfdbfe; border-color: rgba(96, 165, 250, 0.3); background: rgba(59, 130, 246, 0.14); }
+.plan-wizard-modal--workout .plan-wizard__heading h3 { margin: 0; font-size: 1.2rem; }
+.plan-wizard-modal--workout .plan-wizard__heading p { display: none; }
+.plan-wizard-modal--workout #planWizardKicker { color: #93c5fd; font-size: 0.78rem; letter-spacing: 0.04em; }
+
+.plan-wizard-modal--workout .plan-wizard__progress { padding: 0.5rem 1.5rem 0.65rem; background: rgba(8, 15, 29, 0.8); }
+.plan-wizard-modal--workout .plan-wizard__steps { display: none; }
+.plan-wizard-modal--workout .plan-wizard__track { margin-top: 0; background: rgba(148, 163, 184, 0.2); }
+.plan-wizard-modal--workout .plan-wizard__track span { background: linear-gradient(90deg, #2563eb, #93c5fd); }
+
+.plan-wizard-modal--workout .plan-wizard__body { padding-bottom: 1.5rem; }
+.plan-wizard-modal--workout .wizard-step-heading { margin-bottom: 1.4rem; }
+.plan-wizard-modal--workout .wizard-step-heading > span { display: none; }
+.plan-wizard-modal--workout .wizard-step-heading h4 { color: #f8fafc; font-size: clamp(1.35rem, 4vw, 1.65rem); }
+.plan-wizard-modal--workout .wizard-step-heading p,
+.plan-wizard-modal--workout .wizard-field-hint { color: #aebcd0; font-size: 0.875rem; line-height: 1.45; }
+.plan-wizard-modal--workout .wizard-field > label,
+.plan-wizard-modal--workout .wizard-fieldset > legend { color: #e2e8f0; font-size: 0.9375rem; }
+.plan-wizard-modal--workout .wizard-field > label span { font-size: 0.875rem; color: #aebcd0; }
+
+.plan-wizard-modal--workout .wizard-field input,
+.plan-wizard-modal--workout .wizard-field select,
+.plan-wizard-modal--workout .wizard-field textarea {
+    min-height: 3rem;
+    border-color: rgba(148, 163, 184, 0.28) !important;
+    border-radius: 12px;
+    color: #f8fafc !important;
+    background: rgba(15, 23, 42, 0.9) !important;
+    font-size: 1rem !important;
+}
+
+.plan-wizard-modal--workout .wizard-field textarea { min-height: 6.5rem; }
+.plan-wizard-modal--workout .wizard-field input:focus,
+.plan-wizard-modal--workout .wizard-field select:focus,
+.plan-wizard-modal--workout .wizard-field textarea:focus { border-color: #60a5fa !important; box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.2); }
+
+.plan-wizard-modal--workout .wizard-choice--selected { grid-column: auto; }
+.plan-wizard-modal--workout .wizard-choice--selected .wizard-choice__surface,
+.plan-wizard-modal--workout .wizard-choice__surface,
+.plan-wizard-modal--workout .wizard-check__surface { min-height: 3rem; padding: 0.7rem 0.8rem; font-size: 0.9375rem; }
+.plan-wizard-modal--workout .wizard-choice input:checked + .wizard-choice__surface,
+.plan-wizard-modal--workout .wizard-check input:checked + .wizard-check__surface { border-color: rgba(96, 165, 250, 0.8); color: #eff6ff; background: rgba(59, 130, 246, 0.16); }
+.plan-wizard-modal--workout .wizard-choice input:checked + .wizard-choice__surface > i,
+.plan-wizard-modal--workout .wizard-check input:checked + .wizard-check__surface > i { border-color: #60a5fa; color: #0f172a; background: #93c5fd; }
+
+.plan-wizard-modal--workout .workout-equipment-modes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.plan-wizard-modal--workout .workout-equipment-modes .wizard-choice__surface { min-height: 4rem; align-items: flex-start; }
+.plan-wizard-modal--workout .wizard-equipment-details { border-color: rgba(96, 165, 250, 0.22); background: rgba(30, 41, 59, 0.5); }
+.plan-wizard-modal--workout .wizard-equipment-details > span { color: #dbeafe; font-size: 0.875rem; }
+.plan-wizard-modal--workout .workout-recommendation-status { min-height: 1.25rem; margin: 0.25rem 0 0; color: #bfdbfe; font-size: 0.875rem; }
+.plan-wizard-modal--workout .workout-recommendation-status.is-warning { color: #fcd34d; }
+
+.plan-wizard-modal--workout .wizard-review { margin: 0 0 1.1rem; border-color: rgba(96, 165, 250, 0.27); background: rgba(30, 58, 138, 0.17); }
+.plan-wizard-modal--workout .wizard-review__title strong { font-size: 1rem; color: #eff6ff; }
+.plan-wizard-modal--workout .wizard-review__title span { display: none; }
+.plan-wizard-modal--workout .wizard-review dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.plan-wizard-modal--workout .wizard-review dl > div { padding: 0.7rem; background: rgba(15, 23, 42, 0.62); }
+.plan-wizard-modal--workout .wizard-review dt { font-size: 0.75rem; color: #aebcd0; }
+.plan-wizard-modal--workout .wizard-review dd { font-size: 0.875rem; color: #e2e8f0; }
+
+.plan-wizard-modal--workout .workout-advanced { margin-top: 1rem; border-top: 1px solid rgba(148, 163, 184, 0.23); }
+.plan-wizard-modal--workout .workout-advanced > summary { display: flex; align-items: center; min-height: 3.25rem; cursor: pointer; color: #dbeafe; font-size: 0.9375rem; font-weight: 700; list-style: none; }
+.plan-wizard-modal--workout .workout-advanced > summary::-webkit-details-marker { display: none; }
+.plan-wizard-modal--workout .workout-advanced > summary i { margin-left: auto; color: #93c5fd; transition: transform 160ms ease; }
+.plan-wizard-modal--workout .workout-advanced[open] > summary i { transform: rotate(180deg); }
+.plan-wizard-modal--workout .workout-advanced__content { padding: 0.5rem 0 0.25rem; }
+
+.plan-wizard-modal--workout .plan-wizard__actions { justify-content: flex-end; padding-block: 0.8rem; background: rgba(8, 15, 29, 0.92); }
+.plan-wizard-modal--workout .plan-wizard__actions > .btn-secondary { display: none; }
+.plan-wizard-modal--workout .plan-wizard__navigation { width: 100%; }
+.plan-wizard-modal--workout .plan-wizard__navigation .btn-secondary { min-width: 6.5rem; }
+.plan-wizard-modal--workout #planWizardNext { flex: 1; min-height: 3rem; color: #fff; background: #2563eb; box-shadow: none; }
+.plan-wizard-modal--workout #planWizardNext:hover { background: #1d4ed8; transform: none; }
+
+.plan-wizard-modal--workout .workout-generation-state { display: grid; justify-items: center; align-content: center; min-height: 100%; padding: 2rem 1rem; text-align: center; }
+.plan-wizard-modal--workout .workout-generation-state__icon { width: 4rem; height: 4rem; display: grid; place-items: center; border-radius: 50%; color: #bfdbfe; background: rgba(59, 130, 246, 0.16); font-size: 1.45rem; }
+.plan-wizard-modal--workout .workout-generation-state h4 { margin-top: 1.25rem; color: #f8fafc; font-size: 1.35rem; }
+.plan-wizard-modal--workout .workout-generation-state p { max-width: 25rem; margin-top: 0.5rem; color: #aebcd0; font-size: 0.9375rem; line-height: 1.5; }
+.plan-wizard-modal--workout .workout-generation-state .btn-primary { width: min(100%, 20rem); min-height: 3rem; margin-top: 1.25rem; color: #fff; background: #2563eb; box-shadow: none; }
+.plan-wizard-modal--workout .workout-generation-state dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; width: min(100%, 25rem); margin-top: 1.25rem; text-align: left; }
+.plan-wizard-modal--workout .workout-generation-state dl > div { padding: 0.75rem; border: 1px solid rgba(96, 165, 250, 0.22); border-radius: 10px; background: rgba(15, 23, 42, 0.6); }
+.plan-wizard-modal--workout .workout-generation-state dt { color: #aebcd0; font-size: 0.75rem; }
+.plan-wizard-modal--workout .workout-generation-state dd { margin-top: 0.2rem; color: #eff6ff; font-size: 0.875rem; }
+.plan-wizard-modal--workout.is-generating .sheet-drag-handle { display: none; }
+
+@media (max-width: 768px) {
+    .plan-wizard-modal--workout .plan-wizard__header { min-height: 4.25rem; padding: max(0.75rem, env(safe-area-inset-top)) 1rem 0.7rem; }
+    .plan-wizard-modal--workout .plan-wizard__icon { display: none; }
+    .plan-wizard-modal--workout .plan-wizard__progress { padding: 0.45rem 1rem 0.55rem; }
+    .plan-wizard-modal--workout .plan-wizard__body { padding: 1.15rem 1rem 1.4rem; }
+    .plan-wizard-modal--workout .plan-wizard__actions { padding: 0.75rem 1rem max(0.75rem, env(safe-area-inset-bottom)); }
+    .plan-wizard-modal--workout .workout-equipment-modes { grid-template-columns: 1fr; }
+    .plan-wizard-modal--workout .workout-equipment-modes .wizard-choice__surface { min-height: 3rem; align-items: center; }
+}
+
+@media (max-width: 390px) {
+    .plan-wizard-modal--workout .wizard-review dl,
+    .plan-wizard-modal--workout .workout-generation-state dl { grid-template-columns: 1fr; }
+    .plan-wizard-modal--workout .plan-wizard__navigation .btn-secondary { min-width: 5.7rem; }
+}
+
+/* Gerador de plano alimentar: fluxo compacto e mobile-first, isolado dos demais modais. */
+.plan-wizard-modal--diet {
+    --plan-accent: #60a5fa;
+    --plan-blue: #93c5fd;
+    background: rgba(2, 6, 23, 0.82);
+}
+
+.plan-wizard-modal--diet .plan-wizard {
+    border-color: rgba(96, 165, 250, 0.24) !important;
+    background: linear-gradient(155deg, #111c31 0%, #0b1220 68%, #080f1d 100%) !important;
+}
+
+.plan-wizard-modal--diet .plan-wizard__header {
+    align-items: center;
+    min-height: 4.75rem;
+    padding-block: 1rem;
+    background: rgba(8, 15, 29, 0.8);
+}
+
+.plan-wizard-modal--diet .plan-wizard__heading { align-items: center; }
+.plan-wizard-modal--diet .plan-wizard__heading h3 { margin: 0; font-size: 1.2rem; }
+.plan-wizard-modal--diet .plan-wizard__heading p { display: none; }
+.plan-wizard-modal--diet #planWizardKicker { color: #93c5fd; font-size: 0.78rem; letter-spacing: 0.04em; }
+.plan-wizard-modal--diet .plan-wizard__progress { padding: 0.5rem 1.5rem 0.65rem; background: rgba(8, 15, 29, 0.8); }
+.plan-wizard-modal--diet .plan-wizard__steps { display: none; }
+.plan-wizard-modal--diet .plan-wizard__track { margin-top: 0; background: rgba(148, 163, 184, 0.2); }
+.plan-wizard-modal--diet .plan-wizard__track span { background: linear-gradient(90deg, #2563eb, #93c5fd); }
+.plan-wizard-modal--diet .plan-wizard__body { padding-bottom: 1.5rem; }
+.plan-wizard-modal--diet .wizard-step-heading { margin-bottom: 1.25rem; }
+.plan-wizard-modal--diet .wizard-step-heading > span { display: none; }
+.plan-wizard-modal--diet .wizard-step-heading h4 { color: #f8fafc; font-size: clamp(1.35rem, 4vw, 1.65rem); }
+.plan-wizard-modal--diet .wizard-step-heading p,
+.plan-wizard-modal--diet .wizard-field-hint { color: #aebcd0; font-size: 0.875rem; line-height: 1.45; }
+.plan-wizard-modal--diet .wizard-field > label,
+.plan-wizard-modal--diet .wizard-fieldset > legend { color: #e2e8f0; font-size: 0.9375rem; }
+.plan-wizard-modal--diet .wizard-field > label span,
+.plan-wizard-modal--diet .wizard-fieldset > legend span { color: #aebcd0; font-size: 0.875rem; }
+
+.plan-wizard-modal--diet .wizard-field input,
+.plan-wizard-modal--diet .wizard-field select,
+.plan-wizard-modal--diet .wizard-field textarea {
+    min-height: 3rem;
+    border-color: rgba(148, 163, 184, 0.28) !important;
+    border-radius: 12px;
+    color: #f8fafc !important;
+    background: rgba(15, 23, 42, 0.9) !important;
+    font-size: 1rem !important;
+}
+
+.plan-wizard-modal--diet .wizard-field textarea { min-height: 6.5rem; }
+.plan-wizard-modal--diet .wizard-field input:focus,
+.plan-wizard-modal--diet .wizard-field select:focus,
+.plan-wizard-modal--diet .wizard-field textarea:focus { border-color: #60a5fa !important; box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.2); }
+.plan-wizard-modal--diet .wizard-choice--selected { grid-column: auto; }
+.plan-wizard-modal--diet .wizard-choice--selected .wizard-choice__surface,
+.plan-wizard-modal--diet .wizard-choice__surface { min-height: 3rem; padding: 0.7rem 0.8rem; font-size: 0.9375rem; }
+.plan-wizard-modal--diet .wizard-choice input:checked + .wizard-choice__surface { border-color: rgba(96, 165, 250, 0.8); color: #eff6ff; background: rgba(59, 130, 246, 0.16); }
+.plan-wizard-modal--diet .wizard-choice input:checked + .wizard-choice__surface > i { border-color: #60a5fa; color: #0f172a; background: #93c5fd; }
+.plan-wizard-modal--diet .wizard-review { margin: 0 0 1rem; border-color: rgba(96, 165, 250, 0.27); background: rgba(30, 58, 138, 0.17); }
+.plan-wizard-modal--diet .wizard-review__title strong { color: #eff6ff; font-size: 1rem; }
+.plan-wizard-modal--diet .wizard-review__title span { display: none; }
+.plan-wizard-modal--diet .wizard-review__actions { display: flex; flex-wrap: wrap; gap: 0.35rem 0.75rem; margin: 0.75rem 0 0; }
+.plan-wizard-modal--diet .wizard-review__actions .text-button { min-height: 2.75rem; padding: 0.35rem 0.15rem; color: #93c5fd; }
+.plan-wizard-modal--diet .diet-profile-note { padding: 0.85rem 1rem; border: 1px solid rgba(96, 165, 250, 0.24); border-radius: 12px; background: rgba(30, 58, 138, 0.14); }
+.plan-wizard-modal--diet .diet-profile-note strong { color: #eff6ff; font-size: 0.9375rem; }
+.plan-wizard-modal--diet .diet-profile-note p { margin: 0.35rem 0 0.5rem; color: #aebcd0; font-size: 0.875rem; line-height: 1.45; }
+.plan-wizard-modal--diet .diet-profile-note .text-button { min-height: 2.75rem; padding-inline: 0; color: #93c5fd; }
+.plan-wizard-modal--diet .wizard-review dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.plan-wizard-modal--diet .wizard-review dl > div { padding: 0.7rem; background: rgba(15, 23, 42, 0.62); }
+.plan-wizard-modal--diet .wizard-review dt { color: #aebcd0; font-size: 0.75rem; }
+.plan-wizard-modal--diet .wizard-review dd { color: #e2e8f0; font-size: 0.875rem; }
+
+.plan-wizard-modal--diet .diet-wizard-disclosure { margin-top: 0.85rem; border-top: 1px solid rgba(148, 163, 184, 0.23); }
+.plan-wizard-modal--diet .diet-wizard-disclosure > summary { display: flex; align-items: center; gap: 0.4rem; min-height: 3.25rem; cursor: pointer; color: #dbeafe; font-size: 0.9375rem; font-weight: 700; list-style: none; }
+.plan-wizard-modal--diet .diet-wizard-disclosure > summary::-webkit-details-marker { display: none; }
+.plan-wizard-modal--diet .diet-wizard-disclosure > summary span { color: #aebcd0; font-size: 0.8125rem; font-weight: 400; }
+.plan-wizard-modal--diet .diet-wizard-disclosure > summary i { margin-left: auto; color: #93c5fd; transition: transform 160ms ease; }
+.plan-wizard-modal--diet .diet-wizard-disclosure[open] > summary i { transform: rotate(180deg); }
+.plan-wizard-modal--diet .diet-wizard-disclosure__content { display: grid; gap: 0.85rem; padding: 0.5rem 0 0.25rem; }
+.plan-wizard-modal--diet .ingredient-chip__remove { min-width: 2.25rem; min-height: 2.25rem; }
+.plan-wizard-modal--diet .plan-wizard__actions { justify-content: flex-end; padding-block: 0.8rem; background: rgba(8, 15, 29, 0.92); }
+.plan-wizard-modal--diet .plan-wizard__actions > .btn-secondary { display: none; }
+.plan-wizard-modal--diet .plan-wizard__navigation { width: 100%; }
+.plan-wizard-modal--diet #planWizardNext { flex: 1; min-height: 3rem; color: #fff; background: #2563eb; box-shadow: none; }
+.plan-wizard-modal--diet #planWizardNext:hover { background: #1d4ed8; transform: none; }
+
+.plan-wizard-modal--diet .diet-generation-state { display: grid; justify-items: center; align-content: center; min-height: 100%; padding: 2rem 1rem; text-align: center; }
+.plan-wizard-modal--diet .diet-generation-state__icon { width: 4rem; height: 4rem; display: grid; place-items: center; border-radius: 50%; color: #bfdbfe; background: rgba(59, 130, 246, 0.16); font-size: 1.45rem; }
+.plan-wizard-modal--diet .diet-generation-state h4 { margin-top: 1.25rem; color: #f8fafc; font-size: 1.35rem; }
+.plan-wizard-modal--diet .diet-generation-state p { max-width: 25rem; margin-top: 0.5rem; color: #aebcd0; font-size: 0.9375rem; line-height: 1.5; }
+.plan-wizard-modal--diet .diet-generation-state .btn-primary { width: min(100%, 20rem); min-height: 3rem; margin-top: 1.25rem; color: #fff; background: #2563eb; box-shadow: none; }
+.plan-wizard-modal--diet .diet-generation-state dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; width: min(100%, 25rem); margin-top: 1.25rem; text-align: left; }
+.plan-wizard-modal--diet .diet-generation-state dl > div { padding: 0.75rem; border: 1px solid rgba(96, 165, 250, 0.22); border-radius: 10px; background: rgba(15, 23, 42, 0.6); }
+.plan-wizard-modal--diet .diet-generation-state dt { color: #aebcd0; font-size: 0.75rem; }
+.plan-wizard-modal--diet .diet-generation-state dd { margin-top: 0.2rem; color: #eff6ff; font-size: 0.875rem; }
+.plan-wizard-modal--diet.is-generating .sheet-drag-handle { display: none; }
+
+@media (max-width: 768px) {
+    .plan-wizard-modal--diet .plan-wizard__header { min-height: 4.25rem; padding: max(0.75rem, env(safe-area-inset-top)) 1rem 0.7rem; }
+    .plan-wizard-modal--diet .plan-wizard__icon { display: none; }
+    .plan-wizard-modal--diet .plan-wizard__progress { padding: 0.45rem 1rem 0.55rem; }
+    .plan-wizard-modal--diet .plan-wizard__body { padding: 1.15rem 1rem 1.4rem; }
+    .plan-wizard-modal--diet .plan-wizard__actions { padding: 0.75rem 1rem max(0.75rem, env(safe-area-inset-bottom)); }
+    .plan-wizard-modal--diet .wizard-choice-grid { grid-template-columns: 1fr; }
+    .plan-wizard-modal--diet .wizard-review dl,
+    .plan-wizard-modal--diet .diet-generation-state dl { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .plan-wizard-modal--diet .diet-wizard-disclosure > summary i { transition: none; }
+}
+
+#shoppingListModal .modal-content { max-width: 40rem; }
+.shopping-list-details { padding: 0 1rem 1.25rem; color: #dbeafe; }
+.shopping-list-controls { display: flex; flex-wrap: wrap; gap: .65rem; align-items: end; margin-bottom: .65rem; }
+.shopping-list-controls label { display: grid; gap: .25rem; color: #aebcd0; font-size: .875rem; }
+.shopping-list-controls select { min-height: 2.75rem; min-width: 5rem; padding: .45rem .6rem; border: 1px solid rgba(148,163,184,.35); border-radius: .55rem; color: #f8fafc; background: #17233a; font-size: 1rem; }
+.shopping-toggle { display: flex !important; align-items: center; min-height: 2.75rem; padding: 0 .65rem; border: 1px solid rgba(148,163,184,.25); border-radius: .55rem; }
+.shopping-toggle input, .shopping-item input { width: 1.15rem; height: 1.15rem; }
+.shopping-list-meta { margin: .5rem 0 1rem; color: #aebcd0; font-size: .875rem; }
+.shopping-category { margin-top: 1rem; }
+.shopping-category h4 { margin: 0 0 .45rem; color: #bfdbfe; font-size: 1rem; }
+.shopping-category ul { display: grid; gap: .4rem; margin: 0; padding: 0; list-style: none; }
+.shopping-item { display: flex; align-items: center; justify-content: space-between; gap: .65rem; min-height: 3rem; padding: .55rem .65rem; border: 1px solid rgba(148,163,184,.2); border-radius: .6rem; background: rgba(15,23,42,.45); }
+.shopping-item label { display: grid; grid-template-columns: auto 1fr; column-gap: .55rem; align-items: center; min-width: 0; flex: 1; }
+.shopping-item label span { color: #f8fafc; font-size: 1rem; }
+.shopping-item label small { grid-column: 2; color: #aebcd0; font-size: .8125rem; }
+.shopping-item.is-checked label span { color: #94a3b8; text-decoration: line-through; }
+.shopping-substitute { min-height: 2.5rem; padding: .35rem .55rem; border: 0; border-radius: .45rem; color: #bfdbfe; background: rgba(37,99,235,.16); font-size: .8125rem; }
+.shopping-share-text { width: 100%; min-height: 5rem; margin-top: 1rem; padding: .7rem; border: 1px solid rgba(148,163,184,.22); border-radius: .55rem; color: #cbd5e1; background: #0f172a; font: .8125rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+@media (max-width: 768px) { #shoppingListModal .modal-content { width: 100%; max-width: none; } .shopping-list-controls { align-items: stretch; } .shopping-list-controls > * { flex: 1 1 100%; } .shopping-list-controls .shopping-toggle { justify-content: flex-start; } }

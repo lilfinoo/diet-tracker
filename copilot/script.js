@@ -2779,15 +2779,20 @@ let dietDailyMutationSlotKey = null;
 let dietPlansLibraryLoaded = false;
 
 function dietPlanItemText(item) {
-    if (!item || typeof item !== "object") return String(item || "");
-    const quantity = Number(item.quantity);
-    const amount = Number.isFinite(quantity) ? quantity : "";
-    return `${amount} ${item.unit || "g"} de ${item.name || item.foodId || "alimento"}`.trim();
+    return window.formatDietPlanItem?.(item) || String(item || "");
 }
 
 function dietPlanItemsText(meal) {
-    const items = Array.isArray(meal.items) ? meal.items.map(dietPlanItemText).filter(Boolean) : [];
-    return items.length ? items.join(", ") : (meal.description || "");
+    return window.formatDietPlanItemsText?.(meal) || (Array.isArray(meal?.items) ? meal.items.map(dietPlanItemText).filter(Boolean).join(", ") : (meal?.description || ""));
+}
+
+function dietPlanItemsRawText(meal) {
+    const items = Array.isArray(meal?.items) ? meal.items.map((item) => {
+        if (!item || typeof item !== "object") return String(item || "");
+        const quantity = Number(item.quantity);
+        return `${Number.isFinite(quantity) ? quantity : ""} ${item.unit || "g"} de ${item.name || item.foodId || "alimento"}`.trim();
+    }).filter(Boolean) : [];
+    return items.length ? items.join(", ") : (meal?.description || "");
 }
 
 function getStoredCardapioDay() {
@@ -2893,7 +2898,7 @@ function renderTodayCardapio(dailyView, errorMessage) {
             <strong>Opção ${index + 1}</strong><span>${escapeHtml(dietPlanItemsText(option))}</span>
         </button>`).join('')}</div>` : '';
     const disabled = todayDietMutationSlotKey === slot.slot_key ? ' disabled' : '';
-    bodyEl.innerHTML = `<div class="today-meal"><div class="today-meal__intro"><span class="today-meal__icon"><i data-lucide="${mealIconName(meal.meal_type)}" aria-hidden="true"></i></span><div><p class="today-muted">Opção ${optionPosition} de ${alternatives.length}</p><h3>${escapeHtml(slot.label || meal.meal_type)}</h3></div></div><p class="today-food-description">${escapeHtml(dietPlanItemsText(meal))}</p><button type="button" class="today-food-primary" onclick="quickLogDailyMeal('${slot.slot_key}', 'exact')"${disabled}><i data-lucide="check" aria-hidden="true"></i> Comi isso</button><div class="today-food-secondary"><button type="button" class="text-button" onclick="quickLogDailyMeal('${slot.slot_key}', 'describe')"${disabled}>Comi diferente</button>${alternatives.length > 1 ? `<button type="button" class="text-button" onclick="toggleTodayDietOptions('${slot.slot_key}')" aria-expanded="${selectorOpen}"${disabled}>Trocar opção</button>` : ''}</div>${selector}</div>`;
+    bodyEl.innerHTML = `<div class="today-meal"><div class="today-meal__intro"><span class="today-meal__icon"><i data-lucide="${mealIconName(meal.meal_type)}" aria-hidden="true"></i></span><div><p class="today-muted">Opção ${optionPosition} de ${alternatives.length}</p><h3>${escapeHtml(slot.label || meal.meal_type)}</h3></div></div><p class="today-food-description">${escapeHtml(dietPlanItemsText(meal))}</p><button type="button" class="today-food-primary" onclick="quickLogDailyMeal('${slot.slot_key}', 'exact')"${disabled}><i data-lucide="check" aria-hidden="true"></i> Comi isso</button><div class="today-food-secondary"><button type="button" class="text-button" onclick="quickLogDailyMeal('${slot.slot_key}', 'describe')"${disabled}>Comi diferente</button><button type="button" class="text-button diet-daily-skip" onclick="quickLogDailyMeal('${slot.slot_key}', 'skip')"${disabled}>Pular refeição</button>${alternatives.length > 1 ? `<button type="button" class="text-button" onclick="toggleTodayDietOptions('${slot.slot_key}')" aria-expanded="${selectorOpen}"${disabled}>Trocar opção</button>` : ''}</div>${selector}</div>`;
 }
 
 function renderDietCurrentPlanHub(plan, errorMessage) {
@@ -2997,12 +3002,12 @@ async function quickLogDailyMeal(slotKey, mode) {
             headers: { "Content-Type": "application/json" },
             credentials: "include",
             body: JSON.stringify({
-                result: "consumed_planned",
+                result: mode === "skip" ? "skipped" : "consumed_planned",
                 diet_plan_meal_id: meal.id
             })
         });
         if (response.ok) {
-            showToast("Refeição registrada!", "success");
+            showToast(mode === "skip" ? "Refeição marcada como pulada." : "Refeição registrada!", "success");
             await Promise.all([loadDietEntries({ showLoading: false }), loadTodayCardapio()]);
         } else {
             const errorData = await response.json();
@@ -3308,7 +3313,7 @@ async function openEditPlanMealModal(mealId) {
     const meal = findPlanMeal(mealId);
     if (!meal) return;
     getElement("editPlanMealId").value = meal.id;
-    getElement("editPlanMealDescription").value = dietPlanItemsText(meal);
+    getElement("editPlanMealDescription").value = dietPlanItemsRawText(meal);
     getElement("editPlanMealNotes").value = meal.notes || "";
     getElement("editPlanMealTitle").textContent = `Editar ${meal.meal_type}`;
     openAppModal(getElement("editPlanMealModal"));

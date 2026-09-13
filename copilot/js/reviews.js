@@ -146,7 +146,7 @@
         const dietMeals = asArray(plan.meals);
         const content = workoutDays.length
             ? workoutDays.map((day) => `<div><strong>${esc(day.title)}</strong>${asArray(day.exercises).map((exercise) => `<p>${esc(exercise.name)} · ${esc(exercise.sets)} × ${esc(exercise.reps)} · ${esc(exercise.rest_seconds)}s</p>`).join("")}</div>`).join("")
-            : ["Dia 1", "Dia 2", "Dia 3"].map((day) => `<div><strong>${day}</strong>${dietMeals.filter((meal) => meal.day_of_week === day).map((meal) => `<p>${esc(meal.meal_type)} · ${esc(asArray(meal.items).map((item) => typeof item === "object" ? item.name : item).join(", ") || meal.description)}</p>`).join("")}</div>`).join("");
+            : ["Dia 1", "Dia 2", "Dia 3"].map((day) => `<div><strong>${day}</strong>${dietMeals.filter((meal) => meal.day_of_week === day).map((meal) => `<p>${esc(meal.meal_type)} · ${esc(window.formatDietPlanItemsText?.(meal) || asArray(meal.items).map((item) => typeof item === "object" ? item.name : item).join(", ") || meal.description)}</p>`).join("")}</div>`).join("");
         return `<section class="review-plan"><h4>${esc(label)}</h4><h5>${esc(plan.title)}</h5>${content}</section>`;
     }
 

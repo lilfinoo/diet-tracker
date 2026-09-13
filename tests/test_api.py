@@ -314,6 +314,42 @@ def test_workout_generation_uses_fallback_model(app, monkeypatch):
     assert models == ["primary-model", "fallback-model"]
 
 
+def test_workout_generation_retries_models_after_temporary_unavailability(app, monkeypatch):
+    models = []
+    waits = []
+
+    def completion(*args, **kwargs):
+        models.append(kwargs["model"])
+        if len(models) < 3:
+            raise AIServiceUnavailableError("busy")
+        return '{"type":"workout_plan","title":"Plano","description":"Teste","days":[]}'
+
+    monkeypatch.setattr(ai, "_completion", completion)
+    monkeypatch.setattr(ai.time, "sleep", waits.append)
+    questionnaire = {
+        "goal": "hypertrophy",
+        "experience_level": "beginner",
+        "days_per_week": 2,
+        "split_type": "full_body",
+        "session_duration": 45,
+        "equipment": ["full_gym"],
+        "limitations": "",
+        "priorities": "",
+        "avoid_exercises": "",
+    }
+    with app.app_context():
+        app.config.update(
+            GEMINI_WORKOUT_MODEL="primary-model",
+            GEMINI_WORKOUT_FALLBACK_MODEL="fallback-model",
+            GEMINI_WORKOUT_UNAVAILABLE_RETRIES=2,
+        )
+        result = ai.generate_workout_plan(questionnaire, None)
+
+    assert result["type"] == "workout_plan"
+    assert models == ["primary-model", "fallback-model", "primary-model"]
+    assert waits == [1]
+
+
 def test_workout_retry_sends_only_invalid_days_and_previous_plan(app, monkeypatch):
     captured = {}
 

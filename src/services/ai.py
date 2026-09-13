@@ -424,34 +424,43 @@ Corrija esses dias usando os respectivos required_days. Não retorne nem altere 
     contents = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     primary_model = current_app.config["GEMINI_WORKOUT_MODEL"]
     fallback_model = current_app.config["GEMINI_WORKOUT_FALLBACK_MODEL"]
-    try:
-        response = _completion(
-            system_instruction,
-            contents,
-            current_app.config["GEMINI_PLAN_MAX_TOKENS"],
-            0.25,
-            json_response=True,
-            model=primary_model,
-            json_schema=schema,
-        )
-    except AIServiceUnavailableError:
-        if not fallback_model or fallback_model == primary_model:
-            raise
-        current_app.logger.warning(
-            "Workout model %s unavailable; trying fallback %s",
-            primary_model,
-            fallback_model,
-        )
-        response = _completion(
-            system_instruction,
-            contents,
-            current_app.config["GEMINI_PLAN_MAX_TOKENS"],
-            0.2,
-            json_response=True,
-            model=fallback_model,
-            json_schema=schema,
-        )
-    return _json_object(response)
+    models = [primary_model] + ([fallback_model] if fallback_model and fallback_model != primary_model else [])
+    unavailable_attempts = max(1, current_app.config["GEMINI_WORKOUT_UNAVAILABLE_RETRIES"])
+    last_error = None
+
+    for attempt in range(unavailable_attempts):
+        for model_index, model in enumerate(models):
+            try:
+                response = _completion(
+                    system_instruction,
+                    contents,
+                    current_app.config["GEMINI_PLAN_MAX_TOKENS"],
+                    0.25 if model_index == 0 else 0.2,
+                    json_response=True,
+                    model=model,
+                    json_schema=schema,
+                )
+                return _json_object(response)
+            except AIServiceUnavailableError as error:
+                last_error = error
+                if model_index < len(models) - 1:
+                    current_app.logger.warning(
+                        "Workout model %s unavailable; trying fallback %s",
+                        model,
+                        models[model_index + 1],
+                    )
+
+        if attempt < unavailable_attempts - 1:
+            delay = attempt + 1
+            current_app.logger.warning(
+                "Workout generation models unavailable; retrying in %ss (attempt %s/%s)",
+                delay,
+                attempt + 1,
+                unavailable_attempts,
+            )
+            time.sleep(delay)
+
+    raise last_error or AIServiceUnavailableError("A IA está temporariamente indisponível.")
 
 
 def _diet_meal_schema(include_optional=True):

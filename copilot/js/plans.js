@@ -84,7 +84,7 @@
         stability_ball: "Bola suíça"
     };
     const WIZARD_STEPS = {
-        diet: ["Objetivo", "Preferências", "Revisão"],
+        diet: ["Base", "Cuidados", "Revisão"],
         workout: ["Rotina", "Estrutura", "Revisão"]
     };
     const FIELD_STEPS = {
@@ -92,12 +92,14 @@
             goal: 0,
             meals_per_day: 0,
             diet_pattern: 0,
-            training_days_per_week: 0,
-            change_pace: 0,
+            training_days_per_week: 1,
+            change_pace: 2,
             target_calories: 2,
             target_protein: 2,
             target_carbs: 2,
             target_fat: 2,
+            custom_targets: 2,
+            nutrition_targets: 2,
             allergies: 1,
             intolerances: 1,
             disliked_foods: 1,
@@ -111,7 +113,7 @@
             goal: 0,
             experience_level: 0,
             days_per_week: 0,
-            split_type: 1,
+            split_type: 2,
             session_duration: 1,
             equipment: 1,
             limitations: 2,
@@ -157,10 +159,11 @@
     }
 
     const wizardMemory = {
-        diet: { step: 0, answers: defaultDietAnswers(), error: "", fieldErrors: {}, generating: false },
+        diet: { step: 0, answers: defaultDietAnswers(), error: "", fieldErrors: {}, generating: false, preferencesOpen: false, customizationOpen: false, targetsOpen: false, ingredientDraft: "" },
         workout: { step: 0, answers: defaultWorkoutAnswers(), error: "", fieldErrors: {}, generating: false }
     };
     const dietView = { plan: null, selectedDay: 0, adherence: null, adherenceDate: null };
+    const dietShoppingState = { planId: null, people: 1, hideAvailable: false, checked: new Set(), substitutions: new Map() };
     const workoutSharePhotoCache = new Map();
     const shareLogo = new Image();
     shareLogo.src = "/assets/ChatGPT Image 26 de ago. de 2026, 01_07_52.png";
@@ -245,7 +248,7 @@
         try {
             response = await fetch(`${API_BASE}${path}`, fetchOptions);
         } catch (error) {
-            const connectionError = new Error("Sem conexão. Seus dados continuam salvos neste dispositivo e serão sincronizados automaticamente.");
+            const connectionError = new Error(options.offlineMessage || "Sem conexão. Seus dados continuam salvos neste dispositivo e serão sincronizados automaticamente.");
             connectionError.cause = error;
             connectionError.code = "offline";
             throw connectionError;
@@ -271,7 +274,11 @@
             throw requestError;
         }
         if (response.status === 202 && data.job_id) {
-            return window.waitForAIJob(data);
+            options.onQueued?.(data);
+            return window.waitForAIJob(data, options.jobTimeoutMilliseconds, {
+                onStatus: options.onJobStatus,
+                jobLabel: options.jobLabel
+            });
         }
         return data;
     }
@@ -432,28 +439,24 @@
     function workoutEquipmentPicker(state) {
         const selected = new Set(asArray(state.answers.equipment));
         const detailedEquipment = Object.fromEntries(
-            Object.entries(WORKOUT_EQUIPMENT).filter(([value]) => !["full_gym", "bodyweight"].includes(value))
+            Object.entries(WORKOUT_EQUIPMENT).filter(([value]) => value !== "full_gym")
         );
-        const hasDetailedSelection = Object.keys(detailedEquipment).some((value) => selected.has(value));
-        const detailsOpen = Boolean(state.customEquipmentOpen || hasDetailedSelection);
-        const mainOptions = [
-            ["full_gym", "Academia completa"],
-            ["bodyweight", "Peso corporal"],
-        ].map(([value, label]) => `
-            <label class="wizard-check">
-                <input type="checkbox" name="equipment" value="${value}"${selected.has(value) ? " checked" : ""}${invalidAttributes("equipment", state)}>
-                <span class="wizard-check__surface"><i class="fas fa-check" aria-hidden="true"></i><span>${label}</span></span>
-            </label>
-        `).join("");
+        const mode = state.equipmentMode || (selected.has("full_gym") ? "full_gym" : "bodyweight");
+        const customOpen = mode === "custom";
         return `
-            <div class="wizard-check-grid"${state.fieldErrors.equipment ? ' aria-describedby="wizard-error-equipment"' : ""}>
-                ${mainOptions}
-                <label class="wizard-check">
-                    <input type="checkbox" name="equipment_picker" value="custom"${detailsOpen ? " checked" : ""}>
-                    <span class="wizard-check__surface"><i class="fas fa-check" aria-hidden="true"></i><span>Escolher equipamentos</span></span>
-                </label>
+            <div class="workout-equipment-modes wizard-choice-grid wizard-choice-grid--compact"${state.fieldErrors.equipment ? ' aria-describedby="wizard-error-equipment"' : ""}>
+                ${[
+                    ["full_gym", "Academia completa"],
+                    ["bodyweight", "Só peso corporal"],
+                    ["custom", "Personalizar"],
+                ].map(([value, label]) => `
+                    <label class="wizard-choice">
+                        <input type="radio" name="equipment_mode" value="${value}"${mode === value ? " checked" : ""}>
+                        <span class="wizard-choice__surface"><span>${label}</span><i class="fas fa-check" aria-hidden="true"></i></span>
+                    </label>
+                `).join("")}
             </div>
-            ${detailsOpen ? `<div class="wizard-equipment-details"><span>Equipamentos específicos</span>${checkboxCards("equipment", detailedEquipment, state.answers.equipment, state)}</div>` : fieldError("equipment", state)}`;
+            ${customOpen ? `<div class="wizard-equipment-details"><span>Selecione o que você tem disponível</span>${checkboxCards("equipment", detailedEquipment, state.answers.equipment, state)}</div>` : fieldError("equipment", state)}`;
     }
 
     function loadIngredientPool() {
@@ -491,22 +494,39 @@
     function ingredientOptions(query) {
         const q = String(query || "").toLowerCase();
         const matches = q ? INGREDIENT_POOL.filter((name) => name.toLowerCase().indexOf(q) !== -1) : INGREDIENT_POOL;
-        return matches.map((name) => `<option value="${esc(name)}"></option>`).join("");
+        return matches.slice(0, 30).map((name) => `<option value="${esc(name)}"></option>`).join("");
     }
 
     function addIngredient(value) {
         const state = wizardMemory[activeWizardType];
+        if (!state || activeWizardType !== "diet") return false;
         const answers = state.answers;
         const token = String(value || "").trim().replace(/^;+|;+$/g, "");
-        if (!token) return;
+        if (!token) return false;
         const tokens = parseIngredientTokens(answers.available_ingredients);
-        if (tokens.indexOf(token) !== -1) return;
+        if (token.length > 80) {
+            state.fieldErrors.available_ingredients = "Cada ingrediente deve ter até 80 caracteres.";
+            return false;
+        }
+        if (tokens.indexOf(token) !== -1) return false;
+        if (tokens.length >= 24) {
+            state.fieldErrors.available_ingredients = "Você pode informar no máximo 24 ingredientes.";
+            return false;
+        }
         tokens.push(token);
-        if (tokens.length > 24) return;
         answers.available_ingredients = tokens.join("; ");
         delete state.fieldErrors.available_ingredients;
+        state.ingredientDraft = "";
         const chips = byId("ingredient-chips");
         if (chips) chips.innerHTML = ingredientChipsMarkup(answers.available_ingredients);
+        return true;
+    }
+
+    function commitIngredientDraft(state) {
+        if (!state?.ingredientDraft?.trim()) return true;
+        const added = addIngredient(state.ingredientDraft);
+        if (added) state.ingredientDraft = "";
+        return added;
     }
 
     function removeIngredient(value) {
@@ -514,6 +534,7 @@
         if (!state) return;
         const tokens = parseIngredientTokens(state.answers.available_ingredients).filter((token) => token !== String(value));
         state.answers.available_ingredients = tokens.join("; ");
+        delete state.fieldErrors.available_ingredients;
         const chips = byId("ingredient-chips");
         if (chips) chips.innerHTML = ingredientChipsMarkup(state.answers.available_ingredients);
     }
@@ -522,60 +543,62 @@
         const answers = state.answers;
         if (state.step === 0) {
             return `
-                <div class="wizard-step-heading" tabindex="-1"><span>Etapa 1 de 3</span><h4>Qual resultado você busca?</h4><p>Defina a base do plano alimentar. Você poderá revisar tudo antes de gerar.</p></div>
-                <fieldset class="wizard-fieldset"><legend>Objetivo principal</legend>${radioCards("goal", DIET_GOALS, answers.goal, state)}</fieldset>
-                <div class="wizard-field-row">
-                    <fieldset class="wizard-fieldset"><legend>Refeições por dia</legend>${radioCards("meals_per_day", { 3: "3 refeições", 4: "4 refeições", 5: "5 refeições" }, answers.meals_per_day, state, true)}</fieldset>
-                    <div class="wizard-field">
-                        <label for="wizard-diet-pattern">Padrão alimentar</label>
-                        <select id="wizard-diet-pattern" name="diet_pattern"${invalidAttributes("diet_pattern", state)}>${selectOptions(DIET_PATTERNS, answers.diet_pattern)}</select>
-                        ${fieldError("diet_pattern", state)}
-                    </div>
-                </div>
-                <div class="wizard-field-row">
-                    <div class="wizard-field"><label for="wizard-training-days">Treinos por semana</label><select id="wizard-training-days" name="training_days_per_week"${invalidAttributes("training_days_per_week", state)}>${selectOptions({ 0: "Não treino", 1: "1 dia", 2: "2 dias", 3: "3 dias", 4: "4 dias", 5: "5 dias", 6: "6 dias", 7: "7 dias" }, answers.training_days_per_week)}</select>${fieldError("training_days_per_week", state)}</div>
-                    ${["fat_loss", "muscle_gain"].includes(answers.goal) ? `<fieldset class="wizard-fieldset"><legend>Velocidade para atingir o objetivo</legend>${radioCards("change_pace", CHANGE_PACES, answers.change_pace, state, true)}<small class="wizard-field-hint">${answers.goal === "fat_loss" ? "Gradual reduz cerca de 10% das calorias; mais rápida, 15%." : "Gradual aumenta cerca de 5% das calorias; mais rápida, 8%."} A opção mais rápida exige mais atenção à recuperação e à adesão.</small></fieldset>` : `<div class="wizard-field"><span class="field-label">Meta energética</span><p class="wizard-field-hint">Para manutenção e saúde geral, não aplicamos redução nem aumento automático de calorias.</p></div>`}
-                </div>`;
+                <div class="wizard-step-heading" tabindex="-1"><h4>Qual é a base do seu plano?</h4><p>Escolha só o essencial. Você poderá personalizar os detalhes na revisão.</p></div>
+                <div class="wizard-field"><label for="wizard-diet-goal">Objetivo principal</label><select id="wizard-diet-goal" name="goal"${invalidAttributes("goal", state)}><option value="">Selecione um objetivo</option>${selectOptions(DIET_GOALS, answers.goal)}</select>${fieldError("goal", state)}</div>
+                <fieldset class="wizard-fieldset"><legend>Refeições por dia</legend>${radioCards("meals_per_day", { 3: "3 refeições", 4: "4 refeições", 5: "5 refeições" }, answers.meals_per_day, state, true)}</fieldset>
+                <div class="wizard-field"><label for="wizard-diet-pattern">Padrão alimentar</label><select id="wizard-diet-pattern" name="diet_pattern"${invalidAttributes("diet_pattern", state)}>${selectOptions(DIET_PATTERNS, answers.diet_pattern)}</select>${fieldError("diet_pattern", state)}</div>`;
         }
         if (state.step === 1) {
             return `
-                <div class="wizard-step-heading" tabindex="-1"><span>Etapa 2 de 3</span><h4>Preferências e cuidados</h4><p>Separe vários itens com vírgulas. Deixe em branco o que não se aplicar.</p></div>
-                <div class="wizard-field-grid">
-                    <div class="wizard-field"><label for="wizard-allergies">Alergias</label><input id="wizard-allergies" name="allergies" value="${esc(answers.allergies)}" placeholder="Ex.: amendoim, camarão" maxlength="970"${invalidAttributes("allergies", state)}><small class="wizard-field-hint">Confira sempre rótulos e risco de contaminação cruzada.</small>${fieldError("allergies", state)}</div>
-                    <div class="wizard-field"><label for="wizard-intolerances">Intolerâncias</label><input id="wizard-intolerances" name="intolerances" value="${esc(answers.intolerances)}" placeholder="Ex.: lactose, glúten" maxlength="970"${invalidAttributes("intolerances", state)}>${fieldError("intolerances", state)}</div>
-                    <div class="wizard-field"><label for="wizard-disliked-foods">Alimentos que não gosta</label><input id="wizard-disliked-foods" name="disliked_foods" value="${esc(answers.disliked_foods)}" placeholder="Ex.: berinjela, coentro" maxlength="970"${invalidAttributes("disliked_foods", state)}>${fieldError("disliked_foods", state)}</div>
-                    <div class="wizard-field"><label for="wizard-preferred-foods">Alimentos preferidos</label><input id="wizard-preferred-foods" name="preferred_foods" value="${esc(answers.preferred_foods)}" placeholder="Ex.: arroz, frango, banana" maxlength="970"${invalidAttributes("preferred_foods", state)}>${fieldError("preferred_foods", state)}</div>
-                </div>`;
+                <div class="wizard-step-heading" tabindex="-1"><h4>Rotina e cuidados</h4><p>Essas informações ajudam a ajustar as quantidades e evitar alimentos inadequados.</p></div>
+                <div class="wizard-field"><label for="wizard-training-days">Treinos por semana</label><select id="wizard-training-days" name="training_days_per_week"${invalidAttributes("training_days_per_week", state)}>${selectOptions({ 0: "Não treino", 1: "1 dia", 2: "2 dias", 3: "3 dias", 4: "4 dias", 5: "5 dias", 6: "6 dias", 7: "7 dias" }, answers.training_days_per_week)}</select>${fieldError("training_days_per_week", state)}</div>
+                <div class="diet-profile-note" role="note"><strong>Restrições alimentares</strong><p>Alergias e intolerâncias são gerenciadas no seu perfil para que todos os planos respeitem as mesmas informações.</p><button type="button" class="text-button" data-wizard-action="open-profile">Editar perfil</button></div>
+                <details class="diet-wizard-disclosure" data-diet-preferences${state.preferencesOpen || Boolean(state.fieldErrors.disliked_foods || state.fieldErrors.preferred_foods) ? " open" : ""}>
+                    <summary>Preferências alimentares <span>opcional</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+                    <div class="diet-wizard-disclosure__content">
+                        <div class="wizard-field"><label for="wizard-disliked-foods">Alimentos que não gosta</label><input id="wizard-disliked-foods" name="disliked_foods" value="${esc(answers.disliked_foods)}" placeholder="Ex.: berinjela, coentro" maxlength="970"${invalidAttributes("disliked_foods", state)}>${fieldError("disliked_foods", state)}</div>
+                        <div class="wizard-field"><label for="wizard-preferred-foods">Alimentos preferidos</label><input id="wizard-preferred-foods" name="preferred_foods" value="${esc(answers.preferred_foods)}" placeholder="Ex.: arroz, frango, banana" maxlength="970"${invalidAttributes("preferred_foods", state)}>${fieldError("preferred_foods", state)}</div>
+                    </div>
+                </details>`;
         }
+        const customizationOpen = state.customizationOpen || Boolean(state.fieldErrors.budget || state.fieldErrors.prep_minutes || state.fieldErrors.available_ingredients || state.fieldErrors.notes);
+        const targetsOpen = state.targetsOpen || Boolean(state.fieldErrors.change_pace || state.fieldErrors.target_calories || state.fieldErrors.target_protein || state.fieldErrors.target_carbs || state.fieldErrors.target_fat || state.fieldErrors.custom_targets || state.fieldErrors.nutrition_targets);
         return `
-            <div class="wizard-step-heading" tabindex="-1"><span>Etapa 3 de 3</span><h4>Rotina e revisão</h4><p>Ajuste o preparo e confirme as escolhas antes de criar seus três dias.</p></div>
-            <div class="wizard-field-row">
-                <fieldset class="wizard-fieldset"><legend>Orçamento</legend>${radioCards("budget", BUDGETS, answers.budget, state, true)}</fieldset>
-                <div class="wizard-field"><label for="wizard-prep-minutes">Tempo máximo de preparo</label><select id="wizard-prep-minutes" name="prep_minutes"${invalidAttributes("prep_minutes", state)}>${selectOptions({ 15: "Até 15 min", 30: "Até 30 min", 45: "Até 45 min", 60: "Até 60 min" }, answers.prep_minutes)}</select>${fieldError("prep_minutes", state)}</div>
-            </div>
-            <div class="wizard-field wizard-field--ingredients">
-                <label for="wizard-ingredient-input">Selecionar ingredientes <span>opcional</span></label>
-                <div class="ingredient-picker">
-                    <input id="wizard-ingredient-input" name="available_ingredients" list="wizard-ingredient-options" placeholder="Digite um ingrediente e pressione Enter" autocomplete="off" maxlength="160" value=""${invalidAttributes("available_ingredients", state)}>
-                    <datalist id="wizard-ingredient-options">${ingredientOptions(ingredientLastToken(answers.available_ingredients))}</datalist>
-                    <button type="button" class="ingredient-add" data-add-ingredient aria-label="Adicionar ingrediente"><i class="fas fa-plus" aria-hidden="true"></i></button>
+            <div class="wizard-step-heading" tabindex="-1"><h4>Confira seu plano</h4><p>Revise o essencial. Os ajustes opcionais ficam disponíveis abaixo.</p></div>
+            ${renderWizardReview("diet", answers)}
+            <details class="diet-wizard-disclosure" data-diet-customization${customizationOpen ? " open" : ""}>
+                <summary>Personalizar preparo <span>opcional</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+                <div class="diet-wizard-disclosure__content">
+                    <fieldset class="wizard-fieldset"><legend>Orçamento</legend>${radioCards("budget", BUDGETS, answers.budget, state, true)}</fieldset>
+                    <div class="wizard-field"><label for="wizard-prep-minutes">Tempo máximo de preparo</label><select id="wizard-prep-minutes" name="prep_minutes"${invalidAttributes("prep_minutes", state)}>${selectOptions({ 15: "Até 15 min", 30: "Até 30 min", 45: "Até 45 min", 60: "Até 60 min" }, answers.prep_minutes)}</select>${fieldError("prep_minutes", state)}</div>
+                    <div class="wizard-field wizard-field--ingredients">
+                        <label for="wizard-ingredient-input">Ingredientes disponíveis <span>opcional</span></label>
+                        <div class="ingredient-picker">
+                            <input id="wizard-ingredient-input" name="available_ingredients" list="wizard-ingredient-options" placeholder="Digite e pressione Enter" autocomplete="off" maxlength="160" value="${esc(state.ingredientDraft || "")}"${invalidAttributes("available_ingredients", state)}>
+                            <datalist id="wizard-ingredient-options">${ingredientOptions(ingredientLastToken(state.ingredientDraft || ""))}</datalist>
+                            <button type="button" class="ingredient-add" data-add-ingredient aria-label="Adicionar ingrediente"><i class="fas fa-plus" aria-hidden="true"></i></button>
+                        </div>
+                        <div class="ingredient-chips" id="ingredient-chips">${ingredientChipsMarkup(answers.available_ingredients)}</div>
+                        <small class="wizard-field-hint">A IA prioriza esses ingredientes, quando possível.</small>
+                        ${fieldError("available_ingredients", state)}
+                    </div>
+                    <div class="wizard-field"><label for="wizard-diet-notes">Observações finais <span>opcional</span></label><textarea id="wizard-diet-notes" name="notes" rows="3" maxlength="500" placeholder="Conte algo importante sobre sua rotina."${invalidAttributes("notes", state)}>${esc(answers.notes)}</textarea><small class="wizard-character-count">${String(answers.notes || "").length}/500</small>${fieldError("notes", state)}</div>
                 </div>
-                <div class="ingredient-chips" id="ingredient-chips">${ingredientChipsMarkup(answers.available_ingredients)}</div>
-                <small class="wizard-field-hint">Informe o que você tem em casa. A IA monta o plano usando principalmente esses ingredientes.</small>
-                ${fieldError("available_ingredients", state)}
-            </div>
-            <fieldset class="wizard-fieldset">
-                <legend>Metas nutricionais <span>opcional</span></legend>
-                <p class="wizard-field-hint">Preencha somente o que desejar. Campos vazios serão calculados com idade, sexo, altura, peso, atividade, treinos e objetivo.</p>
-                <div class="wizard-field-grid">
-                    <div class="wizard-field"><label for="wizard-target-calories">Calorias por dia</label><input id="wizard-target-calories" name="target_calories" type="number" min="800" max="7000" step="1" value="${esc(answers.target_calories)}" placeholder="Automático"${invalidAttributes("target_calories", state)}>${fieldError("target_calories", state)}</div>
-                    <div class="wizard-field"><label for="wizard-target-protein">Proteína (g)</label><input id="wizard-target-protein" name="target_protein" type="number" min="20" max="500" step="1" value="${esc(answers.target_protein)}" placeholder="Automático"${invalidAttributes("target_protein", state)}>${fieldError("target_protein", state)}</div>
-                    <div class="wizard-field"><label for="wizard-target-carbs">Carboidratos (g)</label><input id="wizard-target-carbs" name="target_carbs" type="number" min="20" max="1200" step="1" value="${esc(answers.target_carbs)}" placeholder="Automático"${invalidAttributes("target_carbs", state)}>${fieldError("target_carbs", state)}</div>
-                    <div class="wizard-field"><label for="wizard-target-fat">Gorduras (g)</label><input id="wizard-target-fat" name="target_fat" type="number" min="15" max="300" step="1" value="${esc(answers.target_fat)}" placeholder="Automático"${invalidAttributes("target_fat", state)}>${fieldError("target_fat", state)}</div>
+            </details>
+            <details class="diet-wizard-disclosure" data-diet-targets${targetsOpen ? " open" : ""}>
+                <summary>Metas e ritmo <span>opcional</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+                <div class="diet-wizard-disclosure__content">
+                    ${["fat_loss", "muscle_gain"].includes(answers.goal) ? `<fieldset class="wizard-fieldset"><legend>Velocidade para atingir o objetivo</legend>${radioCards("change_pace", CHANGE_PACES, answers.change_pace, state, true)}<small class="wizard-field-hint">${answers.goal === "fat_loss" ? "Gradual reduz cerca de 10% das calorias; mais rápida, 15%." : "Gradual aumenta cerca de 5% das calorias; mais rápida, 8%."}</small></fieldset>` : `<p class="wizard-field-hint">As calorias serão calculadas automaticamente para este objetivo.</p>`}
+                    <p class="wizard-field-hint">Campos vazios são calculados com seu perfil, atividade, treinos e objetivo.</p>
+                    ${fieldError("custom_targets", state)}${fieldError("nutrition_targets", state)}
+                    <div class="wizard-field-grid">
+                        <div class="wizard-field"><label for="wizard-target-calories">Calorias por dia</label><input id="wizard-target-calories" name="target_calories" type="number" min="800" max="7000" step="1" value="${esc(answers.target_calories)}" placeholder="Automático"${invalidAttributes("target_calories", state)}>${fieldError("target_calories", state)}</div>
+                        <div class="wizard-field"><label for="wizard-target-protein">Proteína (g)</label><input id="wizard-target-protein" name="target_protein" type="number" min="20" max="500" step="1" value="${esc(answers.target_protein)}" placeholder="Automático"${invalidAttributes("target_protein", state)}>${fieldError("target_protein", state)}</div>
+                        <div class="wizard-field"><label for="wizard-target-carbs">Carboidratos (g)</label><input id="wizard-target-carbs" name="target_carbs" type="number" min="20" max="1200" step="1" value="${esc(answers.target_carbs)}" placeholder="Automático"${invalidAttributes("target_carbs", state)}>${fieldError("target_carbs", state)}</div>
+                        <div class="wizard-field"><label for="wizard-target-fat">Gorduras (g)</label><input id="wizard-target-fat" name="target_fat" type="number" min="15" max="300" step="1" value="${esc(answers.target_fat)}" placeholder="Automático"${invalidAttributes("target_fat", state)}>${fieldError("target_fat", state)}</div>
+                    </div>
                 </div>
-            </fieldset>
-            <div class="wizard-field"><label for="wizard-diet-notes">Observações finais <span>opcional</span></label><textarea id="wizard-diet-notes" name="notes" rows="3" maxlength="500" placeholder="Conte algo importante sobre sua rotina."${invalidAttributes("notes", state)}>${esc(answers.notes)}</textarea><small class="wizard-character-count">${String(answers.notes || "").length}/500</small>${fieldError("notes", state)}</div>
-            ${renderWizardReview("diet", answers)}`;
+            </details>`;
     }
 
     function compatibleSplits(days) {
@@ -590,40 +613,83 @@
         const options = compatibleSplits(state.answers.days_per_week);
         const invalid = Boolean(state.fieldErrors.split_type);
         return `<div class="wizard-choice-grid wizard-choice-grid--compact"${invalid ? ' aria-describedby="wizard-error-split_type"' : ""}>${Object.entries(options).map(([value, label]) => `
-            <label class="wizard-choice${state.answers.split_type === value ? " wizard-choice--selected" : ""}">
+            <label class="wizard-choice">
                 <input type="radio" name="split_type" value="${esc(value)}"${state.answers.split_type === value ? " checked" : ""}${invalidAttributes("split_type", state)}>
                 <span class="wizard-choice__surface"><span>${esc(label)}</span><i class="fas fa-check" aria-hidden="true"></i></span>
             </label>
         `).join("")}</div>${fieldError("split_type", state)}`;
     }
 
+    function workoutRecommendationFingerprint(state) {
+        const answers = state.answers;
+        return JSON.stringify({
+            goal: answers.goal,
+            experience_level: answers.experience_level,
+            days_per_week: answers.days_per_week,
+            session_duration: answers.session_duration,
+            equipment: asArray(answers.equipment).slice().sort()
+        });
+    }
+
+    function workoutFallbackSplit(state) {
+        const compatible = SPLITS_BY_DAYS[Number(state.answers.days_per_week)] || ["full_body"];
+        return compatible.includes("full_body") ? "full_body" : compatible[0];
+    }
+
     function scheduleWorkoutRecommendation(delay = 150) {
         window.clearTimeout(workoutRecommendationTimer);
-        workoutRecommendationTimer = window.setTimeout(async () => {
-            const state = wizardMemory.workout;
-            if (activeWizardType !== "workout" || state.step !== 1 || !window.currentUser) return;
-            const token = (state.recommendationToken || 0) + 1;
-            state.recommendationToken = token;
+        const state = wizardMemory.workout;
+        const token = (state.recommendationToken || 0) + 1;
+        const fingerprint = workoutRecommendationFingerprint(state);
+        state.recommendationToken = token;
+        state.recommendationFingerprint = fingerprint;
+        state.recommendationStatus = "loading";
+        state.recommendation = null;
+
+        const waitForDelay = new Promise((resolve) => {
+            workoutRecommendationTimer = window.setTimeout(resolve, delay);
+        });
+        const waitForTimeout = new Promise((resolve) => window.setTimeout(() => resolve({ timeout: true }), 10000));
+        state.recommendationPromise = (async () => {
+            await waitForDelay;
+            if (activeWizardType !== "workout" || state.step !== 1 || state.recommendationToken !== token || !window.currentUser) return;
+            renderWizard({ preserveFocus: true });
             try {
-                const recommendation = await apiRequest("/workout_plans/recommendation", {
-                    method: "POST",
-                    body: buildWizardPayload("workout")
-                });
-                if (activeWizardType !== "workout" || state.recommendationToken !== token) return;
-                state.recommendation = recommendation;
-                if (!state.splitManuallySelected) state.answers.split_type = recommendation.recommended_split;
-                renderWizard();
+                const response = await Promise.race([
+                    apiRequest("/workout_plans/recommendation", {
+                        method: "POST",
+                        body: buildWizardPayload("workout")
+                    }),
+                    waitForTimeout
+                ]);
+                if (state.recommendationToken !== token || state.recommendationFingerprint !== fingerprint) return;
+                if (response?.timeout) {
+                    state.recommendationStatus = "fallback";
+                    state.recommendationMessage = "Não foi possível sugerir uma divisão agora. Você pode ajustar depois.";
+                    if (state.splitMode !== "manual") state.answers.split_type = workoutFallbackSplit(state);
+                    renderWizard({ preserveFocus: true });
+                    return;
+                }
+                state.recommendation = response;
+                state.recommendationStatus = "ready";
+                state.recommendationMessage = "";
+                if (state.splitMode !== "manual") state.answers.split_type = response.recommended_split;
             } catch (error) {
-                if (state.recommendationToken === token) state.recommendation = null;
+                if (state.recommendationToken !== token || state.recommendationFingerprint !== fingerprint) return;
+                state.recommendationStatus = "fallback";
+                state.recommendationMessage = "Não foi possível sugerir uma divisão agora. Você pode ajustar depois.";
+                if (state.splitMode !== "manual") state.answers.split_type = workoutFallbackSplit(state);
             }
-        }, delay);
+            if (state.recommendationToken === token) renderWizard({ preserveFocus: true });
+        })();
+        return state.recommendationPromise;
     }
 
     function renderWorkoutStep(state) {
         const answers = state.answers;
         if (state.step === 0) {
             return `
-                <div class="wizard-step-heading" tabindex="-1"><span>Etapa 1 de 3</span><h4>Monte uma rotina possível</h4><p>Escolha o objetivo e uma frequência que caiba de verdade na sua semana.</p></div>
+                <div class="wizard-step-heading" tabindex="-1"><h4>Sua rotina</h4><p>Escolha um objetivo e uma frequência que caiba de verdade na sua semana.</p></div>
                 <div class="wizard-field"><label for="wizard-workout-goal">Objetivo principal</label><select id="wizard-workout-goal" name="goal"${invalidAttributes("goal", state)}><option value="">Selecione um objetivo</option>${selectOptions(WORKOUT_GOALS, answers.goal)}</select>${fieldError("goal", state)}</div>
                 <div class="wizard-field-row">
                     <fieldset class="wizard-fieldset"><legend>Experiência</legend>${radioCards("experience_level", EXPERIENCE_LEVELS, answers.experience_level, state, true)}</fieldset>
@@ -632,41 +698,90 @@
         }
         if (state.step === 1) {
             return `
-                <div class="wizard-step-heading" tabindex="-1"><span>Etapa 2 de 3</span><h4>Estrutura do treino</h4><p>A divisão já está limitada às opções compatíveis com sua frequência.</p></div>
-                <fieldset class="wizard-fieldset"><legend>Equipamentos disponíveis</legend><p class="wizard-field-hint">Escolha uma opção ou abra a lista para informar equipamentos específicos.</p>${workoutEquipmentPicker(state)}</fieldset>
-                <div class="wizard-field-row">
-                    <fieldset class="wizard-fieldset"><legend>Divisão semanal</legend><p class="wizard-field-hint">Selecionamos uma estrutura inicial conforme sua frequência e seus equipamentos. Você pode escolher outra opção.</p>${workoutSplitCards(state)}</fieldset>
-                    <div class="wizard-field"><label for="wizard-session-duration">Duração por sessão</label><select id="wizard-session-duration" name="session_duration"${invalidAttributes("session_duration", state)}>${selectOptions({ 20: "20 minutos", 30: "30 minutos", 45: "45 minutos", 60: "60 minutos", 75: "75 minutos", 90: "90 minutos" }, answers.session_duration)}</select>${fieldError("session_duration", state)}</div>
-                </div>`;
+                <div class="wizard-step-heading" tabindex="-1"><h4>Tempo e equipamentos</h4><p>Vamos adaptar seu treino à sua disponibilidade.</p></div>
+                <div class="wizard-field"><label for="wizard-session-duration">Duração por sessão</label><select id="wizard-session-duration" name="session_duration"${invalidAttributes("session_duration", state)}>${selectOptions({ 20: "20 minutos", 30: "30 minutos", 45: "45 minutos", 60: "60 minutos", 75: "75 minutos", 90: "90 minutos" }, answers.session_duration)}</select>${fieldError("session_duration", state)}</div>
+                <fieldset class="wizard-fieldset"><legend>Onde você vai treinar?</legend><p class="wizard-field-hint">Escolha uma opção ou personalize o que você tem disponível.</p>${workoutEquipmentPicker(state)}</fieldset>
+                <p class="workout-recommendation-status${state.recommendationStatus === "fallback" ? " is-warning" : ""}" role="status">${state.recommendationStatus === "loading" ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Ajustando a estrutura do seu treino...' : esc(state.recommendationMessage || "")}</p>`;
         }
+        const advancedOpen = state.advancedOpen || Boolean(state.fieldErrors.split_type || state.fieldErrors.priorities || state.fieldErrors.avoid_exercises);
+        const splitMode = state.splitMode === "manual" ? "manual" : "automatic";
         return `
-            <div class="wizard-step-heading" tabindex="-1"><span>Etapa 3 de 3</span><h4>Ajustes e revisão</h4><p>Esses detalhes ajudam a IA a criar um treino mais seguro e relevante.</p></div>
-            <div class="wizard-field-grid">
-                <div class="wizard-field"><label for="wizard-limitations">Limitações ou dores <span>opcional</span></label><textarea id="wizard-limitations" name="limitations" rows="3" maxlength="500" placeholder="Ex.: desconforto no joelho direito"${invalidAttributes("limitations", state)}>${esc(answers.limitations)}</textarea><small class="wizard-field-hint">Interrompa movimentos que causem dor. O plano não substitui avaliação profissional.</small>${fieldError("limitations", state)}</div>
-                <div class="wizard-field"><label for="wizard-priorities">Regiões prioritárias <span>opcional</span></label><textarea id="wizard-priorities" name="priorities" rows="3" maxlength="300" placeholder="Ex.: costas e glúteos"${invalidAttributes("priorities", state)}>${esc(answers.priorities)}</textarea>${fieldError("priorities", state)}</div>
-            </div>
-            <div class="wizard-field"><label for="wizard-avoid-exercises">Exercícios que prefere evitar <span>opcional</span></label><input id="wizard-avoid-exercises" name="avoid_exercises" value="${esc(answers.avoid_exercises)}" maxlength="300" placeholder="Ex.: agachamento livre"${invalidAttributes("avoid_exercises", state)}>${fieldError("avoid_exercises", state)}</div>
-            ${renderWizardReview("workout", answers)}`;
+            <div class="wizard-step-heading" tabindex="-1"><h4>Confira seu treino</h4><p>Você pode ajustar os detalhes antes de gerar.</p></div>
+            ${renderWizardReview("workout", answers)}
+            <div class="wizard-field"><label for="wizard-limitations">Limitações ou dores <span>opcional</span></label><textarea id="wizard-limitations" name="limitations" rows="3" maxlength="500" placeholder="Ex.: desconforto no joelho direito"${invalidAttributes("limitations", state)}>${esc(answers.limitations)}</textarea><small class="wizard-field-hint">Interrompa movimentos que causem dor. O plano não substitui avaliação profissional.</small>${fieldError("limitations", state)}</div>
+            <details class="workout-advanced" data-workout-advanced${advancedOpen ? " open" : ""}>
+                <summary>Ajustes opcionais <i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+                <div class="workout-advanced__content">
+                    <fieldset class="wizard-fieldset"><legend>Divisão semanal</legend>
+                        ${radioCards("split_mode", { automatic: "Automática", manual: "Escolher divisão" }, splitMode, state, true)}
+                        ${splitMode === "manual" ? workoutSplitCards(state) : '<p class="wizard-field-hint">Vamos escolher a divisão mais adequada com base na sua rotina e equipamentos.</p>'}
+                    </fieldset>
+                    <div class="wizard-field"><label for="wizard-priorities">Regiões prioritárias <span>opcional</span></label><textarea id="wizard-priorities" name="priorities" rows="3" maxlength="300" placeholder="Ex.: costas e glúteos"${invalidAttributes("priorities", state)}>${esc(answers.priorities)}</textarea>${fieldError("priorities", state)}</div>
+                    <div class="wizard-field"><label for="wizard-avoid-exercises">Exercícios que prefere evitar <span>opcional</span></label><input id="wizard-avoid-exercises" name="avoid_exercises" value="${esc(answers.avoid_exercises)}" maxlength="300" placeholder="Ex.: agachamento livre"${invalidAttributes("avoid_exercises", state)}>${fieldError("avoid_exercises", state)}</div>
+                </div>
+            </details>`;
     }
 
     function renderWizardReview(type, answers) {
         const rows = type === "diet"
             ? [
                 ["Objetivo", labelFor(DIET_GOALS, answers.goal)],
-                ["Rotina", `${answers.meals_per_day} refeições, dieta ${labelFor(DIET_PATTERNS, answers.diet_pattern).toLowerCase()}`],
-                ["Meta energética", ["fat_loss", "muscle_gain"].includes(answers.goal) ? `${answers.training_days_per_week} treino(s)/semana, velocidade ${labelFor(CHANGE_PACES, answers.change_pace).toLowerCase()}` : `${answers.training_days_per_week} treino(s)/semana, sem ajuste automático`],
-                ["Preparo", `${labelFor(BUDGETS, answers.budget)}, até ${answers.prep_minutes} min`]
+                ["Formato", `${answers.meals_per_day} refeições · ${labelFor(DIET_PATTERNS, answers.diet_pattern).toLowerCase()}`],
+                ["Rotina", `${answers.training_days_per_week} treino(s) por semana`],
+                ["Cuidados", "Restrições gerenciadas no perfil"],
+                ["Preparo", `${labelFor(BUDGETS, answers.budget)}, até ${answers.prep_minutes} min`],
+                ["Metas", ["fat_loss", "muscle_gain"].includes(answers.goal) ? `Ritmo ${labelFor(CHANGE_PACES, answers.change_pace).toLowerCase()}` : "Calculadas automaticamente"]
             ]
             : [
                 ["Objetivo", labelFor(WORKOUT_GOALS, answers.goal)],
                 ["Rotina", `${answers.days_per_week} dias, ${answers.session_duration} min por sessão`],
-                ["Estrutura", `${labelFor(SPLIT_TYPES, answers.split_type)} · ${labelFor(EXPERIENCE_LEVELS, answers.experience_level)}`]
+                ["Experiência", labelFor(EXPERIENCE_LEVELS, answers.experience_level)],
+                ["Equipamentos", asArray(answers.equipment).map((value) => labelFor(WORKOUT_EQUIPMENT, value, value)).join(", ")]
             ];
         return `
             <aside class="wizard-review" aria-label="Resumo das respostas">
-                <div class="wizard-review__title"><i class="fas fa-clipboard-check" aria-hidden="true"></i><div><strong>Pronto para gerar</strong><span>Revise o resumo. Suas respostas ficam salvas se precisar tentar novamente.</span></div></div>
+                <div class="wizard-review__title"><i class="fas fa-clipboard-check" aria-hidden="true"></i><div><strong>Pronto para gerar</strong><span>Revise o resumo ou volte para ajustar qualquer etapa.</span></div></div>
+                ${type === "diet" ? `<div class="wizard-review__actions"><button type="button" class="text-button" data-wizard-edit-step="0">Editar base</button><button type="button" class="text-button" data-wizard-edit-step="1">Editar cuidados</button><button type="button" class="text-button" data-wizard-edit-step="2">Editar ajustes</button></div>` : ""}
                 <dl>${rows.map(([term, description]) => `<div><dt>${esc(term)}</dt><dd>${esc(description)}</dd></div>`).join("")}</dl>
             </aside>`;
+    }
+
+    function workoutGenerationMarkup(state) {
+        const checking = Boolean(state.pendingGenerationJob);
+        return `
+            <section class="workout-generation-state" role="status" aria-live="polite">
+                <span class="workout-generation-state__icon"><i class="fas ${checking ? "fa-rotate" : "fa-spinner fa-spin"}" aria-hidden="true"></i></span>
+                <h4>${checking ? "Seu treino ainda está sendo criado" : "Criando seu treino..."}</h4>
+                <p>${checking ? "Verifique o resultado para continuar de onde parou, sem gerar outro treino." : (state.generationStatus === "queued" ? "Seu pedido está na fila. Estamos preparando sua rotina." : "Estamos montando sua rotina com base nas suas escolhas.")}</p>
+                ${checking ? '<button type="button" class="btn-primary" data-wizard-action="check-generation">Verificar resultado</button>' : `<dl><div><dt>Objetivo</dt><dd>${esc(labelFor(WORKOUT_GOALS, state.answers.goal))}</dd></div><div><dt>Rotina</dt><dd>${esc(`${state.answers.days_per_week} dias · ${state.answers.session_duration} min`)}</dd></div></dl>`}
+            </section>`;
+    }
+
+    function dietGenerationMarkup(state) {
+        const checking = Boolean(state.pendingGenerationJob);
+        return `
+            <section class="diet-generation-state" role="status" aria-live="polite">
+                <span class="diet-generation-state__icon"><i class="fas ${checking ? "fa-rotate" : "fa-spinner fa-spin"}" aria-hidden="true"></i></span>
+                <h4>${checking ? "Seu plano ainda está sendo criado" : "Criando seu plano alimentar..."}</h4>
+                <p>${checking ? "Verifique o resultado para continuar sem gerar outro plano." : (state.generationStatus === "queued" ? "Seu pedido está na fila. Estamos preparando seu cardápio." : "Estamos montando seus dias com base nas suas escolhas.")}</p>
+                ${checking ? '<button type="button" class="btn-primary" data-wizard-action="check-generation">Verificar resultado</button>' : `<dl><div><dt>Objetivo</dt><dd>${esc(labelFor(DIET_GOALS, state.answers.goal))}</dd></div><div><dt>Formato</dt><dd>${esc(`${state.answers.meals_per_day} refeições`)}</dd></div></dl>`}
+            </section>`;
+    }
+
+    function capturedWizardFocus() {
+        const current = document.activeElement;
+        if (!current?.closest?.("#guidedPlanModal")) return null;
+        return { id: current.id, name: current.name, value: current.value };
+    }
+
+    function restoreWizardFocus(focus) {
+        if (!focus) return;
+        requestAnimationFrame(() => {
+            const target = (focus.id && byId(focus.id))
+                || (focus.name && document.querySelector(`#guidedPlanModal [name="${CSS.escape(focus.name)}"][value="${CSS.escape(focus.value || "")}"]`))
+                || document.querySelector(`#guidedPlanModal [name="${CSS.escape(focus.name || "")}"]`);
+            target?.focus?.({ preventScroll: true });
+        });
     }
 
     function renderWizard(options = {}) {
@@ -676,13 +791,17 @@
         const modal = byId("guidedPlanModal");
         const stepContainer = byId("planWizardStep");
         if (!modal || !stepContainer) return;
+        const focus = options.preserveFocus ? capturedWizardFocus() : null;
 
         const isDiet = type === "diet";
-        byId("planWizardTitle").textContent = isDiet ? "Seu plano alimentar" : "Seu plano de treino";
+        modal.classList.toggle("plan-wizard-modal--workout", !isDiet);
+        modal.classList.toggle("plan-wizard-modal--diet", isDiet);
+        modal.classList.toggle("is-generating", Boolean(state.generating));
+        byId("planWizardTitle").textContent = isDiet ? "Criar plano alimentar" : "Criar treino";
         byId("planWizardDescription").textContent = isDiet
             ? "Três dias rotativos alinhados às suas preferências."
-            : "Uma semana de treinos alinhada à sua rotina.";
-        byId("planWizardKicker").textContent = isDiet ? "Planejamento alimentar" : "Rotina de movimento";
+            : `Etapa ${state.step + 1} de 3`;
+        byId("planWizardKicker").textContent = `Etapa ${state.step + 1} de 3`;
         byId("planWizardIcon").className = `plan-wizard__icon${isDiet ? "" : " plan-wizard__icon--workout"}`;
         byId("planWizardIcon").innerHTML = `<i class="fas ${isDiet ? "fa-apple-alt" : "fa-dumbbell"}" aria-hidden="true"></i>`;
 
@@ -693,12 +812,16 @@
             return `<li class="${status}"${current}><span>${index < state.step ? '<i class="fas fa-check" aria-hidden="true"></i>' : index + 1}</span><small>${esc(label)}</small></li>`;
         }).join("");
         byId("planWizardProgressBar").style.width = `${((state.step + 1) / steps.length) * 100}%`;
-        stepContainer.innerHTML = isDiet ? renderDietStep(state) : renderWorkoutStep(state);
+        stepContainer.innerHTML = state.generating || state.pendingGenerationJob
+            ? (isDiet ? dietGenerationMarkup(state) : workoutGenerationMarkup(state))
+            : (isDiet ? renderDietStep(state) : renderWorkoutStep(state));
         stepContainer.setAttribute("aria-busy", state.generating ? "true" : "false");
 
         const errorElement = byId("planWizardError");
         if (state.error) {
-            errorElement.textContent = state.error;
+            if (state.uncertainSubmission) {
+                errorElement.innerHTML = `${esc(state.error)} <button type="button" class="text-button" data-wizard-action="open-generation-library">Ver meus planos</button>`;
+            } else errorElement.textContent = state.error;
             errorElement.classList.remove("hidden");
         } else {
             errorElement.textContent = "";
@@ -710,10 +833,10 @@
         const nextLabel = byId("planWizardNextLabel");
         const nextIcon = byId("planWizardNextIcon");
         if (state.generating) {
-            nextLabel.textContent = isDiet ? "Criando sua dieta..." : "Criando seu treino...";
+            nextLabel.textContent = isDiet ? "Criando plano..." : "Criando seu treino...";
             nextIcon.className = "fas fa-spinner fa-spin";
         } else if (state.step === 2) {
-            nextLabel.textContent = "Gerar plano";
+            nextLabel.textContent = isDiet ? "Gerar plano alimentar" : "Gerar plano";
             nextIcon.className = "fas fa-wand-magic-sparkles";
         } else if (state.step === 1) {
             nextLabel.textContent = "Revisar";
@@ -723,6 +846,9 @@
             nextIcon.className = "fas fa-arrow-right";
         }
 
+        const actions = modal.querySelector(".plan-wizard__actions");
+        actions?.classList.toggle("hidden", Boolean(state.generating || state.pendingGenerationJob));
+
         modal.dataset.modalLocked = state.generating ? "true" : "false";
         const form = byId("guidedPlanForm");
         form.querySelectorAll("input, select, textarea, button").forEach((control) => {
@@ -731,10 +857,95 @@
         if (options.focusHeading) {
             requestAnimationFrame(() => stepContainer.querySelector(".wizard-step-heading")?.focus());
         }
+        if (!isDiet && !state.generating && !state.pendingGenerationJob) {
+            stepContainer.querySelector("[data-workout-advanced]")?.addEventListener("toggle", (event) => {
+                state.advancedOpen = event.currentTarget.open;
+            });
+        }
+        if (isDiet && !state.generating && !state.pendingGenerationJob) {
+            stepContainer.querySelector("[data-diet-preferences]")?.addEventListener("toggle", (event) => {
+                state.preferencesOpen = event.currentTarget.open;
+            });
+            stepContainer.querySelector("[data-diet-customization]")?.addEventListener("toggle", (event) => {
+                state.customizationOpen = event.currentTarget.open;
+            });
+            stepContainer.querySelector("[data-diet-targets]")?.addEventListener("toggle", (event) => {
+                state.targetsOpen = event.currentTarget.open;
+            });
+        }
+        restoreWizardFocus(focus);
     }
 
-    function openPlanWizard(type, context = null) {
+    function workoutWizardOwnerKey(context) {
+        return context?.studentId ? `student:${context.studentId}` : `user:${window.currentUser?.id || "anonymous"}`;
+    }
+
+    function missingDietProfileFields(profile) {
+        const required = {
+            age: "Informe sua idade.",
+            gender: "Informe o sexo usado no cálculo nutricional.",
+            activity_level: "Informe seu nível de atividade.",
+            weight: "Informe seu peso.",
+            height: "Informe sua altura."
+        };
+        return Object.fromEntries(Object.entries(required).filter(([field]) => {
+            const value = profile?.[field];
+            if (value == null || value === "") return true;
+            if (field === "age") return !Number.isFinite(Number(value)) || Number(value) < 18 || Number(value) > 120;
+            if (field === "weight") return !Number.isFinite(Number(value)) || Number(value) < 30 || Number(value) > 300;
+            if (field === "height") return !Number.isFinite(Number(value)) || Number(value) < 120 || Number(value) > 250;
+            if (field === "activity_level") return !["sedentario", "leve", "moderado", "intenso"].includes(String(value).toLowerCase());
+            if (field === "gender") return !["masculino", "homem", "male", "feminino", "mulher", "female"].includes(String(value).toLowerCase());
+            return false;
+        }).map(([field, message]) => [`profile.${field}`, message]));
+    }
+
+    async function ensureDietProfileBeforeWizard(context) {
+        if (context?.studentId || !window.currentUser) return true;
+        try {
+            const response = await fetch(`${API_BASE}/profile`, { credentials: "include" });
+            if (!response.ok) throw new Error("Não foi possível verificar seu perfil.");
+            const data = await response.json();
+            const fields = missingDietProfileFields(data.profile);
+            if (Object.keys(fields).length) {
+                window.requestProfileCompletion?.(() => openPlanWizard("diet", context), fields);
+                return false;
+            }
+        } catch (error) {
+            showToast("Complete seu perfil básico antes de gerar o plano alimentar.", "info");
+        }
+        return true;
+    }
+
+    function openPlanWizard(type, context = null, options = {}) {
         if (type !== "diet" && type !== "workout") return;
+        if (type === "workout" && !window.requireAuth?.("Entre para criar seu treino.", {
+            premium: true,
+            resume: () => openPlanWizard(type, context)
+        })) return;
+        if (type === "diet" && !window.requireAuth?.("Entre para criar seu plano alimentar.", {
+            premium: true,
+            requiresProfile: true,
+            resume: () => openPlanWizard(type, context)
+        })) return;
+        if (type === "diet" && !options.skipProfileCheck && !context?.studentId) {
+            ensureDietProfileBeforeWizard(context).then((ready) => {
+                if (ready) openPlanWizard(type, context, { skipProfileCheck: true });
+            });
+            return;
+        }
+        if (type === "workout") {
+            const ownerKey = workoutWizardOwnerKey(context);
+            if (wizardMemory.workout.ownerKey && wizardMemory.workout.ownerKey !== ownerKey) {
+                wizardMemory.workout = { step: 0, answers: defaultWorkoutAnswers(), error: "", fieldErrors: {}, generating: false, ownerKey };
+            } else wizardMemory.workout.ownerKey = ownerKey;
+        }
+        if (type === "diet") {
+            const ownerKey = workoutWizardOwnerKey(context);
+            if (wizardMemory.diet.ownerKey && wizardMemory.diet.ownerKey !== ownerKey) {
+                wizardMemory.diet = { step: 0, answers: defaultDietAnswers(), error: "", fieldErrors: {}, generating: false, preferencesOpen: false, customizationOpen: false, targetsOpen: false, ingredientDraft: "", ownerKey };
+            } else wizardMemory.diet.ownerKey = ownerKey;
+        }
         professionalWizardContext = context;
         activeWizardType = type;
         const modal = byId("guidedPlanModal");
@@ -751,14 +962,16 @@
             answers: type === "diet" ? defaultDietAnswers() : defaultWorkoutAnswers(),
             error: "",
             fieldErrors: {},
-            generating: false
+            generating: false,
+            ...(type === "diet" ? { preferencesOpen: false, customizationOpen: false, targetsOpen: false, ingredientDraft: "" } : {}),
+            ownerKey: type === "workout" ? `student:${studentId}` : undefined
         };
         openPlanWizard(type, { type, studentId });
     }
 
     function openDietPlanWizardWithPlan(plan) {
         const questionnaire = plan?.questionnaire || {};
-        const targets = plan?.nutrition_targets || {};
+        const customTargets = questionnaire.custom_targets || {};
         const answers = defaultDietAnswers();
         Object.assign(answers, {
             goal: questionnaire.goal || answers.goal,
@@ -766,20 +979,20 @@
             diet_pattern: questionnaire.diet_pattern || answers.diet_pattern,
             training_days_per_week: String(questionnaire.training_days_per_week ?? answers.training_days_per_week),
             change_pace: questionnaire.change_pace || answers.change_pace,
-            allergies: asArray(questionnaire.allergies).join(", "),
-            intolerances: asArray(questionnaire.intolerances).join(", "),
+            allergies: "",
+            intolerances: "",
             disliked_foods: asArray(questionnaire.disliked_foods).join(", "),
             preferred_foods: asArray(questionnaire.preferred_foods).join(", "),
             budget: questionnaire.budget || answers.budget,
             prep_minutes: String(questionnaire.prep_minutes || answers.prep_minutes),
             available_ingredients: asArray(questionnaire.available_ingredients).join("; "),
-            target_calories: targets.targetCalories ?? "",
-            target_protein: targets.targetProtein ?? "",
-            target_carbs: targets.targetCarbs ?? "",
-            target_fat: targets.targetFat ?? "",
+            target_calories: customTargets.calories ?? "",
+            target_protein: customTargets.protein ?? "",
+            target_carbs: customTargets.carbs ?? "",
+            target_fat: customTargets.fat ?? "",
             notes: questionnaire.notes || ""
         });
-        wizardMemory.diet = { step: 2, answers, error: "", fieldErrors: {}, generating: false };
+        wizardMemory.diet = { step: 2, answers, error: "", fieldErrors: {}, generating: false, preferencesOpen: false, customizationOpen: false, targetsOpen: false, ingredientDraft: "", ownerKey: workoutWizardOwnerKey(null) };
         openPlanWizard("diet");
     }
 
@@ -806,12 +1019,9 @@
                 if (!DIET_GOALS[answers.goal]) errors.goal = "Selecione seu objetivo principal.";
                 if (!["3", "4", "5"].includes(String(answers.meals_per_day))) errors.meals_per_day = "Escolha quantas refeições deseja.";
                 if (!DIET_PATTERNS[answers.diet_pattern]) errors.diet_pattern = "Selecione um padrão alimentar.";
-                if (!Array.from({ length: 8 }, (_, index) => String(index)).includes(String(answers.training_days_per_week))) errors.training_days_per_week = "Escolha entre 0 e 7 dias.";
-                if (!CHANGE_PACES[answers.change_pace]) errors.change_pace = "Selecione uma velocidade.";
             } else if (step === 1) {
+                if (!Array.from({ length: 8 }, (_, index) => String(index)).includes(String(answers.training_days_per_week))) errors.training_days_per_week = "Escolha entre 0 e 7 dias.";
                 const fields = {
-                    allergies: "Alergias",
-                    intolerances: "Intolerâncias",
                     disliked_foods: "Alimentos evitados",
                     preferred_foods: "Alimentos preferidos"
                 };
@@ -820,6 +1030,7 @@
                     if (message) errors[field] = message;
                 });
             } else {
+                if (["fat_loss", "muscle_gain"].includes(answers.goal) && !CHANGE_PACES[answers.change_pace]) errors.change_pace = "Selecione uma velocidade.";
                 if (!BUDGETS[answers.budget]) errors.budget = "Selecione uma faixa de orçamento.";
                 if (!["15", "30", "45", "60"].includes(String(answers.prep_minutes))) errors.prep_minutes = "Selecione o tempo de preparo.";
                 const ingredients = parseIngredientTokens(answers.available_ingredients);
@@ -907,6 +1118,97 @@
         requestAnimationFrame(() => byId("planWizardError")?.focus());
     }
 
+    async function waitForWorkoutRecommendation(state) {
+        if (state.recommendationStatus !== "loading" || !state.recommendationPromise) return;
+        await state.recommendationPromise;
+        if (state.recommendationStatus === "loading") {
+            state.recommendationStatus = "fallback";
+            state.recommendationMessage = "Não foi possível sugerir uma divisão agora. Você pode ajustar depois.";
+            if (state.splitMode !== "manual") state.answers.split_type = workoutFallbackSplit(state);
+        }
+    }
+
+    async function completeGeneratedPlan(type, result) {
+        const planId = result.plan_id || result.plan?.id;
+        const professionalContext = professionalWizardContext;
+        wizardMemory[type] = {
+            step: 0,
+            answers: type === "diet" ? defaultDietAnswers() : defaultWorkoutAnswers(),
+            error: "",
+            fieldErrors: {},
+            generating: false
+        };
+        closePlanWizard();
+        professionalWizardContext = null;
+        showToast(professionalContext ? "Rascunho criado para revisão." : type === "diet" ? "Plano alimentar criado!" : "Plano de treino criado!", "success");
+        if (professionalContext) {
+            window.openProfessionalStudent?.(professionalContext.studentId);
+            return;
+        }
+        showTab(type === "diet" ? "diet_plans" : "workout_plans");
+        if (!planId) return;
+        const opened = type === "diet" ? await viewDietPlan(planId) : await viewWorkoutPlan(planId);
+        if (!opened) showToast("Seu plano foi criado. Abra-o em Meus planos para continuar.", "info");
+    }
+
+    async function checkWorkoutGeneration() {
+        const state = wizardMemory.workout;
+        const job = state.pendingGenerationJob;
+        if (!job || state.generating) return;
+        state.generating = true;
+        state.pendingGenerationJob = null;
+        state.error = "";
+        renderWizard();
+        try {
+            const result = await window.waitForAIJob(job, undefined, {
+                jobLabel: "treino",
+                onStatus: (status) => {
+                    state.generationStatus = status;
+                    if (state.generating) renderWizard();
+                }
+            });
+            await completeGeneratedPlan("workout", result);
+        } catch (error) {
+            state.generating = false;
+            if (error.code === "ai_job_timeout" || error.code === "ai_job_check_failed") {
+                state.pendingGenerationJob = error.job || job;
+                state.error = error.message;
+                renderWizard();
+                return;
+            }
+            showWizardErrors("workout", error.fields || error.data?.fields || {}, error.message);
+        }
+    }
+
+    async function checkDietGeneration() {
+        const state = wizardMemory.diet;
+        const job = state.pendingGenerationJob;
+        if (!job || state.generating) return;
+        state.generating = true;
+        state.pendingGenerationJob = null;
+        state.error = "";
+        renderWizard();
+        try {
+            const result = await window.waitForAIJob(job, undefined, {
+                jobLabel: "plano alimentar",
+                onStatus: (status) => {
+                    state.generationStatus = status;
+                    if (state.generating) renderWizard();
+                }
+            });
+            await completeGeneratedPlan("diet", result);
+        } catch (error) {
+            state.generating = false;
+            if (error.code === "ai_job_timeout" || error.code === "ai_job_check_failed") {
+                state.pendingGenerationJob = error.job || job;
+                state.error = error.message;
+                renderWizard();
+                return;
+            }
+            showWizardErrors("diet", error.fields || error.data?.fields || {}, error.message);
+        }
+    }
+
     async function generatePlan(type) {
         const state = wizardMemory[type];
         const errors = validateAllWizardSteps(type);
@@ -925,7 +1227,12 @@
         }
         if (!window.requireAuth?.(`Entre para gerar seu plano de ${type === "diet" ? "dieta" : "treino"}.`, { premium: true })) return;
 
+        if (type === "workout") await waitForWorkoutRecommendation(state);
+
         state.generating = true;
+        state.pendingGenerationJob = null;
+        state.generationJob = null;
+        state.uncertainSubmission = false;
         renderWizard();
         window.analytics?.track("plan_generation_requested", {
             plan_type: type,
@@ -938,11 +1245,24 @@
                 : `/${type === "diet" ? "diet_plans" : "workout_plans"}/generate`;
             result = await apiRequest(path, {
                 method: "POST",
-                body: buildWizardPayload(type)
+                body: buildWizardPayload(type),
+                offlineMessage: `Sem conexão. Não foi possível confirmar se o plano de ${type === "diet" ? "alimentação" : "treino"} foi criado.`,
+                jobLabel: type === "diet" ? "plano alimentar" : "treino",
+                onQueued: (job) => {
+                    state.generationJob = job;
+                    state.generationStatus = "queued";
+                    if (state.generating) renderWizard();
+                },
+                onJobStatus: (status) => {
+                    state.generationStatus = status;
+                    if (state.generating) renderWizard();
+                }
             });
         } catch (error) {
             state.generating = false;
-            const serverFields = error.fields && typeof error.fields === "object" ? error.fields : {};
+            const serverFields = error.fields && typeof error.fields === "object"
+                ? error.fields
+                : (error.data?.fields && typeof error.data.fields === "object" ? error.data.fields : {});
             const profileFields = Object.fromEntries(Object.entries(serverFields).filter(([field]) => field.startsWith("profile.")));
             if (type === "diet" && Object.keys(profileFields).length) {
                 if (professionalWizardContext) {
@@ -958,34 +1278,17 @@
                 }, profileFields);
                 return;
             }
+            if (error.code === "ai_job_timeout" || error.code === "ai_job_check_failed") {
+                state.pendingGenerationJob = error.job || state.generationJob;
+                state.error = error.message;
+                renderWizard();
+                return;
+            }
+            if (error.code === "offline" && !state.generationJob) state.uncertainSubmission = true;
             showWizardErrors(type, serverFields, error.message);
             return;
         }
-
-        state.generating = false;
-        state.error = "";
-        state.fieldErrors = {};
-        const planId = result.plan_id || result.plan?.id;
-        wizardMemory[type] = {
-            step: 0,
-            answers: type === "diet" ? defaultDietAnswers() : defaultWorkoutAnswers(),
-            error: "",
-            fieldErrors: {},
-            generating: false
-        };
-        closePlanWizard();
-        const professionalContext = professionalWizardContext;
-        professionalWizardContext = null;
-        showToast(professionalContext ? "Rascunho criado para revisão." : type === "diet" ? "Plano alimentar criado!" : "Plano de treino criado!", "success");
-        if (professionalContext) {
-            window.openProfessionalStudent?.(professionalContext.studentId);
-            return;
-        }
-        showTab(type === "diet" ? "diet_plans" : "workout_plans");
-        if (planId) {
-            if (type === "diet") await viewDietPlan(planId);
-            else await viewWorkoutPlan(planId);
-        }
+        await completeGeneratedPlan(type, result);
     }
 
     function handleWizardInput(event) {
@@ -993,44 +1296,61 @@
         const control = event.target;
         if (!control.name) return;
         const state = wizardMemory[activeWizardType];
-        if (control.id === "wizard-ingredient-input") return;
-        if (activeWizardType === "workout" && control.name === "equipment_picker") {
-            state.customEquipmentOpen = control.checked;
-            if (!control.checked) {
-                state.answers.equipment = asArray(state.answers.equipment).filter((value) => ["full_gym", "bodyweight"].includes(value));
-                state.recommendation = null;
-                scheduleWorkoutRecommendation();
+        if (state.error) state.error = "";
+        if (control.id === "wizard-ingredient-input") {
+            state.ingredientDraft = control.value;
+            if (control.value.trim().length <= 80) delete state.fieldErrors.available_ingredients;
+            const options = byId("wizard-ingredient-options");
+            if (options) options.innerHTML = ingredientOptions(ingredientLastToken(control.value));
+            return;
+        }
+        if (activeWizardType === "workout" && control.name === "equipment_mode") {
+            const current = asArray(state.answers.equipment);
+            if (state.equipmentMode === "custom") state.customEquipment = current;
+            else if (!asArray(state.customEquipment).length && !current.includes("full_gym")) state.customEquipment = current;
+            state.equipmentMode = control.value;
+            if (control.value === "full_gym") state.answers.equipment = ["full_gym"];
+            else if (control.value === "bodyweight") state.answers.equipment = ["bodyweight"];
+            else state.answers.equipment = asArray(state.customEquipment).length ? asArray(state.customEquipment) : ["bodyweight"];
+            delete state.fieldErrors.equipment;
+            if (state.step === 1) scheduleWorkoutRecommendation(0);
+            renderWizard({ preserveFocus: true });
+            return;
+        }
+        if (activeWizardType === "workout" && control.name === "split_mode") {
+            state.splitMode = control.value;
+            state.advancedOpen = true;
+            if (control.value === "automatic") {
+                state.answers.split_type = state.recommendation?.recommended_split || workoutFallbackSplit(state);
+                delete state.fieldErrors.split_type;
             }
-            renderWizard();
+            renderWizard({ preserveFocus: true });
             return;
         }
         if (control.type === "checkbox") {
             const current = new Set(asArray(state.answers[control.name]));
-            if (activeWizardType === "workout" && control.name === "equipment" && control.checked && control.value === "full_gym") {
-                current.clear();
-                current.add("full_gym");
-                state.customEquipmentOpen = false;
-            } else if (control.checked) {
-                if (activeWizardType === "workout" && control.name === "equipment") current.delete("full_gym");
-                current.add(control.value);
-            } else current.delete(control.value);
+            if (control.checked) current.add(control.value);
+            else current.delete(control.value);
             state.answers[control.name] = Array.from(current);
+            if (activeWizardType === "workout" && control.name === "equipment") state.customEquipment = state.answers.equipment.slice();
         } else {
             state.answers[control.name] = control.value;
         }
         delete state.fieldErrors[control.name];
 
         if (activeWizardType === "workout" && ["days_per_week", "experience_level"].includes(control.name)) {
-            state.splitManuallySelected = false;
+            state.splitMode = "automatic";
         }
         if (activeWizardType === "workout" && control.name === "days_per_week") {
             const compatible = SPLITS_BY_DAYS[Number(state.answers.days_per_week)] || [];
             if (!compatible.includes(state.answers.split_type)) state.answers.split_type = compatible[0] || "full_body";
         }
         if (activeWizardType === "workout" && ["days_per_week", "experience_level", "split_type", "session_duration", "equipment"].includes(control.name)) {
-            if (control.name === "split_type") state.splitManuallySelected = true;
-            state.recommendation = null;
-            scheduleWorkoutRecommendation();
+            if (control.name === "split_type") {
+                state.splitMode = "manual";
+                state.advancedOpen = true;
+            }
+            if (state.step === 1) scheduleWorkoutRecommendation();
         }
         if (control.name === "notes") {
             const count = byId("planWizardStep")?.querySelector(".wizard-character-count");
@@ -1043,8 +1363,7 @@
         if (!activeWizardType || control.id !== "wizard-ingredient-input") return;
         if (event.key === "Enter" || event.key === ";") {
             event.preventDefault();
-            addIngredient(control.value);
-            control.value = "";
+            if (addIngredient(control.value)) control.value = "";
         }
     }
 
@@ -1053,9 +1372,10 @@
         if (addButton) {
             const input = byId("wizard-ingredient-input");
             if (input) {
-                addIngredient(input.value);
-                input.value = "";
-                input.focus();
+                const added = addIngredient(input.value);
+                if (added) input.value = "";
+                else if (wizardMemory.diet.fieldErrors.available_ingredients) renderWizard({ preserveFocus: true });
+                byId("wizard-ingredient-input")?.focus();
             }
             return;
         }
@@ -1068,6 +1388,14 @@
         if (!activeWizardType) return;
         const state = wizardMemory[activeWizardType];
         if (state.generating) return;
+        if (activeWizardType === "diet" && state.step === 2 && state.ingredientDraft?.trim()) {
+            if (!commitIngredientDraft(state)) {
+                state.error = "Revise os ingredientes destacados para continuar.";
+                renderWizard({ preserveFocus: true });
+                requestAnimationFrame(() => byId("wizard-ingredient-input")?.focus({ preventScroll: true }));
+                return;
+            }
+        }
         const errors = validateWizardStep(activeWizardType, state.step);
         if (Object.keys(errors).length) {
             state.fieldErrors = { ...state.fieldErrors, ...errors };
@@ -1580,11 +1908,7 @@
     }
 
     function renderMealCard(meal, index) {
-        const items = asArray(meal.items).map((item) => {
-            if (!item || typeof item !== "object") return String(item || "");
-            const quantity = Number(item.quantity);
-            return `${Number.isFinite(quantity) ? quantity : ""} ${item.unit || "g"} de ${item.name || item.foodId || "alimento"}`.trim();
-        }).filter((item) => item.trim());
+        const items = asArray(meal.items).map((item) => window.formatDietPlanItem?.(item) || String(item || "")).filter((item) => item.trim());
         const prepMinutes = meal.prep_minutes != null ? `${esc(meal.prep_minutes)} min` : "";
         return `
             <article class="meal-card meal-card--detailed">
@@ -1595,13 +1919,98 @@
                 </header>
                 ${items.length
                     ? `<ul class="meal-items">${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>`
-                    : `<p class="meal-description">${esc(meal.description || "Descrição não informada.")}</p>`}
+                    : `<p class="meal-description">${esc(window.formatDietPlanItemsText?.(meal) || meal.description || "Descrição não informada.")}</p>`}
                 <div class="meal-macro-heading"><span>Macros estimados</span><small>valores aproximados</small></div>
                 ${renderMealMacros(meal)}
                 ${meal.prep_instructions ? `<div class="meal-preparation"><strong><i class="fas fa-kitchen-set" aria-hidden="true"></i> Como preparar</strong><p>${esc(meal.prep_instructions)}</p></div>` : ""}
                 ${renderSubstitutions(meal.substitutions)}
                 ${meal.notes ? `<p class="plan-note"><i class="fas fa-lightbulb" aria-hidden="true"></i> ${esc(meal.notes)}</p>` : ""}
             </article>`;
+    }
+
+    const SHOPPING_CATEGORIES = [
+        ["Hortifruti", ["banana", "maçã", "maca", "mamão", "mamao", "tomate", "alface", "cenoura", "batata", "abacate", "fruta", "verdura", "legume"]],
+        ["Proteínas", ["ovo", "frango", "carne", "peixe", "atum", "tofu", "proteína", "proteina"]],
+        ["Grãos e cereais", ["arroz", "aveia", "pão", "pao", "quinoa", "macarrão", "macarrao", "granola", "farinha"]],
+        ["Laticínios", ["leite", "iogurte", "queijo", "requeijão", "requeijao"]],
+        ["Outros", []]
+    ];
+    const SHOPPING_SUBSTITUTIONS = {
+        banana: ["Maçã", "Mamão"], maçã: ["Banana", "Mamão"], maca: ["Banana", "Mamão"],
+        arroz: ["Quinoa", "Batata"], frango: ["Peixe", "Tofu"], peixe: ["Frango", "Tofu"],
+        leite: ["Bebida vegetal", "Iogurte natural"], iogurte: ["Leite", "Bebida vegetal"],
+        pão: ["Tapioca", "Aveia"], pao: ["Tapioca", "Aveia"]
+    };
+
+    function shoppingNormalize(value) {
+        return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+    }
+
+    function parseShoppingItem(raw) {
+        if (raw && typeof raw === "object") {
+            const name = String(raw.name || raw.foodId || "").trim();
+            const quantity = Number(raw.quantity);
+            return { name, quantity: Number.isFinite(quantity) ? quantity : null, unit: String(raw.unit || "").trim() };
+        }
+        const text = String(raw || "").trim();
+        const match = text.match(/^([0-9]+(?:[.,][0-9]+)?)\s*(kg|g|mg|ml|l|un(?:idade)?s?|unid\.?|xícaras?|colheres?|fatias?|porções?)\s+(?:de\s+)?(.+)$/i);
+        if (match) return { name: match[3].trim(), quantity: Number(match[1].replace(",", ".")), unit: match[2].toLowerCase().replace("unidades", "un").replace("unidade", "un").replace("unid.", "un") };
+        const simple = text.match(/^([0-9]+(?:[.,][0-9]+)?)\s+(.+)$/);
+        if (simple && /\b(ovo|banana|maca|maçã|laranja|fatia|unidade)\b/i.test(simple[2])) return { name: simple[2].trim(), quantity: Number(simple[1].replace(",", ".")), unit: "un" };
+        return { name: text, quantity: null, unit: "" };
+    }
+
+    function collectShoppingItems(plan) {
+        const items = new Map();
+        groupDietMeals(plan).forEach((group) => asArray(group.meals).forEach((meal) => asArray(meal.items).forEach((raw) => {
+            const parsed = parseShoppingItem(raw);
+            if (!parsed.name) return;
+            const key = `${shoppingNormalize(parsed.name)}|${shoppingNormalize(parsed.unit)}`;
+            const current = items.get(key) || { ...parsed, key, sources: 0 };
+            if (current.quantity != null && parsed.quantity != null) current.quantity += parsed.quantity;
+            else if (parsed.quantity != null && current.quantity == null) current.quantity = parsed.quantity;
+            current.sources += 1;
+            items.set(key, current);
+        })));
+        return Array.from(items.values());
+    }
+
+    function shoppingCategory(name) {
+        const normalized = shoppingNormalize(name);
+        return SHOPPING_CATEGORIES.find(([, terms]) => terms.some((term) => normalized.includes(shoppingNormalize(term))))?.[0] || "Outros";
+    }
+
+    function shoppingAvailable(plan) {
+        return asArray(plan?.questionnaire?.available_ingredients).map(shoppingNormalize).filter(Boolean);
+    }
+
+    function renderShoppingList() {
+        const details = byId("shoppingListDetails");
+        const plan = dietView.plan;
+        if (!details || !plan) return;
+        const people = Math.max(1, Math.min(5, Number(dietShoppingState.people) || 1));
+        dietShoppingState.people = people;
+        const available = shoppingAvailable(plan);
+        const items = collectShoppingItems(plan).map((item) => ({ ...item, available: available.some((value) => value === shoppingNormalize(item.name) || value.includes(shoppingNormalize(item.name)) || shoppingNormalize(item.name).includes(value)) }));
+        const groups = new Map();
+        items.forEach((item) => { if (dietShoppingState.hideAvailable && item.available) return; const category = shoppingCategory(item.name); if (!groups.has(category)) groups.set(category, []); groups.get(category).push(item); });
+        const text = groups.size ? Array.from(groups, ([category, group]) => `${category}\n${group.map((item) => `${dietShoppingState.checked.has(item.key) ? "[x]" : "[ ]"} ${dietShoppingState.substitutions.get(item.key) || item.name}: ${item.quantity != null ? `${(item.quantity * people).toLocaleString("pt-BR")} ${item.unit}` : "conforme receita"}${item.available ? " (já disponível)" : ""}`).join("\n")}`).join("\n\n") : "Nenhum item para comprar.";
+        details.innerHTML = `<div class="shopping-list-controls"><label for="shoppingPeople">Pessoas<select id="shoppingPeople">${[1,2,3,4,5].map((n) => `<option value="${n}" ${n === people ? "selected" : ""}>${n}</option>`).join("")}</select></label><label class="shopping-toggle"><input type="checkbox" id="shoppingHideAvailable" ${dietShoppingState.hideAvailable ? "checked" : ""}> Ocultar o que já tenho</label><button type="button" class="btn-secondary" data-shopping-action="share"><i class="fas fa-share-nodes"></i> Compartilhar</button></div><p class="shopping-list-meta">Lista consolidada para ${people} pessoa(s). Itens marcados ficam salvos nesta sessão.</p>${groups.size ? Array.from(groups, ([category, group]) => `<section class="shopping-category"><h4>${esc(category)}</h4><ul>${group.map((item) => { const key = esc(item.key); const substitute = dietShoppingState.substitutions.get(item.key); const label = substitute || item.name; return `<li class="shopping-item ${dietShoppingState.checked.has(item.key) ? "is-checked" : ""}"><label><input type="checkbox" data-shopping-check="${key}" ${dietShoppingState.checked.has(item.key) ? "checked" : ""}><span>${esc(label)}</span><small>${item.quantity != null ? `${esc((item.quantity * people).toLocaleString("pt-BR"))} ${esc(item.unit)}` : "Conforme receita"}${item.available ? " · Já disponível" : ""}</small></label>${substitute ? `<button type="button" class="shopping-substitute" data-shopping-restore="${key}">Restaurar</button>` : (SHOPPING_SUBSTITUTIONS[shoppingNormalize(item.name)] ? `<button type="button" class="shopping-substitute" data-shopping-substitute="${key}">Substituir</button>` : "")}</li>`; }).join("")}</ul></section>`).join("") : "<p class=\"plan-details-empty\">Nenhum ingrediente encontrado neste plano.</p>"}<textarea class="shopping-share-text" readonly aria-label="Texto da lista de compras">${esc(text)}</textarea>`;
+    }
+
+    function openShoppingList() {
+        if (!dietView.plan) return;
+        if (String(dietShoppingState.planId) !== String(dietView.plan.id)) { dietShoppingState.planId = dietView.plan.id; dietShoppingState.people = 1; dietShoppingState.hideAvailable = false; dietShoppingState.checked = new Set(); dietShoppingState.substitutions = new Map(); }
+        renderShoppingList();
+        openAppModal(byId("shoppingListModal"));
+    }
+
+    function closeShoppingListModal() { closeAppModal(byId("shoppingListModal")); }
+
+    async function shareShoppingList() {
+        const text = byId("shoppingListDetails")?.querySelector(".shopping-share-text")?.value || "Lista de compras";
+        if (navigator.share) { await navigator.share({ title: "Lista de compras", text }).catch(() => {}); return; }
+        try { await navigator.clipboard.writeText(text); showToast("Lista copiada para compartilhar.", "success"); } catch { showToast("Não foi possível copiar a lista.", "error"); }
     }
 
     function renderDietDetail() {
@@ -1619,7 +2028,7 @@
                 <div class="plan-summary__icon"><i class="fas fa-apple-alt" aria-hidden="true"></i></div>
                 <div><span>Plano alimentar</span><p>${esc(plan.description || "Uma rotina alimentar organizada para você.")}</p></div>
                 <small><i class="far fa-calendar" aria-hidden="true"></i> ${esc(formatDateTime(plan.created_at))}</small>
-            </section><div class="plan-current-action">${currentAction}<button type="button" class="btn-secondary" onclick="openPlanReviewRequest('diet', '${esc(plan.id)}')"><i class="fas fa-user-check"></i> Solicitar revisão profissional</button>${plan.professional_review ? `<span class="professional-review-badge"><i class="fas fa-shield-check"></i> Revisado por ${esc(plan.professional_review.professional?.username || "profissional")}</span>` : ""}</div>`;
+            </section><div class="plan-current-action">${currentAction}<button type="button" class="btn-secondary" data-diet-action="shopping-list"><i class="fas fa-cart-shopping"></i> Lista de compras</button><button type="button" class="btn-secondary" onclick="openPlanReviewRequest('diet', '${esc(plan.id)}')"><i class="fas fa-user-check"></i> Solicitar revisão profissional</button>${plan.professional_review ? `<span class="professional-review-badge"><i class="fas fa-shield-check"></i> Revisado por ${esc(plan.professional_review.professional?.username || "profissional")}</span>` : ""}</div>`;
         if (!groups.length) {
             details.innerHTML = `${summary}<div class="plan-details-empty">Nenhuma refeição detalhada para este plano.</div>`;
             return;
@@ -3570,6 +3979,26 @@
             handleIngredientClick(event);
             const action = event.target.closest("[data-wizard-action]")?.dataset.wizardAction;
             if (action === "close") closePlanWizard();
+            if (action === "open-profile") window.openProfileEditor?.();
+            if (action === "check-generation") {
+                if (activeWizardType === "diet") checkDietGeneration();
+                else checkWorkoutGeneration();
+            }
+            if (action === "open-generation-library") {
+                const type = activeWizardType;
+                closePlanWizard();
+                showTab(type === "diet" ? "diet_plans" : "workout_plans");
+                if (type === "diet") loadDietPlans();
+                else loadWorkoutPlans();
+            }
+            const editStep = event.target.closest("[data-wizard-edit-step]")?.dataset.wizardEditStep;
+            if (editStep != null && activeWizardType === "diet") {
+                const state = wizardMemory.diet;
+                state.step = Math.max(0, Math.min(2, Number(editStep)));
+                state.error = "";
+                state.fieldErrors = {};
+                renderWizard({ focusHeading: true });
+            }
             if (action === "back" && activeWizardType) {
                 const state = wizardMemory[activeWizardType];
                 if (!state.generating && state.step > 0) {
@@ -3717,6 +4146,7 @@
         });
 
         byId("viewDietPlanDetails")?.addEventListener("click", (event) => {
+            if (event.target.closest('[data-diet-action="shopping-list"]')) { openShoppingList(); return; }
             if (event.target.closest('[data-diet-action="set-current"]')) {
                 setCurrentDietPlan();
                 return;
@@ -3728,6 +4158,19 @@
             dietView.selectedDay = index;
             renderDietDetail();
             requestAnimationFrame(() => byId(`diet-day-tab-${index}`)?.focus());
+        });
+        byId("shoppingListDetails")?.addEventListener("change", (event) => {
+            if (event.target.id === "shoppingPeople") { dietShoppingState.people = Number(event.target.value) || 1; renderShoppingList(); return; }
+            if (event.target.id === "shoppingHideAvailable") { dietShoppingState.hideAvailable = event.target.checked; renderShoppingList(); return; }
+            const check = event.target.closest("[data-shopping-check]");
+            if (check) { const key = check.dataset.shoppingCheck; if (check.checked) dietShoppingState.checked.add(key); else dietShoppingState.checked.delete(key); renderShoppingList(); }
+        });
+        byId("shoppingListDetails")?.addEventListener("click", (event) => {
+            if (event.target.closest('[data-shopping-action="share"]')) { shareShoppingList(); return; }
+            const substitute = event.target.closest("[data-shopping-substitute]");
+            const restore = event.target.closest("[data-shopping-restore]");
+            if (substitute) { const item = collectShoppingItems(dietView.plan).find((entry) => entry.key === substitute.dataset.shoppingSubstitute); const options = item && SHOPPING_SUBSTITUTIONS[shoppingNormalize(item.name)]; if (options?.length) dietShoppingState.substitutions.set(item.key, options[0]); renderShoppingList(); }
+            if (restore) { dietShoppingState.substitutions.delete(restore.dataset.shoppingRestore); renderShoppingList(); }
         });
         byId("viewDietPlanDetails")?.addEventListener("keydown", (event) => {
             const tab = event.target.closest("[data-diet-day-index]");
@@ -4004,6 +4447,8 @@
     window.openWorkoutCurrentModal = openWorkoutCurrentModal;
     window.toggleWorkoutPlansLibrary = toggleWorkoutPlansLibrary;
     window.viewDietPlan = viewDietPlan;
+    window.openShoppingList = openShoppingList;
+    window.closeShoppingListModal = closeShoppingListModal;
     window.viewWorkoutPlan = viewWorkoutPlan;
     window.openWorkoutActivity = openWorkoutActivity;
     window.loadActiveWorkoutDock = loadActiveWorkoutDock;
