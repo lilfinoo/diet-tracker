@@ -1,5 +1,9 @@
 {
   "appId": "ai.fittracker.app",
   "appName": "Fit Tracker",
-  "webDir": "copilot"
+  "webDir": "copilot",
+  "server": {
+    "url": "https://diet-tracker-6i67.onrender.com",
+    "cleartext": false
+  }
 }
