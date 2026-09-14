@@ -147,8 +147,22 @@
     }
 
     async function uploadPhoto(file) {
+        const input = byId("networkAvatarInput");
+        if (!file || !file.type.startsWith("image/")) { showToast("Selecione um arquivo de imagem.", "error"); return; }
+        if (file.size > 12 * 1024 * 1024) { showToast("A foto deve ter no máximo 12 MB.", "error"); return; }
+        input?.setAttribute("aria-busy", "true");
+        if (input) input.disabled = true;
         const form = new FormData();
-        form.append("photo", file);
+        try {
+            const image = await downscaleImageFile(file, 1200);
+            const blob = await fetch(image.dataUrl).then(response => response.blob());
+            form.append("photo", blob, "avatar.jpg");
+        } catch (error) {
+            showToast("Não foi possível preparar a foto. Escolha JPG/PNG ou tente outra imagem.", "error");
+            if (input) input.disabled = false;
+            input?.removeAttribute("aria-busy");
+            return;
+        }
         try {
             const response = await fetch(`${API_BASE}/profile/avatar`, { method: "POST", credentials: "include", body: form });
             const data = await response.json().catch(() => ({}));
@@ -158,6 +172,9 @@
             showToast(data.message, "success");
         } catch (error) {
             showToast(error.message, "error");
+        } finally {
+            if (input) input.disabled = false;
+            input?.removeAttribute("aria-busy");
         }
     }
 

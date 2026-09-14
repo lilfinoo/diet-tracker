@@ -520,7 +520,7 @@ def normalize_manual_diet(data, questionnaire):
 
 def correction_feedback(error, candidate=None, targets=None):
     feedback = {
-        "instruction": "Ajuste porções e refeições para aproximar os totais das metas, preservando preferências e restrições.",
+        "instruction": "Ajuste as porções numericamente para que CADA dia fique dentro de todas as faixas permitidas. Preserve alimentos e restrições sempre que possível; não apenas troque o texto. Recalcule os quatro totais depois do ajuste.",
         "validation_errors": dict(list(error.errors.items())[:20]),
     }
     if candidate:

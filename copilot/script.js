@@ -165,16 +165,21 @@ function hideGlobalLoading() {
 }
 
 async function downscaleImageFile(file, maxSize = 1024) {
+    if (!file || !/^image\//i.test(file.type || '')) throw new Error("Arquivo de imagem inválido");
+    if (file.size > 12 * 1024 * 1024) throw new Error("A imagem é muito grande");
     const dataUrl = await new Promise((resolve, reject) => {
         const reader = new FileReader();
+        const timeout = setTimeout(() => { reader.abort(); reject(new Error("Tempo excedido ao ler a foto")); }, 15000);
         reader.onload = () => resolve(reader.result);
         reader.onerror = () => reject(new Error("Falha ao ler o arquivo"));
+        reader.onloadend = () => clearTimeout(timeout);
         reader.readAsDataURL(file);
     });
     const img = await new Promise((resolve, reject) => {
         const image = new Image();
-        image.onload = () => resolve(image);
-        image.onerror = () => reject(new Error("Falha ao decodificar a imagem"));
+        const timeout = setTimeout(() => reject(new Error("Tempo excedido ao decodificar a imagem")), 15000);
+        image.onload = () => { clearTimeout(timeout); resolve(image); };
+        image.onerror = () => { clearTimeout(timeout); reject(new Error("Falha ao decodificar a imagem")); };
         image.src = dataUrl;
     });
     let width = img.naturalWidth || img.width;
@@ -188,7 +193,8 @@ async function downscaleImageFile(file, maxSize = 1024) {
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d");
-    if (ctx) ctx.drawImage(img, 0, 0, width, height);
+    if (!ctx) throw new Error("Seu dispositivo não consegue processar esta foto");
+    ctx.drawImage(img, 0, 0, width, height);
     const out = canvas.toDataURL("image/jpeg", 0.8);
     return { dataUrl: out, base64: out.split(",")[1] };
 }
@@ -692,7 +698,9 @@ async function initializeGoogleAuth() {
         script.onload = () => {
             google.accounts.id.initialize({
                 client_id: config.google_client_id,
-                callback: handleGoogleCredential
+                callback: handleGoogleCredential,
+                ux_mode: 'popup',
+                cancel_on_tap_outside: false
             });
             google.accounts.id.renderButton(getElement('googleSignInButton'), {
                 theme: 'outline', size: 'large', width: 320, text: 'continue_with'

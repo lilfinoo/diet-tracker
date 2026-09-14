@@ -196,15 +196,17 @@
             if (!file) return;
             invalidate(); const token = ++photoVersion, owner = account();
             photo = null; dirty = true; clearNutrients(); el('dietPhotoPreview').hidden = true;
-            loadingPhoto = true; render();
+            loadingPhoto = true; message('Preparando a foto…'); render();
             try {
                 const result = await downscaleImageFile(file, 1024);
                 if (token !== photoVersion || owner !== account()) return;
                 const mime = result.dataUrl.match(/^data:([^;]+);/)?.[1];
                 photo = { data: result.base64, mime_type: mime || file.type };
                 el('dietPhotoPreviewImg').src = result.dataUrl; el('dietPhotoPreview').hidden = false; message();
-            } catch (_) {
-                if (token === photoVersion && owner === account()) message('Não foi possível abrir a foto. Escolha outra imagem ou escreva a refeição.');
+            } catch (error) {
+                if (token === photoVersion && owner === account()) message(error.message === 'Arquivo de imagem inválido'
+                    ? 'Escolha uma foto válida.'
+                    : 'Não foi possível abrir a foto. Escolha JPG/PNG ou escreva a refeição.');
             } finally {
                 if (token === photoVersion && owner === account()) { loadingPhoto = false; render(); }
             }
