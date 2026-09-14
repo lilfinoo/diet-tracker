@@ -1920,6 +1920,7 @@ function showTab(tabName, options = {}) {
         activeBtn.setAttribute('aria-current', 'page');
     }
     
+    const previousTab = currentTab;
     currentTab = tabName;
     if (PRIMARY_VIEWS.has(tabName)) lastPrimaryTab = tabName;
     document.body.dataset.activeTab = tabName;
@@ -1936,7 +1937,7 @@ function showTab(tabName, options = {}) {
     getElement('guestDailySummary')?.classList.add('hidden');
     getElement('dailyMacroGrid')?.classList.remove('hidden');
     if (tabName === 'diet') {
-        loadDietEntries();
+        loadDietEntries({ showLoading: previousTab !== 'diet' });
         loadTodayCardapio();
     } else if (tabName === 'measurements') {
         loadMeasurements();
@@ -2987,8 +2988,12 @@ function renderTodayCardapio(dailyView, errorMessage) {
         <button type="button" class="today-meal-option${Number(option.id) === Number(meal.id) ? ' is-selected' : ''}" onclick="selectTodayDietOption('${slot.slot_key}', ${Number(option.id)})" aria-pressed="${Number(option.id) === Number(meal.id)}">
             <strong>Opção ${index + 1}</strong><span>${escapeHtml(dietPlanItemsText(option))}</span>
         </button>`).join('')}</div>` : '';
-    const disabled = todayDietMutationSlotKey === slot.slot_key ? ' disabled' : '';
-    bodyEl.innerHTML = `<div class="today-meal"><div class="today-meal__intro"><span class="today-meal__icon"><i data-lucide="${mealIconName(meal.meal_type)}" aria-hidden="true"></i></span><div><p class="today-muted">Opção ${optionPosition} de ${alternatives.length}</p><h3>${escapeHtml(slot.label || meal.meal_type)}</h3></div></div><p class="today-food-description">${escapeHtml(dietPlanItemsText(meal))}</p><button type="button" class="today-food-primary" onclick="quickLogDailyMeal('${slot.slot_key}', 'exact')"${disabled}><i data-lucide="check" aria-hidden="true"></i> Comi isso</button><div class="today-food-secondary"><button type="button" class="text-button" onclick="quickLogDailyMeal('${slot.slot_key}', 'describe')"${disabled}>Comi diferente</button><button type="button" class="text-button diet-daily-skip" onclick="quickLogDailyMeal('${slot.slot_key}', 'skip')"${disabled}>Pular refeição</button>${alternatives.length > 1 ? `<button type="button" class="text-button" onclick="toggleTodayDietOptions('${slot.slot_key}')" aria-expanded="${selectorOpen}"${disabled}>Trocar opção</button>` : ''}</div>${selector}</div>`;
+    const mutating = todayDietMutationSlotKey === slot.slot_key;
+    const disabled = mutating ? ' disabled' : '';
+    const primaryLabel = mutating
+        ? '<span class="today-action-spinner" aria-hidden="true"></span> Salvando...'
+        : '<i data-lucide="check" aria-hidden="true"></i> Comi isso';
+    bodyEl.innerHTML = `<div class="today-meal"><div class="today-meal__intro"><span class="today-meal__icon"><i data-lucide="${mealIconName(meal.meal_type)}" aria-hidden="true"></i></span><div><p class="today-muted">Opção ${optionPosition} de ${alternatives.length}</p><h3>${escapeHtml(slot.label || meal.meal_type)}</h3></div></div><p class="today-food-description">${escapeHtml(dietPlanItemsText(meal))}</p><button type="button" class="today-food-primary" onclick="quickLogDailyMeal('${slot.slot_key}', 'exact')"${disabled} aria-busy="${mutating}">${primaryLabel}</button><div class="today-food-secondary"><button type="button" class="text-button" onclick="quickLogDailyMeal('${slot.slot_key}', 'describe')"${disabled}>Comi diferente</button><button type="button" class="text-button diet-daily-skip" onclick="quickLogDailyMeal('${slot.slot_key}', 'skip')"${disabled}>Pular refeição</button>${alternatives.length > 1 ? `<button type="button" class="text-button" onclick="toggleTodayDietOptions('${slot.slot_key}')" aria-expanded="${selectorOpen}"${disabled}>Trocar opção</button>` : ''}</div>${selector}</div>`;
 }
 
 function renderDietCurrentPlanHub(plan, errorMessage) {

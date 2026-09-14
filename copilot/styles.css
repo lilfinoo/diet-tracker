@@ -13522,6 +13522,16 @@ button.achievement-slot { cursor: pointer; }
     outline: 3px solid rgba(94, 234, 212, 0.45);
     outline-offset: 2px;
 }
+#dietTab .today-action-spinner {
+    width: 0.85rem;
+    height: 0.85rem;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: today-action-spin 700ms linear infinite;
+}
+@keyframes today-action-spin { to { transform: rotate(360deg); } }
+#dietTab .today-food-primary:disabled { cursor: wait; opacity: 0.82; transform: none; }
 #dietTab .today-food-secondary {
     display: flex;
     justify-content: space-between;
