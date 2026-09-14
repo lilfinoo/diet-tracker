@@ -1,8 +1,12 @@
 {
+  "scripts": {
+    "ios:sync": "npx cap sync ios",
+    "ios:open": "npx cap open ios"
+  },
   "dependencies": {
-    "@capacitor/cli": "^8.5.1",
-    "@capacitor/core": "^8.5.1",
-    "@capacitor/ios": "^8.5.1",
+    "@capacitor/cli": "8.5.1",
+    "@capacitor/core": "8.5.1",
+    "@capacitor/ios": "8.5.1",
     "lucide": "1.42.0"
   }
 }

@@ -6,7 +6,7 @@
     const asArray = (value) => Array.isArray(value) ? value : [];
 
     async function api(path, options = {}) {
-        const response = await fetch(`${API_BASE}${path}`, {
+        const response = await window.fetchWithTimeout(`${API_BASE}${path}`, {
             method: options.method || "GET",
             credentials: "include",
             headers: options.body === undefined ? {} : { "Content-Type": "application/json" },
@@ -259,6 +259,9 @@
     let performanceLoading = false;
     let performanceRequest = 0;
     let overviewRequest = 0;
+    let overviewCache = null;
+    let overviewPromise = null;
+    const OVERVIEW_CACHE_MS = 60_000;
 
     function performanceSets(session) {
         if (!session?.sets?.length) return '<p>Séries não informadas nesta sessão antiga.</p>';
@@ -310,17 +313,42 @@
     async function loadProgressOverview() {
         const container = byId("workoutProgressOverview");
         if (!container || !currentUser) return;
-        container.innerHTML = '<div class="plans-loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Calculando progresso...</span></div>';
+        const ownerId = String(currentUser.id);
+        const fresh = overviewCache && overviewCache.ownerId === ownerId && Date.now() - overviewCache.at < OVERVIEW_CACHE_MS;
+        if (fresh) {
+            renderProgressOverview(overviewCache.data);
+            return overviewCache.data;
+        }
+        if (!overviewCache || overviewCache.ownerId !== ownerId) {
+            container.innerHTML = '<div class="plans-loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Calculando progresso...</span></div>';
+        } else {
+            container.setAttribute("aria-busy", "true");
+            container.insertAdjacentHTML("afterbegin", '<p class="progress-refresh" role="status">Atualizando…</p>');
+        }
+        if (overviewPromise) return overviewPromise;
         const token = progressRequestToken;
         const request = ++overviewRequest;
+        overviewPromise = (async () => {
         try {
             const result = await api("/progress/overview?view=summary");
             if (token !== progressRequestToken || request !== overviewRequest) return;
+            overviewCache = { ownerId, at: Date.now(), data: result };
             renderProgressOverview(result);
+            return result;
         } catch (error) {
             if (token !== progressRequestToken || request !== overviewRequest) return;
-            container.innerHTML = retry(error.message, 'retry-overview');
+            if (overviewCache?.ownerId === ownerId) {
+                renderProgressOverview(overviewCache.data);
+                container.insertAdjacentHTML("afterbegin", retry(error.message, 'retry-overview'));
+            } else container.innerHTML = retry(error.message, 'retry-overview');
+        } finally {
+            if (request === overviewRequest) {
+                overviewPromise = null;
+                container.removeAttribute("aria-busy");
+            }
         }
+        })();
+        return overviewPromise;
     }
 
     function openExerciseGoalForm(exerciseKey, exerciseName, trigger) {
@@ -357,6 +385,7 @@
                 form.innerHTML = '<p role="status">Meta criada. Acompanhe seu avanço em Progresso.</p><button type="button" data-progress-action="close-goal-form">Fechar</button>';
                 form.querySelector('button').focus();
             }
+            overviewCache = null;
             await loadProgressOverview();
             if (weekly) byId('workoutProgressOverview')?.querySelector('[data-progress-action="edit-weekly"]')?.focus();
         } catch (requestError) {
@@ -375,6 +404,7 @@
         try {
             await api(`/progress/exercise-goals/${encodeURIComponent(button.dataset.cancelGoal)}`, { method: 'DELETE' });
             if (token !== progressRequestToken) return;
+            overviewCache = null;
             await loadProgressOverview();
             byId('workoutProgressOverview')?.querySelector('[data-progress-action="go-activities"]')?.focus();
             showToast('Meta cancelada. Seu histórico foi preservado.', 'success');
@@ -552,6 +582,8 @@
         performanceItems = [];
         performanceRequest += 1;
         overviewRequest += 1;
+        overviewCache = null;
+        overviewPromise = null;
         activitiesHasMore = false;
         activitiesLoading = false;
         exerciseKeyOpen = null;
@@ -570,6 +602,7 @@
     window.renderProgressRecord = recordLabel;
     window.loadWorkoutActivities = loadActivities;
     window.loadProgressOverview = loadProgressOverview;
+    window.invalidateProgressOverview = () => { overviewCache = null; };
     window.loadPersonalRecords = loadPersonalRecords;
     window.openExerciseProgress = openExerciseProgress;
     window.clearWorkoutProgress = clearWorkoutProgress;

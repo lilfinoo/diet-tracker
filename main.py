@@ -132,14 +132,23 @@ def create_app(config_class=None):
             abort(404)
         return None
 
+    @app.before_request
+    def refresh_authenticated_session():
+        if session.get("user_id"):
+            session.permanent = True
+
     @app.after_request
     def apply_security_headers(response):
+        if session.get("user_id"):
+            session.permanent = True
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "same-origin")
         response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         if app.config["HSTS_ENABLED"]:
             response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        if request.path in {"/", "/app", "/app/"} or request.path.startswith("/app/"):
+            response.headers.setdefault("Cache-Control", "no-cache")
         return response
 
     @app.cli.command("create-admin")
@@ -235,6 +244,13 @@ def create_app(config_class=None):
     def health():
         db.session.execute(text("SELECT 1"))
         return {"status": "ok"}
+
+    @app.route("/api/version")
+    def version():
+        return {
+            "version": os.getenv("APP_VERSION", "v1.0"),
+            "commit": os.getenv("RENDER_GIT_COMMIT", "local")[:12],
+        }
 
     @app.route("/", defaults={"path": ""})
     @app.route("/<path:path>")

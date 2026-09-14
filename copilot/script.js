@@ -20,6 +20,9 @@ let pendingProfileRequiredFields = [];
 let googleSignupToken = null;
 let legalVersions = null;
 let authMessageTimer = null;
+let authRequestInFlight = false;
+let authCheckInFlight = null;
+let lastAuthCheckAt = 0;
 let billingReturnHandled = false;
 let profileAchievementsState = { selected: [], achievements: [], badges: [], records: [], limit: 3, filter: 'all', savingToken: null };
 
@@ -319,6 +322,7 @@ document.addEventListener('DOMContentLoaded', function() {
     syncChoiceCards();
     initializeAchievementControls();
     initializeGoogleAuth();
+    refreshDisplayedVersion();
     addEventListenerSafe('googleUsernameForm', 'submit', finishGoogleSignup);
 
     // Formulário de dieta
@@ -386,6 +390,30 @@ document.addEventListener('DOMContentLoaded', function() {
 
 
 });
+
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && currentUser && Date.now() - lastAuthCheckAt > 60_000) checkAuthStatus();
+});
+
+window.addEventListener('pageshow', () => {
+    if (currentUser && Date.now() - lastAuthCheckAt > 60_000) checkAuthStatus();
+});
+
+window.Capacitor?.Plugins?.App?.addListener?.('appStateChange', ({ isActive }) => {
+    if (isActive && currentUser && Date.now() - lastAuthCheckAt > 60_000) checkAuthStatus();
+});
+
+async function refreshDisplayedVersion() {
+    try {
+        const response = await window.fetchWithTimeout(`${API_BASE}/version`);
+        if (!response.ok) return;
+        const data = await response.json();
+        const label = [data.version, data.commit && data.commit !== 'local' ? data.commit : ''].filter(Boolean).join(' · ');
+        document.querySelectorAll('.app-version').forEach((element) => { element.textContent = label; });
+    } catch (_error) {
+        // A versão estática continua visível quando a rede ainda não está disponível.
+    }
+}
 
 // --- FUNÇÕES PRINCIPAIS ---
 
@@ -591,8 +619,10 @@ function setDefaultDates() {
 
 // Authentication functions
 async function checkAuthStatus() {
+    if (authCheckInFlight) return authCheckInFlight;
+    authCheckInFlight = (async () => {
     try {
-        const response = await fetch(`${API_BASE}/check_session`, {
+        const response = await window.fetchWithTimeout(`${API_BASE}/check_session`, {
             credentials: 'include'
         });
         
@@ -606,18 +636,27 @@ async function checkAuthStatus() {
             } else {
                 setCsrfToken(null);
                 setCurrentUser(null);
+                window.clearWorkoutProgress?.();
                 showMainScreen();
             }
-        } else {
+        } else if (response.status === 401 || response.status === 403) {
             setCsrfToken(null);
+            setCurrentUser(null);
+            window.clearWorkoutProgress?.();
             showMainScreen();
+        } else {
+            showMainScreen();
+            showToast('Não foi possível confirmar sua sessão agora.', 'info');
         }
     } catch (error) {
         console.error('Auth check failed:', error);
-        setCsrfToken(null);
         showMainScreen();
     }
     handleBillingReturn();
+    lastAuthCheckAt = Date.now();
+    })();
+    try { return await authCheckInFlight; }
+    finally { authCheckInFlight = null; }
 }
 
 function removeQueryParameter(name) {
@@ -685,12 +724,22 @@ function hasAiAccess() {
 
 async function initializeGoogleAuth() {
     try {
-        const response = await fetch(`${API_BASE}/auth/config`);
+        const response = await window.fetchWithTimeout(`${API_BASE}/auth/config`);
         const config = response.ok ? await response.json() : {};
         legalVersions = config.legal || null;
         if (!config.google_client_id) return;
         getElement('googleAuthSection')?.classList.remove('hidden');
         getElement('googleHeaderButton')?.classList.remove('hidden');
+        if (window.Capacitor?.getPlatform?.() === 'ios') {
+            getElement('googleSignInButton')?.replaceChildren();
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'google-native-signin';
+            button.textContent = 'Continuar com Google';
+            button.addEventListener('click', startNativeGoogleSignIn);
+            getElement('googleSignInButton')?.append(button);
+            return;
+        }
         const script = document.createElement('script');
         script.src = 'https://accounts.google.com/gsi/client';
         script.async = true;
@@ -713,6 +762,24 @@ async function initializeGoogleAuth() {
     }
 }
 
+async function startNativeGoogleSignIn() {
+    const plugin = window.Capacitor?.Plugins?.FitTrackerGoogleAuth;
+    if (!plugin?.signIn) {
+        showAuthMessage('Atualize o app para concluir o login com Google. Você ainda pode entrar com e-mail e senha.', 'info');
+        return;
+    }
+    setGoogleAuthPending(true, 'Abrindo suas contas Google...');
+    try {
+        const result = await plugin.signIn();
+        if (!result?.idToken) throw new Error('O Google não devolveu uma credencial válida. Tente novamente.');
+        await handleGoogleCredential({ credential: result.idToken });
+    } catch (error) {
+        if (error?.message !== 'cancelled') showAuthMessage(error.message || 'Não foi possível entrar com Google.', 'error');
+    } finally {
+        setGoogleAuthPending(false);
+    }
+}
+
 function setGoogleAuthPending(pending, message = '') {
     const section = getElement('googleAuthSection');
     const submit = getElement('googleSignupSubmit');
@@ -726,15 +793,21 @@ function setGoogleAuthPending(pending, message = '') {
 
 function openAuthWithGoogle() {
     openAuthModal('Entre com sua conta Google em um toque.', 'login');
+    if (window.Capacitor?.getPlatform?.() === 'ios') {
+        startNativeGoogleSignIn();
+        return;
+    }
     if (window.google?.accounts?.id) {
         try { google.accounts.id.prompt(); } catch (error) { /* o modal oficial permanece como caminho alternativo */ }
     }
 }
 
 async function handleGoogleCredential(result) {
+    if (authRequestInFlight) return;
+    authRequestInFlight = true;
     setGoogleAuthPending(true, 'Entrando com Google...');
     try {
-        const response = await fetch(`${API_BASE}/auth/google`, {
+        const response = await window.fetchWithTimeout(`${API_BASE}/auth/google`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
@@ -754,6 +827,7 @@ async function handleGoogleCredential(result) {
     } catch (error) {
         showAuthMessage(error.message, 'error');
     } finally {
+        authRequestInFlight = false;
         setGoogleAuthPending(false);
     }
 }
@@ -860,6 +934,7 @@ function showMainScreen(options = {}) {
         getElement('adminPanelBtn')?.classList.toggle('hidden', !isAdmin);
         getElement('profileAdminLink')?.classList.toggle('hidden', !isAdmin);
         getElement('professionalPanelBtn')?.classList.toggle('hidden', !isProfessional);
+        getElement('profileProfessionalDashboard')?.classList.toggle('hidden', !isProfessional);
         getElement('networkHeaderButton')?.classList.remove('hidden');
     } else {
         const welcomeUser = getElement('welcomeUser');
@@ -880,6 +955,7 @@ function showMainScreen(options = {}) {
         getElement('adminPanelBtn')?.classList.add('hidden');
         getElement('profileAdminLink')?.classList.add('hidden');
         getElement('professionalPanelBtn')?.classList.add('hidden');
+        getElement('profileProfessionalDashboard')?.classList.add('hidden');
         if (window.clearActiveWorkoutDock) window.clearActiveWorkoutDock();
     }
 
@@ -1576,6 +1652,7 @@ async function readAuthResponse(response) {
 
 async function handleLogin(e) {
     e.preventDefault();
+    if (authRequestInFlight) return;
     const username = getElement("loginUsername").value.trim();
     const password = getElement("loginPassword").value.trim();
 
@@ -1584,8 +1661,11 @@ async function handleLogin(e) {
         return;
     }
 
+    const submit = e.currentTarget.querySelector('button[type="submit"]');
+    authRequestInFlight = true;
+    if (submit) { submit.disabled = true; submit.textContent = 'Entrando...'; }
     try {
-        const response = await fetch(`${API_BASE}/login`, {
+        const response = await window.fetchWithTimeout(`${API_BASE}/login`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
@@ -1610,6 +1690,9 @@ async function handleLogin(e) {
     } catch (error) {
         console.error("Login error:", error);
         showAuthMessage("Erro de conexão. Tente novamente.", "error");
+    } finally {
+        authRequestInFlight = false;
+        if (submit) { submit.disabled = false; submit.textContent = 'Entrar'; }
     }
 }
 
@@ -1763,10 +1846,12 @@ async function deleteAccount() {
 
 async function logout() {
     try {
-        await fetch(`${API_BASE}/logout`, {
+        const response = await window.fetchWithTimeout(`${API_BASE}/logout`, {
             method: "POST",
             credentials: "include"
         });
+        if (!response.ok) throw new Error('Não foi possível encerrar sua sessão. Tente novamente.');
+        try { await window.Capacitor?.Plugins?.FitTrackerGoogleAuth?.signOut?.(); } catch (_error) { /* a sessão do backend já foi encerrada */ }
         setCurrentUser(null);
         setCsrfToken(null);
         window.clearWorkoutProgress?.();
@@ -1774,10 +1859,7 @@ async function logout() {
         showToast("Logout realizado com sucesso", "success");
     } catch (error) {
         console.error("Logout error:", error);
-        setCurrentUser(null);
-        setCsrfToken(null);
-        window.clearWorkoutProgress?.();
-        showMainScreen({ tab: 'diet' });
+        showToast(error.message || 'Não foi possível encerrar sua sessão.', 'error');
     }
 }
 

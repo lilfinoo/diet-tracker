@@ -89,6 +89,19 @@ function wait(milliseconds) {
     return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
+async function fetchWithTimeout(input, init = {}, timeoutMilliseconds = 15_000) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMilliseconds);
+    try {
+        return await fetch(input, { ...init, signal: controller.signal });
+    } catch (error) {
+        if (error.name === "AbortError") throw new Error("A solicitação demorou demais. Tente novamente.");
+        throw error;
+    } finally {
+        window.clearTimeout(timeout);
+    }
+}
+
 async function waitForAIJob(initial, timeoutMilliseconds = 10 * 60 * 1000, options = {}) {
     if (!initial?.job_id) return initial;
     const jobLabel = options.jobLabel || "plano";
@@ -135,6 +148,7 @@ async function waitForAIJob(initial, timeoutMilliseconds = 10 * 60 * 1000, optio
 
 if (typeof window !== "undefined") {
     window.waitForAIJob = waitForAIJob;
+    window.fetchWithTimeout = fetchWithTimeout;
     window.formatDietPlanItem = formatDietPlanItem;
     window.formatDietPlanItemsText = formatDietPlanItemsText;
 }

@@ -1228,13 +1228,21 @@
         }
         if (!window.requireAuth?.(`Entre para gerar seu plano de ${type === "diet" ? "dieta" : "treino"}.`, { premium: true })) return;
 
-        if (type === "workout") await waitForWorkoutRecommendation(state);
-
         state.generating = true;
         state.pendingGenerationJob = null;
         state.generationJob = null;
         state.uncertainSubmission = false;
         renderWizard();
+        if (type === "workout") {
+            try {
+                await waitForWorkoutRecommendation(state);
+            } catch (error) {
+                state.generating = false;
+                state.error = error.message;
+                renderWizard();
+                return;
+            }
+        }
         window.analytics?.track("plan_generation_requested", {
             plan_type: type,
             surface: professionalWizardContext ? "professional" : "self_service"
@@ -3784,6 +3792,7 @@
             clearLocalWorkoutDraft(session.id);
             clearActiveWorkoutDock();
             workoutView.replacementPanels.clear();
+            window.invalidateProgressOverview?.();
             showToast("Treino finalizado. Excelente trabalho!", "success");
         } catch (error) {
             if (viewVersion === workoutView.viewVersion) workoutView.sessionError = error.message;
@@ -3841,6 +3850,7 @@
             closeViewWorkoutPlanModal();
             showTab("activities");
             window.loadWorkoutActivities?.();
+            window.invalidateProgressOverview?.();
             window.loadProgressOverview?.();
             showToast("Atividade excluída.", "success");
         } catch (error) {
@@ -3977,6 +3987,16 @@
                 navigateSessionExercise(-1);
             }
         }
+    }
+
+    function cancelWorkoutPlayerGesture(event) {
+        const gesture = workoutGesture;
+        if (!gesture || gesture.pointerId !== event.pointerId) return;
+        workoutGesture = null;
+        gesture.stage.classList.remove("is-player-dragging");
+        gesture.stage.style.removeProperty("--player-swipe-x");
+        gesture.sheet?.classList.remove("is-dragging");
+        if (gesture.sheet) gesture.sheet.style.transform = "";
     }
 
     function initializePlanExperience() {
@@ -4441,7 +4461,7 @@
         byId("viewWorkoutPlanDetails")?.addEventListener("pointerdown", startWorkoutPlayerGesture);
         byId("viewWorkoutPlanDetails")?.addEventListener("pointermove", moveWorkoutPlayerGesture);
         byId("viewWorkoutPlanDetails")?.addEventListener("pointerup", endWorkoutPlayerGesture);
-        byId("viewWorkoutPlanDetails")?.addEventListener("pointercancel", endWorkoutPlayerGesture);
+        byId("viewWorkoutPlanDetails")?.addEventListener("pointercancel", cancelWorkoutPlayerGesture);
     }
 
     window.openPlanWizard = openPlanWizard;

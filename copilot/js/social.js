@@ -148,9 +148,11 @@
 
     async function uploadPhoto(file) {
         const input = byId("networkAvatarInput");
+        if (input?.dataset.uploading) return;
         if (!file || !file.type.startsWith("image/")) { showToast("Selecione um arquivo de imagem.", "error"); return; }
         if (file.size > 12 * 1024 * 1024) { showToast("A foto deve ter no máximo 12 MB.", "error"); return; }
         input?.setAttribute("aria-busy", "true");
+        if (input) input.dataset.uploading = "true";
         if (input) input.disabled = true;
         const form = new FormData();
         try {
@@ -159,12 +161,13 @@
             form.append("photo", blob, "avatar.jpg");
         } catch (error) {
             showToast("Não foi possível preparar a foto. Escolha JPG/PNG ou tente outra imagem.", "error");
+            delete input?.dataset.uploading;
             if (input) input.disabled = false;
             input?.removeAttribute("aria-busy");
             return;
         }
         try {
-            const response = await fetch(`${API_BASE}/profile/avatar`, { method: "POST", credentials: "include", body: form });
+            const response = await window.fetchWithTimeout(`${API_BASE}/profile/avatar`, { method: "POST", credentials: "include", body: form }, 60_000);
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || "Não foi possível atualizar a foto.");
             currentUser.avatar_url = data.avatar_url;
@@ -173,12 +176,16 @@
         } catch (error) {
             showToast(error.message, "error");
         } finally {
+            delete input?.dataset.uploading;
             if (input) input.disabled = false;
             input?.removeAttribute("aria-busy");
         }
     }
 
     async function removePhoto() {
+        const input = byId("networkAvatarInput");
+        if (input?.dataset.uploading) return;
+        if (input) input.dataset.uploading = "true";
         try {
             const result = await api("/profile/avatar", { method: "DELETE", body: {} });
             currentUser.avatar_url = null;
@@ -186,6 +193,8 @@
             showToast(result.message, "success");
         } catch (error) {
             showToast(error.message, "error");
+        } finally {
+            delete input?.dataset.uploading;
         }
     }
 

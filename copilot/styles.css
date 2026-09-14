@@ -13730,6 +13730,27 @@ button.achievement-slot { cursor: pointer; }
 body:has(#dietTab:not(.hidden)) #activeWorkoutDock { display: none; }
 body:has(#dietTab.today-authenticated:not(.hidden)) .app-header { display: none; }
 
+/* iOS: one owner for the upper safe area. */
+@media (max-width: 1024px) {
+    .app-header {
+        display: none;
+    }
+
+    .app-shell {
+        min-height: 100dvh;
+    }
+
+    .app-content {
+        padding-top: max(1rem, env(safe-area-inset-top));
+        padding-left: max(1rem, env(safe-area-inset-left));
+        padding-right: max(1rem, env(safe-area-inset-right));
+    }
+
+    #dietTab .today-heading {
+        padding-top: 0;
+    }
+}
+
 @media (max-width: 560px) {
     #dietTab { padding-bottom: 0.75rem; }
     #dietTab .today-heading { margin-bottom: 1rem; }
