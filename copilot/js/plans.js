@@ -198,6 +198,7 @@
     let activeWorkoutSummary = null;
     let activeWizardType = null;
     let workoutGesture = null;
+    let lastWorkoutSwipeAt = 0;
     let ignoreNextWorkoutSheetClick = false;
     let professionalWizardContext = null;
     let workoutTimerInterval = null;
@@ -3955,13 +3956,22 @@
             return;
         }
         if (gesture.axis === "horizontal" && Math.abs(gesture.deltaX) >= 58 && Math.abs(gesture.deltaX) > Math.abs(gesture.deltaY) * 1.2) {
+            if (Date.now() - lastWorkoutSwipeAt < 700 || workoutView.pendingAction) return;
+            lastWorkoutSwipeAt = Date.now();
             if (gesture.deltaX < 0) {
                 const exerciseId = gesture.stage.dataset.exerciseId;
                 const exercise = findSelectedExercise(exerciseId);
                 if (!exercise) return;
+                const exercises = asArray(selectedWorkoutDay()?.exercises);
+                const isLastExercise = exercises.length > 0
+                    && String(exercises[exercises.length - 1]?.id) === String(exerciseId);
                 completeWorkoutExercise(exerciseId, {
                     startRest: true,
                     restSeconds: displayedExercise(exercise).exercise.rest_seconds,
+                }).then(() => {
+                    if (isLastExercise && !workoutView.pendingAction && completedWorkoutExerciseIds().has(String(exerciseId))) {
+                        finishWorkoutSession();
+                    }
                 });
             } else {
                 navigateSessionExercise(-1);

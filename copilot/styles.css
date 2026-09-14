@@ -5896,7 +5896,9 @@ textarea:focus-visible,
     position: sticky;
     top: 0;
     z-index: 300;
-    height: 4.25rem;
+    height: calc(4.25rem + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+    box-sizing: border-box;
     border-bottom: 1px solid rgba(205, 230, 217, 0.07);
     background: rgba(7, 16, 12, 0.82);
     backdrop-filter: blur(22px) saturate(140%);
@@ -5904,7 +5906,7 @@ textarea:focus-visible,
 
 .app-header__inner {
     width: min(1240px, 100%);
-    height: 100%;
+    height: 4.25rem;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -5944,6 +5946,16 @@ textarea:focus-visible,
     font-size: 0.58rem;
     font-weight: 600;
     letter-spacing: 0.03em;
+}
+
+.app-version {
+    display: inline-block;
+    margin-left: 0.35rem;
+    color: #93c5fd;
+    font-size: 0.62em;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    vertical-align: middle;
 }
 
 .app-header__actions {
@@ -15553,6 +15565,8 @@ body:has(#dietTab.today-authenticated:not(.hidden)) .app-header { display: none;
     border-radius: inherit;
     background: #fff;
     touch-action: pan-y;
+    -webkit-user-select: none;
+    user-select: none;
 }
 
 .current-exercise-stage--player::after {
