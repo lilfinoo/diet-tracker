@@ -1,3 +1,7 @@
+if (typeof document !== "undefined" && window.Capacitor?.getPlatform?.() === "ios") {
+    document.documentElement.dataset.nativePlatform = "ios";
+}
+
 function escapeHtml(value) {
     return String(value ?? "").replace(/[&<>"']/g, (character) => ({
         "&": "&amp;",
@@ -91,14 +95,128 @@ function wait(milliseconds) {
 
 async function fetchWithTimeout(input, init = {}, timeoutMilliseconds = 15_000) {
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), timeoutMilliseconds);
-    try {
-        return await fetch(input, { ...init, signal: controller.signal });
-    } catch (error) {
-        if (error.name === "AbortError") throw new Error("A solicitação demorou demais. Tente novamente.");
-        throw error;
-    } finally {
+    const externalSignal = init.signal || input?.signal;
+    let timedOut = false;
+    const cancel = () => controller.abort(externalSignal.reason);
+    const cleanup = () => {
         window.clearTimeout(timeout);
+        externalSignal?.removeEventListener('abort', cancel);
+    };
+    const timeout = window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+        cleanup();
+    }, timeoutMilliseconds);
+    if (externalSignal?.aborted) cancel();
+    else externalSignal?.addEventListener('abort', cancel, { once: true });
+    const requestError = error => {
+        if (!timedOut) return error;
+        const result = new Error('A solicitação demorou demais. Tente novamente.');
+        result.name = 'TimeoutError';
+        return result;
+    };
+    const withAbort = async operation => {
+        let onAbort;
+        try {
+            return await Promise.race([
+                Promise.resolve().then(() => {
+                    if (controller.signal.aborted) throw controller.signal.reason;
+                    return operation();
+                }),
+                new Promise((_, reject) => {
+                    onAbort = () => reject(controller.signal.reason);
+                    controller.signal.addEventListener('abort', onAbort, { once: true });
+                })
+            ]);
+        } catch (error) {
+            throw requestError(error);
+        } finally {
+            controller.signal.removeEventListener('abort', onAbort);
+        }
+    };
+    try {
+        const response = await withAbort(() => fetch(input, { ...init, signal: controller.signal }));
+        // Keep the original Response (headers, URL and status) and the same deadline
+        // until its body is consumed. Receiving headers alone does not finish a read.
+        for (const method of ['json', 'text', 'blob', 'arrayBuffer', 'formData']) {
+            if (typeof response[method] !== 'function') continue;
+            const consume = response[method].bind(response);
+            response[method] = async () => {
+                try { return await withAbort(consume); }
+                finally { cleanup(); }
+            };
+        }
+        if (response.status === 204 || response.status === 205 || init.method === 'HEAD') cleanup();
+        return response;
+    } catch (error) {
+        cleanup();
+        throw error;
+    }
+}
+
+const AppReadCache = (() => {
+    const entries = new Map();
+    const pending = new Map();
+    let version = 0;
+    let accountVersion = 0;
+    const cancelled = () => new DOMException('Leitura substituída por uma atualização.', 'AbortError');
+    return {
+        get version() { return version; },
+        get accountVersion() { return accountVersion; },
+        peek(key) { return entries.get(key) || null; },
+        read(key, loader, { ttl = 0, force = false } = {}) {
+            const existing = pending.get(key);
+            if (existing) return existing.promise;
+            const cached = entries.get(key);
+            if (!force && cached && Date.now() - cached.at < ttl) return Promise.resolve(cached.data);
+            const controller = new AbortController();
+            const request = { controller, promise: null };
+            request.promise = Promise.resolve().then(() => {
+                if (controller.signal.aborted) throw cancelled();
+                return loader({ signal: controller.signal });
+            }).then(data => {
+                if (pending.get(key) !== request || controller.signal.aborted) throw cancelled();
+                entries.set(key, { data, at: Date.now() });
+                return data;
+            }).catch(error => {
+                if (controller.signal.aborted || pending.get(key) !== request) throw cancelled();
+                throw error;
+            }).finally(() => {
+                if (pending.get(key) === request) pending.delete(key);
+            });
+            pending.set(key, request);
+            return request.promise;
+        },
+        invalidate(prefix = '') {
+            version += 1;
+            for (const key of entries.keys()) if (key.startsWith(prefix)) entries.delete(key);
+            for (const [key, request] of pending) {
+                if (!key.startsWith(prefix)) continue;
+                pending.delete(key);
+                request.controller.abort();
+            }
+        },
+        reset() { accountVersion += 1; this.invalidate(); }
+    };
+})();
+
+async function readApiJson(url, { signal } = {}) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+            const response = await fetchWithTimeout(url, { credentials: 'include', signal });
+            const data = await response.json();
+            if (!response.ok) {
+                const error = new Error(data.error || 'Não foi possível carregar agora.');
+                error.status = response.status;
+                throw error;
+            }
+            return data;
+        } catch (error) {
+            const transient = error.name !== 'AbortError' && (!error.status || error.status >= 500);
+            if (attempt || !transient || signal?.aborted) throw error;
+            await wait(1000);
+            if (signal?.aborted) throw new DOMException('Leitura cancelada.', 'AbortError');
+        }
     }
 }
 
@@ -149,6 +267,9 @@ async function waitForAIJob(initial, timeoutMilliseconds = 10 * 60 * 1000, optio
 if (typeof window !== "undefined") {
     window.waitForAIJob = waitForAIJob;
     window.fetchWithTimeout = fetchWithTimeout;
+    window.AppReadCache = AppReadCache;
+    window.readApiJson = readApiJson;
+    if (window.Capacitor?.getPlatform?.() === 'ios') document.documentElement.dataset.nativePlatform = 'ios';
     window.formatDietPlanItem = formatDietPlanItem;
     window.formatDietPlanItemsText = formatDietPlanItemsText;
 }
@@ -162,12 +283,20 @@ if (typeof window !== "undefined" && typeof window.fetch === "function" && !wind
         const unsafe = !["GET", "HEAD", "OPTIONS", "TRACE"].includes(method);
         const url = new URL(request.url, window.location.origin);
         const isApiRequest = url.origin === window.location.origin && url.pathname.startsWith("/api/");
+        let prepared = request;
         if (unsafe && isApiRequest && csrfToken) {
             const headers = new Headers(request.headers);
             if (!headers.has("X-CSRF-Token")) headers.set("X-CSRF-Token", csrfToken);
-            return originalFetch(new Request(request, { headers }));
+            prepared = new Request(request, { headers });
         }
-        return originalFetch(request);
+        const ownerVersion = AppReadCache.accountVersion;
+        return originalFetch(prepared).then(response => {
+            if (response.ok && unsafe && isApiRequest && ownerVersion === AppReadCache.accountVersion &&
+                /^\/api\/(diet(?:\/|$)|diet_plans(?:\/|$)|profile(?:\/|$))/.test(url.pathname)) {
+                AppReadCache.invalidate('diet:');
+            }
+            return response;
+        });
     };
 }
 

@@ -8,13 +8,12 @@
     <link rel="icon" href="/assets/logoIsolada.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.css">
-    <link rel="stylesheet" href="/styles.css?v=20260914-ios-v11">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" media="print" onload="this.media='all'">
+    <link rel="stylesheet" href="/styles.css?v=20260914-ios-fluid">
     <link rel="stylesheet" href="/fluid.css?v=20260828-achievements">
 </head>
-<body>
+<body data-auth-state="unknown">
     <a class="skip-link" href="#appContent">Ir para o conteúdo</a>
     <div id="loginScreen" class="modal" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
         <div class="modal-content auth-modal-content">
@@ -229,6 +228,7 @@
     </div>
 
     <div id="mainScreen" class="screen">
+        <p id="authSessionStatus" role="status" aria-live="polite">Preparando seu dia…</p>
         <header class="app-header">
             <div class="app-header__inner">
                 <a class="app-brand" href="/app/hoje" onclick="showTab('diet'); return false" aria-label="Ir para o início">
@@ -299,11 +299,11 @@
                         </div>
                         <div id="todayMacroDetails" class="today-macro-details" aria-hidden="true"><div class="today-macro-details__inner"></div></div>
                     </section>
-                    <section id="workoutTodayCard" aria-live="polite"></section>
+                    <section id="workoutTodayCard" aria-live="polite"><div class="home-skeleton" aria-hidden="true"></div></section>
                     <section id="todayCardapioSection" class="today-food" aria-labelledby="todayCardapioTitle">
                         <header class="today-food-heading"><h2 id="todayCardapioTitle">Alimentação</h2><button class="text-button" type="button" onclick="showTab('diet_plans')">Ver dia</button></header>
                         <p id="todayMealCount" class="today-muted"></p>
-                        <div id="todayCardapioBody" aria-live="polite"></div>
+                        <div id="todayCardapioBody" aria-live="polite"><div class="home-skeleton" aria-hidden="true"></div></div>
                     </section>
                 </div>
 
@@ -971,20 +971,20 @@
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/awesomplete/1.1.5/awesomplete.min.js"></script>
-    <script src="/vendor/lucide.min.js?v=1.42.0"></script>
-    <script src="/js/icons.js?v=20260907-lucide-today"></script>
-    <script src="/fluid.js?v=20260828-achievements"></script>
-    <script src="/js/exercise-media.js?v=20260828-achievements"></script>
-    <script src="/js/utils.js?v=20260914-ios-v11"></script>
-    <script src="/js/analytics.js?v=20260829-funnel"></script>
-    <script src="/js/body-evolution.js?v=20260909"></script>
-    <script src="/script.js?v=20260914-ios-v11"></script>
-    <script src="/js/diet-entry.js?v=20260910-guided-fix"></script>
-    <script src="/js/plans.js?v=20260914-ios-v11"></script>
-    <script src="/js/progress.js?v=20260914-ios-v11"></script>
-    <script src="/js/social.js?v=20260914-ios-v11"></script>
-    <script src="/js/reviews.js?v=20260913-diet-portions"></script>
-    <script src="/js/professional.js?v=20260913-diet-portions"></script>
+    <script defer src="/vendor/lucide.min.js?v=1.42.0"></script>
+    <script defer src="/js/icons.js?v=20260907-lucide-today"></script>
+    <script defer src="/fluid.js?v=20260828-achievements"></script>
+    <script defer src="/js/exercise-media.js?v=20260828-achievements"></script>
+    <script defer src="/js/utils.js?v=20260914-ios-fluid"></script>
+    <script defer src="/js/analytics.js?v=20260829-funnel"></script>
+    <script defer src="/js/body-evolution.js?v=20260909"></script>
+    <script defer src="/script.js?v=20260914-ios-fluid"></script>
+    <script defer src="/js/diet-entry.js?v=20260910-guided-fix"></script>
+    <script defer src="/js/workout-share.js?v=20260914-ios-fluid"></script>
+    <script defer src="/js/plans.js?v=20260914-ios-fluid"></script>
+    <script defer src="/js/progress.js?v=20260914-ios-fluid"></script>
+    <script defer src="/js/social.js?v=20260914-ios-fluid"></script>
+    <script defer src="/js/reviews.js?v=20260913-diet-portions"></script>
+    <script defer src="/js/professional.js?v=20260913-diet-portions"></script>
 </body>
 </html>

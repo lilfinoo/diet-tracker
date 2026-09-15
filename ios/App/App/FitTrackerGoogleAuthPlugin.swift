@@ -59,5 +59,6 @@ public class FitTrackerGoogleAuthPlugin: CAPPlugin, CAPBridgedPlugin {
 final class FitTrackerBridgeViewController: CAPBridgeViewController {
     override public func capacitorDidLoad() {
         bridge?.registerPluginInstance(FitTrackerGoogleAuthPlugin())
+        bridge?.registerPluginInstance(FitTrackerSharePlugin())
     }
 }

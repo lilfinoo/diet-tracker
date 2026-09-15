@@ -2,6 +2,9 @@
   "appId": "ai.fittracker.app",
   "appName": "Fit Tracker",
   "webDir": "copilot",
+  "ios": {
+    "zoomEnabled": true
+  },
   "server": {
     "url": "https://diet-tracker-6i67.onrender.com",
     "cleartext": false

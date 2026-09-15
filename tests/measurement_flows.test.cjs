@@ -12,6 +12,7 @@ function harness() {
         if (!elements.has(id)) elements.set(id, {
             value: '', innerHTML: '', textContent: '', disabled: false,
             classList: { contains: () => false, add() {}, remove() {} },
+            removeAttribute() {}, setAttribute() {},
             reset() { this.value = ''; }, insertAdjacentHTML(_, html) { this.innerHTML += html; },
         });
         return elements.get(id);
@@ -31,6 +32,7 @@ function harness() {
         fetch: async (url, options) => { calls.push({url, options}); return context.respond(url, options); },
         respond: () => ({ok: true, json: async () => []}),
     };
+    context.window.fetchWithTimeout = (...args) => context.fetch(...args);
     vm.createContext(context);
     vm.runInContext(fs.readFileSync(path.join(__dirname, "../copilot/js/body-evolution.js"), "utf8"), context);
     for (const name of ['setCurrentUser', 'clearMeasurements', 'loadMeasurements',

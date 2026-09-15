@@ -10,6 +10,7 @@ function harness() {
         bodyMetrics:{weight:['Peso','kg'],body_fat:['Gordura','%']}, escapeHtml:v=>String(v??''), showToast(){}, document:{getElementById:()=>null,addEventListener(){}},
         fetch:async(url,opts)=>{calls.push({url,opts});return {ok:true,json:async()=>({})};},
     };
+    c.window.fetchWithTimeout = (...args) => c.fetch(...args);
     vm.createContext(c); vm.runInContext(source,c);
     return {api:c.window.testProgress,calls,context:c};
 }

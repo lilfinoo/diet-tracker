@@ -23,6 +23,14 @@ let authMessageTimer = null;
 let authRequestInFlight = false;
 let authCheckInFlight = null;
 let lastAuthCheckAt = 0;
+let authState = 'unknown';
+let homeRequestVersion = 0;
+let dietScreenRequestVersion = 0;
+let resumeInFlight = null;
+let lastResumeAt = 0;
+let googleAuthReady = null;
+let secondaryOwner = null;
+let audioInitialized = false;
 let billingReturnHandled = false;
 let profileAchievementsState = { selected: [], achievements: [], badges: [], records: [], limit: 3, filter: 'all', savingToken: null };
 
@@ -315,14 +323,11 @@ function syncChoiceCards() {
 // Adiciona listeners ao carregar a página
 document.addEventListener('DOMContentLoaded', function() {
     setDefaultDates();
-    initializeAudioFeatures();
     checkAuthStatus();
     setupAppStyleControls();
     bindTodayMacroControls();
     syncChoiceCards();
     initializeAchievementControls();
-    initializeGoogleAuth();
-    refreshDisplayedVersion();
     addEventListenerSafe('googleUsernameForm', 'submit', finishGoogleSignup);
 
     // Formulário de dieta
@@ -391,17 +396,40 @@ document.addEventListener('DOMContentLoaded', function() {
 
 });
 
-document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && currentUser && Date.now() - lastAuthCheckAt > 60_000) checkAuthStatus();
-});
+async function resumeApp() {
+    if (document.hidden || navigator.onLine === false || resumeInFlight || Date.now() - lastResumeAt < 1000) return resumeInFlight;
+    resumeInFlight = (async () => {
+        if (authState === 'unknown' || Date.now() - lastAuthCheckAt > 60_000) await checkAuthStatus({ resume: true });
+        if (!currentUser) return;
+        await window.resumeWorkoutSession?.();
+        if (currentTab === 'diet') await Promise.all([loadTodayCardapio(), window.loadWorkoutTodayCard?.()]);
+    })();
+    try { await resumeInFlight; }
+    catch (error) { if (error.name !== 'AbortError') console.warn('App resume:', error); }
+    finally { resumeInFlight = null; lastResumeAt = Date.now(); }
+}
 
-window.addEventListener('pageshow', () => {
-    if (currentUser && Date.now() - lastAuthCheckAt > 60_000) checkAuthStatus();
-});
+document.addEventListener('visibilitychange', () => { if (!document.hidden) resumeApp(); });
+window.addEventListener('pageshow', event => { if (event.persisted) resumeApp(); });
+window.addEventListener('online', resumeApp);
 
-window.Capacitor?.Plugins?.App?.addListener?.('appStateChange', ({ isActive }) => {
-    if (isActive && currentUser && Date.now() - lastAuthCheckAt > 60_000) checkAuthStatus();
-});
+function scheduleSecondaryLoads(skipProfile = false) {
+    const owner = currentUser?.id || 'guest';
+    if (secondaryOwner === owner) return;
+    secondaryOwner = owner;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        const run = () => {
+            if (secondaryOwner !== owner || (currentUser?.id || 'guest') !== owner) return;
+            refreshDisplayedVersion();
+            if (currentUser) {
+                if (!skipProfile) checkUserProfile();
+                window.loadNetworkInbox?.();
+                    }
+        };
+        if (window.requestIdleCallback) window.requestIdleCallback(run, { timeout: 2000 });
+        else setTimeout(run, 500);
+    }));
+}
 
 async function refreshDisplayedVersion() {
     try {
@@ -476,7 +504,7 @@ async function handleDietFormSubmit() {
             showToast("Refeição registrada", "success");
             closeDietModal();
             if (currentTab === 'diet_plans') await refreshDietDailySurfaces();
-            else await Promise.all([loadDietEntries({ showLoading: false }), loadTodayCardapio()]);
+            else await loadTodayCardapio({ force: true });
         } else {
             const errorData = await response.json();
             if (ownsDraft()) showDietMessage(errorData.error || "Não foi possível salvar. Tente novamente.", "error");
@@ -618,42 +646,36 @@ function setDefaultDates() {
 }
 
 // Authentication functions
-async function checkAuthStatus() {
+async function checkAuthStatus(options = {}) {
     if (authCheckInFlight) return authCheckInFlight;
+    const ownerVersion = window.AppReadCache?.accountVersion;
+    const wasUnknown = authState === 'unknown';
     authCheckInFlight = (async () => {
-    try {
-        const response = await window.fetchWithTimeout(`${API_BASE}/check_session`, {
-            credentials: 'include'
-        });
-        
-        if (response.ok) {
+        try {
+            const response = await window.fetchWithTimeout(`${API_BASE}/check_session`, { credentials: 'include' });
             const data = await response.json();
-            if (data.logged_in) {
-                if (data.csrf_token) setCsrfToken(data.csrf_token);
-                setCurrentUser(data.user);
-                window.analytics?.trackReturns(currentUser);
-                showMainScreen();
-            } else {
-                setCsrfToken(null);
-                setCurrentUser(null);
-                window.clearWorkoutProgress?.();
-                showMainScreen();
+            if (ownerVersion !== window.AppReadCache?.accountVersion) return;
+            if (!response.ok && response.status !== 401 && !(response.status === 403 && data.logged_in === false)) throw new Error('Não foi possível confirmar sua sessão agora.');
+            const previousOwner = currentUser?.id;
+            setCsrfToken(data.logged_in ? data.csrf_token : null);
+            setCurrentUser(data.logged_in ? data.user : null);
+            authState = currentUser ? 'authenticated' : 'guest';
+            document.body.dataset.authState = authState;
+            const status = getElement('authSessionStatus');
+            if (status) status.innerHTML = '';
+            if (!currentUser) window.clearWorkoutProgress?.();
+            if (currentUser) window.analytics?.trackReturns(currentUser);
+            if (wasUnknown || previousOwner !== currentUser?.id) showMainScreen();
+            else if (!options.resume) showMainScreen({ tab: currentTab, refreshOnly: true });
+            lastAuthCheckAt = Date.now();
+            handleBillingReturn();
+        } catch (error) {
+            if (ownerVersion !== window.AppReadCache?.accountVersion || error.name === 'AbortError') return;
+            if (authState === 'unknown') {
+                const status = getElement('authSessionStatus');
+                if (status) status.innerHTML = '<span>Não foi possível confirmar sua sessão.</span> <button type="button" class="text-button" onclick="checkAuthStatus()">Tentar novamente</button>';
             }
-        } else if (response.status === 401 || response.status === 403) {
-            setCsrfToken(null);
-            setCurrentUser(null);
-            window.clearWorkoutProgress?.();
-            showMainScreen();
-        } else {
-            showMainScreen();
-            showToast('Não foi possível confirmar sua sessão agora.', 'info');
         }
-    } catch (error) {
-        console.error('Auth check failed:', error);
-        showMainScreen();
-    }
-    handleBillingReturn();
-    lastAuthCheckAt = Date.now();
     })();
     try { return await authCheckInFlight; }
     finally { authCheckInFlight = null; }
@@ -684,6 +706,7 @@ function handleBillingReturn() {
 
 // Screen management
 function openAuthModal(reason = 'Entre para salvar seus dados e acompanhar sua evolução.', mode = 'login', intent = null) {
+    initializeGoogleAuth();
     const loginScreen = getElement('loginScreen');
     const context = getElement('authContext');
     if (context) context.textContent = reason;
@@ -723,6 +746,8 @@ function hasAiAccess() {
 }
 
 async function initializeGoogleAuth() {
+    if (googleAuthReady) return googleAuthReady;
+    googleAuthReady = (async () => {
     try {
         const response = await window.fetchWithTimeout(`${API_BASE}/auth/config`);
         const config = response.ok ? await response.json() : {};
@@ -758,8 +783,11 @@ async function initializeGoogleAuth() {
         script.onerror = () => showAuthMessage('Não foi possível carregar o login do Google. Use e-mail e senha ou tente novamente.', 'error');
         document.head.appendChild(script);
     } catch (error) {
+        googleAuthReady = null;
         console.error('Google auth configuration failed:', error);
     }
+    })();
+    return googleAuthReady;
 }
 
 async function startNativeGoogleSignIn() {
@@ -889,11 +917,13 @@ Object.defineProperty(window, 'currentUser', { get: () => currentUser });
 window.requireAuth = requireAuth;
 
 function showMainScreen(options = {}) {
+    authState = currentUser ? 'authenticated' : 'guest';
+    document.body.dataset.authState = authState;
     const loginScreen = getElement('loginScreen');
     const mainScreen = getElement('mainScreen');
     getElement('dietTab')?.classList.toggle('today-authenticated', Boolean(currentUser));
     
-    if (loginScreen?.classList.contains('show')) closeAppModal(loginScreen);
+    if (!options.refreshOnly && loginScreen?.classList.contains('show')) closeAppModal(loginScreen);
     if (mainScreen) mainScreen.classList.remove('hidden');
     
     const homeDate = getElement('homeDate');
@@ -921,7 +951,6 @@ function showMainScreen(options = {}) {
         if (profileMembership) profileMembership.textContent = currentUser.is_premium ? 'Membro Premium' : 'Plano gratuito';
         renderProfileBadges(currentUser);
         window.applyCurrentUserAvatar?.(currentUser.avatar_url);
-        window.loadNetworkInbox?.();
         const aiAccessLabel = getElement('homeAiAccessLabel');
         if (aiAccessLabel) {
             const remaining = Math.max(0, 3 - Number(currentUser.ai_trial_uses || 0));
@@ -979,14 +1008,12 @@ function showMainScreen(options = {}) {
     }
 
     const initialView = options.tab || viewForPath() || 'diet';
-    showTab(initialView, { history: 'replace' });
+    if (!options.refreshOnly) showTab(initialView, { history: 'replace' });
     if (currentUser) {
-        if (!options.skipProfile) checkUserProfile();
-        window.loadWorkoutTodayCard?.();
-        if (window.loadActiveWorkoutDock) window.loadActiveWorkoutDock();
-        if (window.loadOwnProfessionalRelationship) window.loadOwnProfessionalRelationship();
+        scheduleSecondaryLoads(options.skipProfile);
     } else {
         window.renderWorkoutTodayCard?.();
+        scheduleSecondaryLoads(true);
     }
     window.dispatchEvent(new CustomEvent('diettracker:auth-ready', { detail: { user: currentUser } }));
 }
@@ -1866,6 +1893,11 @@ async function logout() {
 // Interface functions
 // Interface functions
 function showTab(tabName, options = {}) {
+    if (authState === 'unknown') {
+        const status = getElement('authSessionStatus');
+        if (status && !status.textContent) status.textContent = 'Confirmando sua sessão…';
+        return false;
+    }
     if (['activities', 'personalRecords'].includes(tabName) && !currentUser) {
         openAuthModal('Entre para acessar seu histórico de atividades.', 'login', { tab: 'activities' });
         return false;
@@ -1927,7 +1959,7 @@ function showTab(tabName, options = {}) {
     const routeStatus = getElement('routeStatus');
     if (routeStatus) routeStatus.textContent = `${VIEW_LABELS[tabName] || 'Seção'} aberta`;
     syncViewPath(tabName, options.history || 'push');
-    window.scrollTo({ top: 0, behavior: 'instant' });
+    if (previousTab !== tabName) window.scrollTo({ top: 0, behavior: 'instant' });
     
     if (!currentUser) {
         renderGuestPresentation(tabName);
@@ -1937,8 +1969,8 @@ function showTab(tabName, options = {}) {
     getElement('guestDailySummary')?.classList.add('hidden');
     getElement('dailyMacroGrid')?.classList.remove('hidden');
     if (tabName === 'diet') {
-        loadDietEntries({ showLoading: previousTab !== 'diet' });
         loadTodayCardapio();
+        window.loadWorkoutTodayCard?.();
     } else if (tabName === 'measurements') {
         loadMeasurements();
         loadMeasurementSummary();
@@ -1954,6 +1986,10 @@ function showTab(tabName, options = {}) {
         loadDietDailyScreen();
     } else if (tabName === 'workout_plans') { // Carrega planos de treino
         loadWorkoutPlans();
+    } else if (tabName === 'stats') {
+        window.loadOwnProfessionalRelationship?.();
+    } else if (tabName === 'chat') {
+        if (!audioInitialized) { initializeAudioFeatures(); audioInitialized = true; }
     } else if (tabName === 'professional') {
         window.loadProfessionalDashboard?.();
     }
@@ -2460,55 +2496,46 @@ function closeViewWorkoutPlanModal() {
 
 // Data functions
 async function loadDietEntries(options = {}) {
-    if (!currentUser) {
-        renderGuestPresentation('diet');
-        return;
-    }
-    if (options.showLoading !== false) showGlobalLoading();
-    const todayOnly = currentTab === 'diet';
-    const startDate = options.startDate || (todayOnly ? localDateInputValue() : getElement("dietStartDate")?.value);
-    const endDate = options.endDate || (todayOnly ? localDateInputValue() : getElement("dietEndDate")?.value);
-    const requestRange = { startDate: startDate || null, endDate: endDate || null };
-    dietEntriesLoadRange = requestRange;
-    
+    if (!currentUser) return;
+    const today = localDateInputValue();
+    if (currentTab === 'diet' && !options.startDate && !options.endDate) return loadTodayCardapio(options);
+    const startDate = options.startDate || getElement('dietStartDate')?.value;
+    const endDate = options.endDate || getElement('dietEndDate')?.value;
+    const owner = currentUser.id;
+    const params = new URLSearchParams();
+    if (startDate) params.set('start_date', startDate);
+    if (endDate) params.set('end_date', endDate);
+    const key = `diet:entries:${owner}:${params}`;
+    dietEntriesLoadRange = { startDate: startDate || null, endDate: endDate || null };
+    const request = window.AppReadCache.read(key, ({ signal }) => window.readApiJson(`${API_BASE}/diet?${params}`, { signal }), { ttl: 60_000, force: options.force });
+    dietEntriesLoadPromise = request;
     try {
-        let url = `${API_BASE}/diet`;
-        const params = new URLSearchParams();
-        if (startDate) params.append('start_date', startDate);
-        if (endDate) params.append('end_date', endDate);
-        if (params.toString()) url += '?' + params.toString();
-
-        dietEntriesLoadPromise = fetch(url, { credentials: 'include' })
-            .then(async (response) => {
-                if (!response.ok) {
-                    console.error('Failed to load diet entries');
-                    return null;
-                }
-                return response.json();
-            })
-            .catch((error) => {
-                console.error('Error loading diet entries:', error);
-                return null;
-            });
-
-        const entries = await dietEntriesLoadPromise;
-        if (entries) {
-            dietEntries = entries;
-            renderDietTable();
-            renderTodayRecentMeals();
-        }
+        const entries = await request;
+        if (currentUser?.id !== owner || dietEntriesLoadPromise !== request) return;
+        dietEntries = entries;
+        renderDietTable();
+        if (startDate === today && endDate === today) renderTodayRecentMeals();
     } catch (error) {
-        console.error('Error loading diet entries:', error);
+        if (error.name !== 'AbortError') console.warn('Diet entries:', error);
     } finally {
-        if (dietEntriesLoadRange.startDate === requestRange.startDate && dietEntriesLoadRange.endDate === requestRange.endDate) {
-            dietEntriesLoadPromise = null;
-        }
-        if (options.showLoading !== false) hideGlobalLoading();
+        if (dietEntriesLoadPromise === request) dietEntriesLoadPromise = null;
     }
 }
 
 function setCurrentUser(user) {
     if (currentUser?.id !== user?.id) {
+        window.resetWorkoutAccount?.();
+        window.AppReadCache?.reset();
+        if (typeof homeRequestVersion !== 'undefined') {
+            homeRequestVersion += 1;
+            dietScreenRequestVersion += 1;
+            dietEntries = [];
+            todayDietDay = null;
+            dietDailyView = null;
+            cardapioActivePlan = null;
+            dietEntriesLoadPromise = null;
+            secondaryOwner = null;
+        }
         clearMeasurements();
         window.DietEntryFlow?.reset();
         if (getElement("dietModal")?.classList.contains("show")) closeDietModal();
@@ -2911,44 +2938,59 @@ function cardapioMealTypeToEntry(mealType) {
     return mealType || "Café da manhã";
 }
 
-async function loadTodayCardapio() {
+function dailyReadKey(dateValue) {
+    return `diet:daily:${currentUser?.id}:${dateValue}:${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
+}
+
+function loadDietDay(dateValue, options = {}) {
+    const key = dailyReadKey(dateValue);
+    return window.AppReadCache.read(key, ({ signal }) => window.readApiJson(`${API_BASE}/diet/days/${encodeURIComponent(dateValue)}`, { signal }), { ttl: 60_000, force: options.force });
+}
+
+function applyTodayDietDay(data) {
+    todayDietDay = data;
+    cardapioActivePlan = data.plan || null;
+    dietEntries = dailyViewEntries(data);
+    renderTodayCardapio(data, null);
+    renderTodayRecentMeals();
+    renderDietCurrentPlanHub(cardapioActivePlan, null);
+}
+
+async function loadTodayCardapio(options = {}) {
     if (!currentUser) {
+        if (authState === 'unknown') return;
         cardapioActivePlan = null;
         todayDietDay = null;
         renderTodayCardapio(null, null);
         renderDietCurrentPlanHub(null, null);
         return;
     }
-    const section = getElement("todayCardapioSection");
-    if (!section) return;
+    if (!getElement('todayCardapioSection')) return;
     const today = localDateInputValue();
+    const owner = currentUser.id;
+    const revision = ++homeRequestVersion;
+    const key = dailyReadKey(today);
+    const cached = window.AppReadCache.peek(key);
     cardapioDay = getStoredCardapioDay();
-
-    let dailyResponse;
-    let currentPlanResponse;
+    if (cached && cached.data !== todayDietDay) applyTodayDietDay(cached.data);
+    const body = getElement('todayCardapioBody');
+    if (!cached && todayDietDay?.date !== today && body) body.innerHTML = '<div class="home-skeleton" aria-hidden="true"></div><p class="sr-only">Carregando alimentação</p>';
+    const stale = !cached || Date.now() - cached.at >= 60_000 || options.force;
+    if (!stale) return;
+    body?.setAttribute('aria-busy', 'true');
     try {
-        [dailyResponse, currentPlanResponse] = await Promise.all([
-            fetch(`${API_BASE}/diet/days/${encodeURIComponent(today)}`, { credentials: "include" }),
-            fetch(`${API_BASE}/diet_plans/current`, { credentials: "include" })
-        ]);
+        const data = await loadDietDay(today, options);
+        if (owner !== currentUser?.id || revision !== homeRequestVersion || today !== localDateInputValue()) return;
+        applyTodayDietDay(data);
     } catch (error) {
-        renderTodayCardapio(null, 'Sem conexão. Seu plano não foi removido. Reconecte e tente novamente.');
-        renderDietCurrentPlanHub(cardapioActivePlan, 'Não foi possível carregar seu plano de dieta.');
-        return;
+        if (error.name === 'AbortError' || owner !== currentUser?.id || revision !== homeRequestVersion) return;
+        if (todayDietDay?.date === today) {
+            renderTodayCardapio(todayDietDay, null);
+            body?.insertAdjacentHTML('beforeend', '<p class="home-data-note" role="status">Mostrando os últimos dados. <button type="button" class="text-button" onclick="loadTodayCardapio({force:true})">Atualizar</button></p>');
+        } else renderTodayCardapio(null, 'Não foi possível carregar sua alimentação. Tente novamente.');
+    } finally {
+        if (revision === homeRequestVersion) body?.setAttribute('aria-busy', 'false');
     }
-    if (currentPlanResponse.ok) {
-        const currentPlanPayload = await currentPlanResponse.json();
-        cardapioActivePlan = currentPlanPayload.plan || null;
-        renderDietCurrentPlanHub(cardapioActivePlan, null);
-    } else {
-        renderDietCurrentPlanHub(cardapioActivePlan, 'Não foi possível carregar seu plano de dieta.');
-    }
-    if (!dailyResponse.ok) {
-        renderTodayCardapio(null, 'Não foi possível carregar sua alimentação de hoje.');
-        return;
-    }
-    todayDietDay = await dailyResponse.json();
-    renderTodayCardapio(todayDietDay, null);
 }
 
 function editDailyNutritionTargets() {
@@ -3103,7 +3145,7 @@ async function quickLogDailyMeal(slotKey, mode) {
         });
         if (response.ok) {
             showToast(mode === "skip" ? "Refeição marcada como pulada." : "Refeição registrada!", "success");
-            await Promise.all([loadDietEntries({ showLoading: false }), loadTodayCardapio()]);
+            await loadTodayCardapio({ force: true });
         } else {
             const errorData = await response.json();
             showToast(errorData.error || "Erro ao registrar!", "error");
@@ -3255,23 +3297,23 @@ async function loadDietDailyScreen(dateValue = dietDailyDate || localDateInputVa
         renderGuestPresentation('diet_plans');
         return;
     }
+    const owner = currentUser.id;
+    const revision = ++dietScreenRequestVersion;
     dietDailyDate = dateValue;
     dietDailyOptionsSlotKey = null;
     updateDietDailyDateHeader();
     const container = getElement('dietDailyMealsBody');
-    if (container) container.innerHTML = '<div class="diet-daily-empty"><span class="today-icon--spin"><i data-lucide="loader-circle" aria-hidden="true"></i></span><div><strong>Carregando seu dia</strong></div></div>';
+    if (container && dietDailyView?.date !== dateValue) container.innerHTML = '<div class="diet-daily-empty"><span class="today-icon--spin"><i data-lucide="loader-circle" aria-hidden="true"></i></span><div><strong>Carregando seu dia</strong></div></div>';
     try {
-        const response = await fetch(`${API_BASE}/diet/days/${encodeURIComponent(dietDailyDate)}`, { credentials: 'include' });
-        if (!response.ok) {
-            const data = await response.json().catch(() => ({}));
-            throw new Error(data.error || 'Tente novamente em instantes.');
-        }
-        dietDailyView = await response.json();
+        const data = await loadDietDay(dateValue);
+        if (owner !== currentUser?.id || revision !== dietScreenRequestVersion || dietDailyDate !== dateValue) return;
+        dietDailyView = data;
         dietEntries = dailyViewEntries(dietDailyView);
         renderDietDailyMacros();
         renderDietDailyMeals();
         renderDietDailyPlan();
     } catch (error) {
+        if (error.name === 'AbortError' || owner !== currentUser?.id || revision !== dietScreenRequestVersion) return;
         dietDailyView = null;
         getElement('dietDailyMacros')?.classList.add('hidden');
         renderDietDailyMeals(error.message);
@@ -3391,8 +3433,11 @@ async function resetDietDailySlot(slotKey) {
 }
 
 async function refreshDietDailySurfaces() {
-    await loadDietDailyScreen(dietDailyDate);
-    if (dietDailyDate === localDateInputValue()) await loadTodayCardapio();
+    window.AppReadCache.invalidate('diet:');
+    await Promise.all([
+        loadDietDailyScreen(dietDailyDate || localDateInputValue()),
+        dietDailyDate === localDateInputValue() ? loadTodayCardapio() : Promise.resolve()
+    ]);
 }
 
 async function toggleDietPlansLibrary(show) {
@@ -3676,7 +3721,7 @@ async function deleteDietEntry(id) {
         if (response.ok) {
             showToast("Refeição excluída!", "success");
             if (currentTab === 'diet_plans') await refreshDietDailySurfaces();
-            else await Promise.all([loadDietEntries({ showLoading: false }), loadTodayCardapio()]);
+            else await loadTodayCardapio({ force: true });
         } else {
             const errorData = await response.json();
             showToast(errorData.error || "Erro ao excluir!", "error");
@@ -3928,6 +3973,7 @@ function bindSheetDrag(modal) {
         content.classList.add("is-dragging");
 
         const onMove = (ev) => {
+            if (ev.pointerId !== e.pointerId) return;
             const dy = ev.clientY - baseY;
             if (dy > 0) moved = true;
             const now = performance.now();
@@ -3938,13 +3984,14 @@ function bindSheetDrag(modal) {
             content.style.transform = "translate3d(0," + dy + "px,0) scale(1)";
         };
         const onUp = (ev) => {
+            if (ev.pointerId !== e.pointerId) return;
             content.classList.remove("is-dragging");
             if (content.releasePointerCapture && ev.pointerId !== undefined) {
                 try { content.releasePointerCapture(ev.pointerId); } catch (err) {}
             }
             window.removeEventListener("pointermove", onMove);
             window.removeEventListener("pointerup", onUp);
-            window.removeEventListener("pointercancel", onUp);
+            window.removeEventListener("pointercancel", onCancel);
 
             const fluid = typeof Fluid !== "undefined" ? Fluid : null;
             if (!moved) {
@@ -3983,8 +4030,14 @@ function bindSheetDrag(modal) {
             }
         };
 
+        const onCancel = (ev) => {
+            if (ev.pointerId !== e.pointerId) return;
+            moved = false;
+            content.style.transform = '';
+            onUp(ev);
+        };
         window.addEventListener("pointermove", onMove);
         window.addEventListener("pointerup", onUp);
-        window.addEventListener("pointercancel", onUp);
+        window.addEventListener("pointercancel", onCancel);
     });
 }

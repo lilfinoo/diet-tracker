@@ -164,9 +164,6 @@
     };
     const dietView = { plan: null, selectedDay: 0, adherence: null, adherenceDate: null };
     const dietShoppingState = { planId: null, people: 1, hideAvailable: false, checked: new Set(), substitutions: new Map() };
-    const workoutSharePhotoCache = new Map();
-    const shareLogo = new Image();
-    shareLogo.src = "/assets/ChatGPT Image 26 de ago. de 2026, 01_07_52.png";
     const workoutView = {
         plan: null,
         days: [],
@@ -186,6 +183,9 @@
         sharePhotoToken: 0,
         setDrafts: new Map(),
         draftSaveTimers: new Map(),
+        draftRevisions: new Map(),
+        draftError: "",
+        mutationRevision: 0,
         rest: null,
         sessionSheetExpanded: false,
         replacementPanels: new Map(),
@@ -198,7 +198,6 @@
     let activeWorkoutSummary = null;
     let activeWizardType = null;
     let workoutGesture = null;
-    let lastWorkoutSwipeAt = 0;
     let ignoreNextWorkoutSheetClick = false;
     let professionalWizardContext = null;
     let workoutTimerInterval = null;
@@ -206,6 +205,98 @@
     let workoutSyncInterval = null;
     let workoutRecommendationTimer = null;
     let activeDockRequestToken = 0;
+    const sessionWrites = new Map();
+    const sessionLocks = new Set();
+    let workoutTodayOwner = "";
+    let workoutTodayAt = 0;
+    let workoutTodayPromise = null;
+
+    function workoutAccount() {
+        return `${window.currentUser?.id || ""}:${window.AppReadCache?.accountVersion || 0}`;
+    }
+
+    function workoutContextCurrent(account, version, sessionId) {
+        return account === workoutAccount() && version === workoutView.viewVersion
+            && (sessionId == null || isCurrentWorkoutSession(sessionId));
+    }
+
+    function queueSessionWrite(sessionId, task) {
+        const key = `${workoutAccount()}:${sessionId}`;
+        const previous = sessionWrites.get(key) || Promise.resolve();
+        const result = previous.catch(() => {}).then(task);
+        sessionWrites.set(key, result);
+        result.finally(() => {
+            if (sessionWrites.get(key) === result) sessionWrites.delete(key);
+        }).catch(() => {});
+        return result;
+    }
+
+    function invalidateWorkoutReads() {
+        workoutTodayAt = 0;
+        window.AppReadCache?.invalidate("workout:");
+        window.invalidateProgressOverview?.();
+    }
+
+    function resetWorkoutAccount() {
+        invalidateWorkoutView();
+        resetWorkoutExecutionState();
+        workoutView.session = null;
+        workoutView.plan = null;
+        workoutView.days = [];
+        workoutView.completedSummary = null;
+        workoutView.shareOpen = false;
+        workoutView.shareDraft = null;
+        workoutView.sharePhotoToken += 1;
+        workoutTodayOwner = "";
+        workoutTodayState = null;
+        workoutTodayPromise = null;
+        workoutTodayAt = 0;
+        workoutTodayError = "";
+        workoutPlans = [];
+        window.WorkoutShare?.reset();
+        clearActiveWorkoutDock();
+        const modal = byId("viewWorkoutPlanModal");
+        if (modal?.classList.contains("show")) closeAppModal(modal);
+        ["viewWorkoutPlanDetails", "workoutTodayCard", "workoutPlansTableBody", "workoutPlanHub"].forEach(id => {
+            const element = byId(id);
+            if (element) element.replaceChildren();
+        });
+    }
+
+    function beginSessionMutation(action, sessionId) {
+        const lock = `${workoutAccount()}:${sessionId}`;
+        if (workoutView.pendingAction || sessionLocks.has(lock)) return null;
+        sessionLocks.add(lock);
+        workoutView.pendingAction = action;
+        workoutView.mutationRevision += 1;
+        activeDockRequestToken += 1;
+        cancelWorkoutPlayerGesture();
+        return lock;
+    }
+
+    function endSessionMutation(lock, action, account, version) {
+        sessionLocks.delete(lock);
+        invalidateWorkoutReads();
+        if (workoutContextCurrent(account, version) && workoutView.pendingAction === action) {
+            workoutView.pendingAction = "";
+        }
+    }
+
+    function closeReplacementPanel(exerciseId) {
+        const key = String(exerciseId);
+        workoutView.replacementPanels.get(key)?.controller?.abort();
+        workoutView.replacementPanels.delete(key);
+    }
+
+    function clearReplacementPanels() {
+        workoutView.replacementPanels.forEach((panel) => panel.controller?.abort());
+        workoutView.replacementPanels.clear();
+    }
+
+    function cancelWorkoutDraftTimers() {
+        workoutView.draftSaveTimers.forEach((timer) => window.clearTimeout(timer));
+        workoutView.draftSaveTimers.clear();
+    }
 
     function byId(id) {
         return document.getElementById(id);
@@ -235,38 +326,50 @@
     }
 
     async function apiRequest(path, options = {}) {
+        if ((!options.method || options.method === "GET") && /^\/(workout_sessions|workouts|workout_plans)/.test(path) && window.readApiJson) {
+            return window.readApiJson(`${API_BASE}${path}`, {signal: options.signal});
+        }
         const fetchOptions = {
             method: options.method || "GET",
             credentials: "include",
             headers: {}
         };
+        const timed = options.timeout || (/^\/(workout_sessions|workouts|workout_plans)/.test(path) ? 15000 : 0);
+        const controller = new AbortController();
+        const abort = () => controller.abort(options.signal?.reason);
+        if (options.signal?.aborted) abort();
+        else options.signal?.addEventListener("abort", abort, { once: true });
+        fetchOptions.signal = controller.signal;
+        let timedOut = false;
+        const timer = timed ? window.setTimeout(() => { timedOut = true; controller.abort(); }, timed) : null;
         if (options.body !== undefined) {
             fetchOptions.headers["Content-Type"] = "application/json";
             fetchOptions.body = JSON.stringify(options.body);
         }
 
         let response;
-        try {
-            response = await fetch(`${API_BASE}${path}`, fetchOptions);
-        } catch (error) {
-            const connectionError = new Error(options.offlineMessage || "Sem conexão. Seus dados continuam salvos neste dispositivo e serão sincronizados automaticamente.");
-            connectionError.cause = error;
-            connectionError.code = "offline";
-            throw connectionError;
-        }
-
         let data = {};
         try {
+            response = await fetch(`${API_BASE}${path}`, fetchOptions);
             data = await response.json();
         } catch (error) {
-            data = {};
+            if (options.signal?.aborted) throw error;
+            const connectionError = new Error(timedOut
+                ? "A solicitação demorou demais. Verifique a sessão antes de tentar novamente."
+                : options.offlineMessage || "Sem conexão. Seus registros continuam neste dispositivo. Tente novamente quando a conexão voltar.");
+            connectionError.cause = error;
+            connectionError.code = timedOut ? "timeout" : "offline";
+            throw connectionError;
+        } finally {
+            window.clearTimeout(timer);
+            options.signal?.removeEventListener("abort", abort);
         }
         if (!response.ok) {
             const fieldMessages = data.fields && typeof data.fields === "object"
                 ? Object.values(data.fields).filter(Boolean)
                 : [];
-            const fallback = response.status === 403
-                ? "Este recurso está disponível para assinantes Premium."
+            const fallback = response.status === 401
+                ? "Sua sessão expirou. Entre novamente para continuar."
                 : "Não foi possível concluir a solicitação.";
             const requestError = new Error(data.error || data.message || fieldMessages[0] || fallback);
             requestError.status = response.status;
@@ -326,6 +429,11 @@
     }
 
     function resetWorkoutExecutionState() {
+        cancelWorkoutDraftTimers();
+        workoutView.draftRevisions.clear();
+        workoutView.lastField = null;
+        workoutView.draftError = "";
+        workoutView.uncertainMutation = null;
         workoutView.setDrafts.clear();
         workoutView.skippedExerciseIds.clear();
         workoutView.completedSetCounts.clear();
@@ -358,16 +466,29 @@
 
     async function saveWorkoutDraftToServer(sessionId, exerciseId, sets) {
         if (!sessionId || !exerciseId) return;
+        const account = workoutAccount();
+        const version = workoutView.viewVersion;
+        const key = String(exerciseId);
+        const revision = workoutView.draftRevisions.get(key);
+        const snapshot = JSON.parse(JSON.stringify(sets));
         try {
-            await apiRequest(`/workout_sessions/${apiSegment(sessionId)}/exercises/${apiSegment(exerciseId)}/draft`, {
-                method: "PUT",
-                body: { sets },
+            await queueSessionWrite(sessionId, async () => {
+                if (!workoutContextCurrent(account, version, sessionId)
+                    || workoutView.draftRevisions.get(key) !== revision
+                    || completedWorkoutExerciseIds().has(key)
+                    || workoutView.pendingAction?.startsWith("complete-")
+                    || ["finish", "cancel"].includes(workoutView.pendingAction)) return;
+                await apiRequest(`/workout_sessions/${apiSegment(sessionId)}/exercises/${apiSegment(exerciseId)}/draft`, {
+                    method: "PUT", body: { sets: snapshot },
+                });
+                if (workoutContextCurrent(account, version, sessionId)
+                    && workoutView.draftRevisions.get(key) === revision) workoutView.draftError = "";
             });
-            if (isCurrentWorkoutSession(sessionId)) workoutView.sessionError = "";
         } catch (error) {
-            if (isCurrentWorkoutSession(sessionId)) {
-                workoutView.sessionError = error.message;
-                renderWorkoutDetail({ preserveScroll: true });
+            if (workoutContextCurrent(account, version, sessionId) && !workoutView.pendingAction
+                && !completedWorkoutExerciseIds().has(key) && workoutView.draftRevisions.get(key) === revision) {
+                workoutView.draftError = "Registro salvo neste dispositivo. A sincronização será retomada com conexão.";
+                updateWorkoutPlayerFeedback();
             }
         }
     }
@@ -377,10 +498,12 @@
         if (!sessionId || !exerciseId) return;
         persistWorkoutDraftLocally(sessionId);
         const key = String(exerciseId);
+        workoutView.draftRevisions.set(key, (workoutView.draftRevisions.get(key) || 0) + 1);
+        const snapshot = JSON.parse(JSON.stringify(asArray(workoutView.setDrafts.get(key))));
         window.clearTimeout(workoutView.draftSaveTimers.get(key));
         workoutView.draftSaveTimers.set(key, window.setTimeout(() => {
             workoutView.draftSaveTimers.delete(key);
-            saveWorkoutDraftToServer(sessionId, exerciseId, asArray(workoutView.setDrafts.get(key)));
+            saveWorkoutDraftToServer(sessionId, exerciseId, snapshot);
         }, 500));
     }
 
@@ -388,16 +511,16 @@
         const key = String(exerciseId);
         window.clearTimeout(workoutView.draftSaveTimers.get(key));
         workoutView.draftSaveTimers.delete(key);
+        workoutView.draftRevisions.set(key, (workoutView.draftRevisions.get(key) || 0) + 1);
         workoutView.setDrafts.delete(key);
         persistWorkoutDraftLocally(sessionId);
     }
 
-    function syncWorkoutDrafts() {
+    async function syncWorkoutDrafts() {
         const sessionId = workoutView.session?.id;
         if (!sessionId || !navigator.onLine) return;
-        workoutView.setDrafts.forEach((sets, exerciseId) => {
-            saveWorkoutDraftToServer(sessionId, exerciseId, asArray(sets));
-        });
+        cancelWorkoutDraftTimers();
+        await Promise.all(Array.from(workoutView.setDrafts, ([exerciseId, sets]) => saveWorkoutDraftToServer(sessionId, exerciseId, asArray(sets))));
     }
 
     function invalidAttributes(name, state) {
@@ -786,6 +909,7 @@
     }
 
     function renderWizard(options = {}) {
+        if (activeWizardType === "diet") loadIngredientPool();
         if (!activeWizardType) return;
         const type = activeWizardType;
         const state = wizardMemory[type];
@@ -1673,7 +1797,7 @@
         }
         try {
             try {
-                workoutTodayState = await apiRequest("/workouts/today");
+                await loadWorkoutTodayCard();
                 workoutTodayError = "";
             } catch (error) {
                 workoutTodayError = error.message;
@@ -1716,7 +1840,9 @@
         const name = day?.title || workoutTodayState.current_plan?.title || 'Treino de hoje';
         const operational = ['active', 'scheduled'].includes(state);
         if (operational) {
-            container.innerHTML = `<div class="today-workout"><div class="today-workout__head"><span class="today-workout__icon"><i data-lucide="dumbbell" aria-hidden="true"></i></span><div><span class="today-muted">${state === 'active' ? 'Treino em andamento' : 'Treino de hoje'}</span><h2>${esc(name)}</h2></div></div><button type="button" class="btn-primary" data-workout-today-action="${state === 'active' ? 'open-plan' : 'start-today'}">${state === 'active' ? 'Continuar treino' : 'Iniciar treino'} <i data-lucide="arrow-right" aria-hidden="true"></i></button></div>`;
+            const firstExercise = asArray(day?.exercises)[0];
+            const preview = firstExercise ? `<figure class="today-workout-preview">${exerciseImageMarkup(firstExercise, true)}<figcaption>${esc(firstExercise.name)}</figcaption></figure>` : "";
+            container.innerHTML = `<div class="today-workout">${preview}<div class="today-workout__head"><span class="today-workout__icon"><i data-lucide="dumbbell" aria-hidden="true"></i></span><div><span class="today-muted">${state === 'active' ? 'Treino em andamento' : 'Treino de hoje'}</span><h2>${esc(name)}</h2></div></div><button type="button" class="btn-primary" data-workout-today-action="${state === 'active' ? 'open-plan' : 'start-today'}">${state === 'active' ? 'Continuar treino' : 'Iniciar treino'} <i data-lucide="arrow-right" aria-hidden="true"></i></button></div>`;
         } else {
             const label = { completed: 'Treino concluído', partial: 'Treino finalizado parcialmente', rest: 'Hoje é descanso', unconfigured: 'Seu treino ainda não está configurado. Acesse Treino.' }[state] || 'Treino indisponível';
             container.innerHTML = `<div class="today-workout-status"><span>${esc(label)}</span>${['completed', 'partial'].includes(state) ? '<button type="button" class="text-button" data-workout-today-action="open-activity">Ver resumo</button>' : ''}</div>`;
@@ -1806,19 +1932,43 @@
             renderWorkoutTodayCard();
             return null;
         }
-        if (workoutTodayState && !forceFetch) {
+        const owner = `${workoutAccount()}:${new Date().toLocaleDateString("en-CA")}:${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
+        if (workoutTodayOwner !== owner) {
+            workoutTodayState = null;
+            workoutTodayAt = 0;
+            workoutTodayPromise = null;
+            workoutTodayOwner = owner;
+        }
+        if (workoutTodayState && !forceFetch && Date.now() - workoutTodayAt < 30000) {
             renderWorkoutTodayCard();
             return workoutTodayState;
         }
-        try {
-            const result = await apiRequest("/workouts/today");
-            workoutTodayState = result;
-            workoutTodayError = "";
-        } catch (error) {
-            workoutTodayError = error.message;
-        }
-        renderWorkoutTodayCard();
-        return workoutTodayState;
+        if (workoutTodayPromise) return workoutTodayPromise;
+        if (!workoutTodayState) renderWorkoutTodayCard();
+        const revision = workoutView.mutationRevision;
+        const promise = (async () => {
+            try {
+                const loader = ({ signal } = {}) => apiRequest("/workouts/today", { signal });
+                const result = window.AppReadCache
+                    ? await window.AppReadCache.read(`workout:today:${owner}`, loader, { ttl: 30000, force: forceFetch })
+                    : await loader();
+                if (owner !== workoutTodayOwner || revision !== workoutView.mutationRevision) return workoutTodayState;
+                workoutTodayState = result;
+                workoutTodayAt = Date.now();
+                workoutTodayError = "";
+                activeWorkoutSummary = result.state === "active" && result.session
+                    ? { session: result.session, plan: result.current_plan, day: result.current_day }
+                    : null;
+                renderActiveWorkoutDock();
+            } catch (error) {
+                if (owner === workoutTodayOwner && error.name !== "AbortError") workoutTodayError = error.message;
+            }
+            if (owner === workoutTodayOwner) renderWorkoutTodayCard();
+            return workoutTodayState;
+        })();
+        workoutTodayPromise = promise;
+        try { return await promise; }
+        finally { if (workoutTodayPromise === promise) workoutTodayPromise = null; }
     }
 
     async function openWorkoutTodayPlan() {
@@ -2187,31 +2337,41 @@
         renderActiveWorkoutDock();
     }
 
-    async function loadActiveWorkoutDock() {
+    async function loadActiveWorkoutDock(force = false) {
         if (!window.currentUser) {
             clearActiveWorkoutDock();
             return;
         }
         const token = ++activeDockRequestToken;
+        const account = workoutAccount();
+        const version = workoutView.viewVersion;
+        const revision = workoutView.mutationRevision;
+        if (workoutView.pendingAction || workoutView.uncertainMutation || workoutGesture || document.visibilityState === "hidden") return;
         let result;
         try {
-            result = await apiRequest("/workout_sessions/active");
+            const loader = ({ signal } = {}) => apiRequest("/workout_sessions/active", { signal });
+            result = window.AppReadCache
+                ? await window.AppReadCache.read(`workout:active:${account}`, loader, { ttl: 30000, force })
+                : await loader();
         } catch (error) {
-            if (workoutView.session) {
+            if (token === activeDockRequestToken && revision === workoutView.mutationRevision && workoutContextCurrent(account, version) && workoutView.session && error.name !== "AbortError") {
                 workoutView.sessionError = error.message;
                 renderWorkoutDetail({ preserveScroll: true });
             }
             return;
         }
-        if (token !== activeDockRequestToken || byId("mainScreen")?.classList.contains("hidden")) return;
+        if (token !== activeDockRequestToken || !workoutContextCurrent(account, version)
+            || revision !== workoutView.mutationRevision || workoutView.pendingAction || workoutView.uncertainMutation || workoutGesture
+            || byId("mainScreen")?.classList.contains("hidden")) return;
         activeWorkoutSummary = result;
         renderActiveWorkoutDock();
         const modalOpen = byId("viewWorkoutPlanModal")?.classList.contains("show");
         if (!modalOpen || !workoutView.session) return;
         if (result?.session && String(result.session.id) === String(workoutView.session.id)) {
+            const changed = JSON.stringify(workoutView.session) !== JSON.stringify(result.session);
             workoutView.session = result.session;
             hydrateWorkoutDrafts(result.session);
-            renderWorkoutDetail({ preserveScroll: true });
+            if (changed) renderWorkoutDetail({ preserveScroll: true });
         } else if (!result?.session) {
             workoutView.session = null;
             workoutView.replacementPanels.clear();
@@ -2263,12 +2423,15 @@
     }
 
     function invalidateWorkoutView() {
+        persistWorkoutDraftLocally(workoutView.session?.id);
+        cancelWorkoutDraftTimers();
+        cancelWorkoutPlayerGesture();
         workoutView.viewVersion += 1;
         workoutView.requestToken += 1;
         workoutView.pendingAction = "";
         workoutView.editMode = false;
         workoutView.addExerciseOpen = false;
-        workoutView.replacementPanels.clear();
+        clearReplacementPanels();
     }
 
     function exerciseImage(exercise) {
@@ -2277,14 +2440,14 @@
             : "";
     }
 
-    function exerciseImageMarkup(exercise) {
+    function exerciseImageMarkup(exercise, eager = false) {
         const imagePath = exerciseImage(exercise);
         const fallbackPath = typeof exerciseFallbackImagePath === "function"
             ? exerciseFallbackImagePath(exercise?.catalog_key)
             : "";
         if (imagePath) {
             const fallback = fallbackPath && fallbackPath !== imagePath ? ` data-fallback-src="${esc(fallbackPath)}"` : "";
-            return `<img class="exercise-demonstration-image" src="${esc(imagePath)}"${fallback} alt="Demonstração de ${esc(exercise?.name || "exercício")}" loading="lazy">`;
+            return `<img class="exercise-demonstration-image" src="${esc(imagePath)}"${fallback} alt="Demonstração de ${esc(exercise?.name || "exercício")}" loading="${eager ? "eager" : "lazy"}" decoding="async" width="768" height="1024">`;
         }
         return '<span class="exercise-image-placeholder" role="img" aria-label="Imagem não disponível"><i class="fas fa-dumbbell" aria-hidden="true"></i></span>';
     }
@@ -2301,7 +2464,7 @@
         const replacementOptions = asArray(panel.options);
         const visibleOptions = panel.expanded ? replacementOptions : replacementOptions.slice(0, 3);
         if (panel.loading) {
-            return `<section id="${panelId}" class="replacement-panel" tabindex="-1" aria-live="polite"><div class="replacement-panel__loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Buscando alternativas seguras...</span></div></section>`;
+            return `<section id="${panelId}" class="replacement-panel" tabindex="-1" aria-live="polite"><button type="button" class="replacement-close" data-workout-action="close-replacements" data-exercise-id="${esc(exercise.id)}" aria-label="Fechar alternativas">×</button><div class="replacement-panel__loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Buscando alternativas seguras...</span></div></section>`;
         }
         return `
             <section id="${panelId}" class="replacement-panel" tabindex="-1" aria-labelledby="replacement-title-${esc(exercise.id)}">
@@ -2309,7 +2472,7 @@
                     <div><span>${permanent ? "Alteração permanente" : "Somente nesta sessão"}</span><h6 id="replacement-title-${esc(exercise.id)}">Trocar ${esc(currentExercise.name || exercise.name)}</h6><p>Melhores opções compatíveis para continuar o treino.</p></div>
                     <button type="button" class="replacement-close" data-workout-action="close-replacements" data-exercise-id="${esc(exercise.id)}" aria-label="Fechar alternativas"><i class="fas fa-xmark" aria-hidden="true"></i></button>
                 </div>
-                ${panel.error ? `<p class="session-inline-error" role="alert">${esc(panel.error)}</p>` : ""}
+                ${panel.error ? `<p class="session-inline-error" role="alert">${esc(panel.error)}</p><button type="button" data-workout-action="${panel.mode === "permanent" ? "permanent-replacement-options" : "replacement-options"}" data-exercise-id="${esc(exercise.id)}">Tentar novamente</button>` : ""}
                 ${panel.message ? `<p class="replacement-message">${esc(panel.message)}</p>` : ""}
                 <div class="replacement-options">
                     ${visibleOptions.map((option) => {
@@ -2383,7 +2546,7 @@
 
     function workoutSetRowMarkup(order, values = {}, current = false) {
         const completed = Boolean(values.completed);
-        return `<div class="workout-set-row${completed ? " is-complete" : ""}${current ? " is-current" : ""}" data-workout-set-completed="${completed}" data-workout-set-index="${order - 1}"><strong><small>Série</small>${esc(order)}</strong><label><span>Carga (kg)</span><input type="number" min="0" max="100000" step="0.01" inputmode="decimal" value="${esc(values.load_kg || "")}" data-workout-set-load aria-label="Carga total da série ${esc(order)} em kg"></label><label><span>Repetições</span><input type="number" min="1" max="1000" step="1" inputmode="numeric" value="${esc(values.repetitions || "")}" data-workout-set-repetitions aria-label="Repetições da série ${esc(order)}"></label><label class="workout-set-warmup"><input type="checkbox" data-workout-set-warmup${values.is_warmup ? " checked" : ""}><span>Aquecimento</span></label><button type="button" class="workout-set-complete" data-workout-action="toggle-set-complete" aria-pressed="${completed}" aria-label="${completed ? "Reabrir" : "Concluir"} série ${esc(order)}"><i class="fas ${completed ? "fa-check" : "fa-circle"}" aria-hidden="true"></i><span>${completed ? "Feita" : "Marcar"}</span></button>${!completed ? `<button type="button" class="workout-set-remove" data-workout-action="remove-set" aria-label="Remover série ${esc(order)}"><i class="fas fa-minus" aria-hidden="true"></i></button>` : ""}</div>`;
+        return `<div class="workout-set-row${completed ? " is-complete" : ""}${current ? " is-current" : ""}" data-workout-set-completed="${completed}" data-workout-set-index="${order - 1}"><strong><small>Série</small>${esc(order)}</strong><label><span>Carga (kg)</span><input type="text" inputmode="decimal" value="${esc(values.load_kg || "")}" data-workout-set-load aria-label="Carga total da série ${esc(order)} em kg"></label><label><span>Repetições</span><input type="text" inputmode="numeric" value="${esc(values.repetitions || "")}" data-workout-set-repetitions aria-label="Repetições da série ${esc(order)}"></label><label class="workout-set-warmup"><input type="checkbox" data-workout-set-warmup${values.is_warmup ? " checked" : ""}><span>Aquecimento</span></label><button type="button" class="workout-set-complete" data-workout-action="toggle-set-complete" aria-pressed="${completed}" aria-label="${completed ? "Reabrir" : "Concluir"} série ${esc(order)}"><i class="fas ${completed ? "fa-check" : "fa-circle"}" aria-hidden="true"></i><span>${completed ? "Feita" : "Marcar"}</span></button>${!completed ? `<button type="button" class="workout-set-remove" data-workout-action="remove-set" aria-label="Remover série ${esc(order)}"><i class="fas fa-minus" aria-hidden="true"></i></button>` : ""}</div>`;
     }
 
     function captureWorkoutSetDraft(exerciseId) {
@@ -2417,6 +2580,33 @@
         renderWorkoutDetail({ preserveScroll: true });
     }
 
+    function setWorkoutSheetExpanded(expanded) {
+        if (workoutView.pendingAction) return;
+        workoutView.sessionSheetExpanded = expanded;
+        if (expanded && !workoutView.rest?.endsAt) {
+            const exercise = findSelectedExercise(workoutView.activeExerciseId);
+            if (exercise) {
+                const seconds = Math.min(600, Math.max(0, Number(displayedExercise(exercise).exercise.rest_seconds) || 0));
+                if (seconds) workoutView.rest = { duration: seconds, endsAt: Date.now() + seconds * 1000, exerciseId: String(exercise.id) };
+            }
+        }
+        persistWorkoutDraftLocally(workoutView.session?.id);
+        renderWorkoutDetail({ preserveScroll: true });
+    }
+
+    function workoutPlayerFeedbackMarkup() {
+        const message = workoutView.pendingAction ? "Salvando…" : workoutView.sessionError || workoutView.draftError || "";
+        return `<div class="workout-player-feedback" data-workout-feedback role="${workoutView.sessionError ? "alert" : "status"}"${message ? "" : " hidden"}>${esc(message)}${workoutView.sessionError && !workoutView.pendingAction ? '<button type="button" data-workout-action="retry-session">Verificar e tentar novamente</button>' : ""}</div>`;
+    }
+
+    function updateWorkoutPlayerFeedback() {
+        document.querySelectorAll("[data-workout-feedback]").forEach((element) => {
+            const template = document.createElement("template");
+            template.innerHTML = workoutPlayerFeedbackMarkup();
+            patchWorkoutNode(element, template.content.firstElementChild);
+        });
+    }
+
     function adjustWorkoutRest(seconds) {
         if (!workoutView.rest) return;
         const remaining = workoutView.rest.endsAt - Date.now() + Number(seconds) * 1000;
@@ -2445,17 +2635,17 @@
 
     function performedSetsFromView(exerciseId) {
         captureWorkoutSetDraft(exerciseId);
-        return asArray(workoutView.setDrafts.get(String(exerciseId))).flatMap((item) => {
+        return asArray(workoutView.setDrafts.get(String(exerciseId))).flatMap((item, index) => {
             const loadValue = item.load_kg;
             const repetitionsValue = item.repetitions;
             if (!loadValue && !repetitionsValue) return [];
             const repetitions = Number(repetitionsValue);
-            const load = loadValue === "" ? null : Number(loadValue);
+            const load = loadValue === "" ? null : Number(String(loadValue).replace(",", "."));
             if (!Number.isInteger(repetitions) || repetitions < 1 || repetitions > 1000) {
-                throw new Error("Informe repetições válidas para cada série preenchida.");
+                throw Object.assign(new Error("Informe repetições válidas para cada série preenchida."), {field: "repetitions", index});
             }
             if (load !== null && (!Number.isFinite(load) || load < 0 || load > 100000)) {
-                throw new Error("Informe uma carga válida para cada série preenchida.");
+                throw Object.assign(new Error("Informe uma carga válida para cada série preenchida."), {field: "load", index});
             }
             return [{ repetitions, load_kg: load, is_warmup: Boolean(item.is_warmup) }];
         });
@@ -2522,11 +2712,12 @@
             return `
                 <section class="active-workout-shell active-workout-shell--complete">
                     ${toolbar}
-                    <div class="workout-complete-state">
+                    <div class="workout-complete-state" data-workout-ready>
                         <span><i class="fas fa-trophy" aria-hidden="true"></i></span>
                         <div><small>Pronta para finalizar</small><h4 id="workoutCompleteTitle" tabindex="-1">Revise e finalize sua sessão</h4><p>${progressState.completedExercises} exercícios concluídos · ${progressState.completedSets} séries realizadas${progressState.skippedExercises ? ` · ${progressState.skippedExercises} pulado(s)` : ""}.</p></div>
                         <button type="button" class="finish-workout-button active-workout-finish" data-workout-action="finish-session"${workoutView.pendingAction === "finish" ? " disabled" : ""}>${workoutView.pendingAction === "finish" ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i>' : '<i class="fas fa-flag-checkered" aria-hidden="true"></i>'} Finalizar treino</button>
                     </div>
+                    ${workoutPlayerFeedbackMarkup()}
                     <details class="active-workout-queue"><summary><span>Revisar sequência</span><strong>${resolvedCount}/${exercises.length}</strong></summary><ol>${queue}</ol></details>
                 </section>`;
         }
@@ -2562,7 +2753,7 @@
             : `<i class="fas fa-check" aria-hidden="true"></i> Concluir série ${currentSetIndex + 1}`;
         const completeExerciseLabel = workoutView.pendingAction === `complete-${currentOriginal.id}`
             ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Salvando...'
-            : '<i class="fas fa-check" aria-hidden="true"></i> Concluir exercício';
+            : '<i class="fas fa-check" aria-hidden="true"></i> Salvar e concluir';
         const stateContent = exerciseDone
             ? `<div class="current-exercise-resolved is-complete"><i class="fas fa-circle-check" aria-hidden="true"></i><div><strong>Exercício concluído</strong><p>As séries registradas já foram salvas.</p></div></div>`
             : exerciseSkipped
@@ -2572,12 +2763,11 @@
                     <div class="workout-set-entry__rows">${setRows}</div>
                     <button type="button" class="complete-current-set-button" data-workout-action="complete-current-set" data-exercise-id="${esc(currentOriginal.id)}" data-workout-set-index="${currentSetIndex == null ? "" : esc(currentSetIndex)}"${currentSetIndex == null || workoutView.pendingAction ? " disabled" : ""}>${completeSetLabel}</button>
                     <p>O registro é opcional. Você também pode concluir o exercício sem preencher todas as séries.</p>
-                    <button type="button" class="complete-exercise-button workout-exercise-primary" data-workout-action="complete-exercise" data-exercise-id="${esc(currentOriginal.id)}"${workoutView.pendingAction ? " disabled" : ""}>${completeExerciseLabel}</button>
                 </section>`;
         return `
             <section class="active-workout-shell active-workout-shell--immersive">
                 <article class="current-exercise-stage current-exercise-stage--player${exerciseDone ? " is-completed-view" : exerciseSkipped ? " is-skipped-view" : ""}" data-workout-exercise-card data-exercise-id="${esc(currentOriginal.id)}">
-                    <figure class="current-exercise-media">${exerciseImageMarkup(exercise)}</figure>
+                    <figure class="current-exercise-media">${exerciseImageMarkup(exercise, true)}</figure>
                     ${toolbar}
                     ${navigation}
                     <div class="current-exercise-content current-exercise-content--overlay">
@@ -2594,22 +2784,23 @@
                         </div>
                         <div class="workout-player-progress"><span>${progressState.completedExercises} de ${exercises.length} exercícios</span><i aria-hidden="true"><b style="width:${exerciseProgress}%"></b></i></div>
                     </div>
-                    ${workoutView.rest ? `<div class="workout-player-rest"><span><i class="fas fa-hourglass-half" aria-hidden="true"></i> Descanso</span><strong data-workout-rest-compact>${formatRestRemaining((workoutView.rest.endsAt - Date.now()) / 1000)}</strong></div>` : ""}
+                    <div class="workout-player-rest"${workoutView.rest ? "" : " hidden"}><span><i class="fas fa-hourglass-half" aria-hidden="true"></i> Descanso</span><strong data-workout-rest-compact>${workoutView.rest ? formatRestRemaining((workoutView.rest.endsAt - Date.now()) / 1000) : ""}</strong></div>
                     <section class="workout-session-sheet${sheetExpanded ? " is-expanded" : " is-collapsed"}" data-workout-sheet aria-label="Controles da sessão">
                         <button type="button" class="workout-sheet-handle" data-workout-action="toggle-session-sheet" aria-expanded="${sheetExpanded}" aria-controls="workoutSessionSheetContent"><span aria-hidden="true"></span><b>${sheetExpanded ? "Recolher painel" : "Arraste para registrar séries"}</b><i class="fas fa-chevron-${sheetExpanded ? "down" : "up"}" aria-hidden="true"></i></button>
                         <div id="workoutSessionSheetContent" class="workout-session-sheet__scroll"${sheetExpanded ? "" : " inert"}>
+                            ${stateContent}
                             ${renderWorkoutRest(nextStep)}
-                            ${workoutView.sessionError ? `<p class="session-inline-error" role="alert"><i class="fas fa-circle-exclamation" aria-hidden="true"></i> <span>${esc(workoutView.sessionError)}</span><button type="button" data-workout-action="retry-session">Tentar novamente</button></p>` : ""}
                             ${details ? `<div class="current-exercise-meta">${details}</div>` : ""}
                             ${exercise.effort_guidance ? `<p class="current-exercise-note"><i class="fas fa-gauge-high" aria-hidden="true"></i><span><strong>Esforço</strong>${esc(exercise.effort_guidance)}</span></p>` : ""}
                             ${exercise.notes ? `<p class="current-exercise-instruction"><i class="fas fa-circle-info" aria-hidden="true"></i>${esc(exercise.notes)}</p>` : ""}
-                            ${stateContent}
                             ${!exerciseDone && !exerciseSkipped ? `<details class="current-exercise-secondary"><summary>Mais ações</summary><div><button type="button" class="skip-current-exercise-button" data-workout-action="skip-exercise" data-exercise-id="${esc(currentOriginal.id)}"><i class="fas fa-forward" aria-hidden="true"></i> Pular exercício</button>${override ? `<button type="button" class="restore-exercise-button" data-workout-action="restore-exercise" data-exercise-id="${esc(currentOriginal.id)}"${workoutView.pendingAction === `restore-${currentOriginal.id}` ? " disabled" : ""}><i class="fas fa-rotate-left" aria-hidden="true"></i> Restaurar original</button>` : ""}</div></details>` : ""}
                             <details class="active-workout-queue"><summary><span>Sequência do treino</span><strong>${progressState.completedExercises} concluídos${progressState.skippedExercises ? ` · ${progressState.skippedExercises} pulado(s)` : ""}</strong></summary><ol>${queue}</ol></details>
                             <div class="workout-sheet-session-actions"><button type="button" class="finish-workout-link" data-workout-action="finish-session"><i class="fas fa-stop-circle" aria-hidden="true"></i> Finalizar treino</button></div>
                             <div class="workout-sheet-danger"><span>Encerrar sem salvar o treino</span><button type="button" class="cancel-workout-button" data-workout-action="cancel-session"><i class="fas fa-trash-can" aria-hidden="true"></i> Cancelar e apagar sessão</button></div>
                         </div>
+                        ${!exerciseDone && !exerciseSkipped ? `<div class="workout-sheet-save-action"${sheetExpanded ? "" : " inert"}><button type="button" class="complete-exercise-button workout-exercise-primary" data-workout-action="complete-exercise" data-exercise-id="${esc(currentOriginal.id)}"${workoutView.pendingAction ? " disabled" : ""}>${completeExerciseLabel}</button></div>` : ""}
                     </section>
+                    ${workoutPlayerFeedbackMarkup()}
                 </article>
                 ${renderReplacementPanel(currentOriginal, panel)}
             </section>`;
@@ -2721,10 +2912,6 @@
             const selected = draft.selectedExerciseIds.has(String(exercise.exercise_id));
             return `<li class="${selected ? "is-selected" : ""}"><div><strong>${esc(exercise.name)}</strong><span>${esc(formatWorkoutBestSet(exercise.best_set))}</span></div><button type="button" data-workout-action="toggle-share-exercise" data-exercise-id="${esc(exercise.exercise_id)}" aria-pressed="${selected}"><i class="fas ${selected ? "fa-eye-slash" : "fa-eye"}" aria-hidden="true"></i>${selected ? "Não mostrar" : "Mostrar"}</button></li>`;
         }).join("");
-        const photo = draft.photoDataUrl
-            ? `<img class="workout-share-card__photo" src="${esc(draft.photoDataUrl)}" alt="" aria-hidden="true" style="transform: translate3d(${(draft.photoOffsetX || 0) / 3}px, ${(draft.photoOffsetY || 0) / 3}px, 0) scale(${draft.photoScale || 1});">`
-            : "";
-
         const photoSlider = !isDark ? `
                         <section class="workout-share-option" aria-labelledby="workoutSharePhotoAdjustTitle">
                             <div class="workout-share-option__heading"><span><i class="fas fa-crop-simple" aria-hidden="true"></i></span><div><h4 id="workoutSharePhotoAdjustTitle">Ajustar foto</h4><p>Escala e posição da imagem de fundo.</p></div></div>
@@ -2755,30 +2942,6 @@
                 </div>
             </section>`;
 
-        const infoMarkup = infoModel.preset === "compact"
-            ? `
-                <span class="workout-share-card__kicker"><i class="fas fa-circle-check" aria-hidden="true"></i> Treino concluído</span>
-                <div class="workout-share-card__title"><h5>${esc(infoModel.title)}</h5></div>
-                <p class="workout-share-card__subtitle">${esc(infoModel.subtitle)}</p>
-                <div class="workout-share-card__indicators">
-                    <div class="workout-share-card__indicator"><strong>${esc(infoModel.durationText || "-")}</strong><small>Duração</small></div>
-                    <div class="workout-share-card__indicator"><strong>${esc(infoModel.exerciseCount || 0)}</strong><small>Exercícios</small></div>
-                </div>
-                <footer class="workout-share-card__footer">${shareLogo.complete && shareLogo.naturalWidth ? `<img src="${esc(shareLogo.src)}" alt="Fit-Tracker.AI" class="workout-share-card__logo">` : `<span>Fit-Tracker.AI</span>`}</footer>`
-            : infoModel.preset === "minimal"
-                ? `
-                <span class="workout-share-card__kicker"><i class="fas fa-circle-check" aria-hidden="true"></i> Treino concluído</span>
-                <div class="workout-share-card__title"><h5>${esc(infoModel.title)}</h5></div>
-                <p class="workout-share-card__subtitle">${esc(infoModel.subtitle)}</p>
-                <footer class="workout-share-card__footer">${shareLogo.complete && shareLogo.naturalWidth ? `<img src="${esc(shareLogo.src)}" alt="Fit-Tracker.AI" class="workout-share-card__logo">` : `<span>Fit-Tracker.AI</span>`}</footer>`
-                : `
-                <span class="workout-share-card__kicker"><i class="fas fa-circle-check" aria-hidden="true"></i> Treino concluído</span>
-                <div class="workout-share-card__title"><h5>${esc(infoModel.title)}</h5></div>
-                <p class="workout-share-card__subtitle">${esc(infoModel.subtitle)}</p>
-                <div class="workout-share-card__separator"></div>
-                ${infoModel.visibleExercises.length ? `<ul class="workout-share-card__exercise-list">${infoModel.visibleExercises.map((exercise) => `<li><span>${esc(exercise.name)}${asArray(exercise.personal_records).length ? ' <em>PR</em>' : ""}</span><small>${esc(formatWorkoutBestSet(exercise.best_set))}</small></li>`).join("")}${infoModel.extraCount > 0 ? `<li class="workout-share-card__extra">+${infoModel.extraCount} exercício${infoModel.extraCount > 1 ? "s" : ""}</li>` : ""}</ul>` : '<p class="workout-share-card__empty">Selecione ao menos um exercício para exibir.</p>'}
-                <footer class="workout-share-card__footer">${shareLogo.complete && shareLogo.naturalWidth ? `<img src="${esc(shareLogo.src)}" alt="Fit-Tracker.AI" class="workout-share-card__logo">` : `<span>Fit-Tracker.AI</span>`}</footer>`;
-
         return `<section class="workout-share-shell">
             <header class="workout-share-header"><button type="button" data-workout-action="back-to-summary"><i class="fas fa-arrow-left" aria-hidden="true"></i> Voltar</button><span>Workout Share</span><h3 tabindex="-1">Monte seu compartilhamento</h3><p>Escolha o modo, ajuste a foto e as informações do card.</p></header>
             <div class="workout-share-editor">
@@ -2807,12 +2970,8 @@
                 </div>
                 <section id="workoutSharePreview" class="workout-share-preview" aria-labelledby="workoutSharePreviewTitle">
                     <div class="workout-share-preview__heading"><div><span>Prévia</span><h4 id="workoutSharePreviewTitle">Seu card</h4></div><small>${esc(selectedExercises.length)} de ${esc(exercises.length)} exercícios</small></div>
-                    <article class="workout-share-card workout-share-card--stories${isDark ? " is-dark" : ""}${draft.photoDataUrl && !isDark ? " has-photo" : ""}">
-                        ${!isDark ? photo : ""}<div class="workout-share-card__shade" aria-hidden="true"></div>
-                        <div class="workout-share-card__content">
-                            <div class="workout-share-card__content-box workout-share-card__content-box--${infoModel.preset}">${infoMarkup}</div>
-                        </div>
-                    </article>
+                    <canvas data-workout-share-canvas width="1080" height="1920" role="img" aria-label="Prévia do card do treino"></canvas>
+                    <p id="workoutShareStatus" class="workout-share-status" role="status">Preparando card…</p>
                 </section>
             </div>
             <footer class="workout-share-shell__actions">
@@ -2823,360 +2982,23 @@
     }
 
     function syncWorkoutSharePreview() {
-        const root = byId("viewWorkoutPlanDetails");
-        const preview = byId("workoutSharePreview");
-        const card = preview?.querySelector(".workout-share-card");
-        const photo = card?.querySelector(".workout-share-card__photo");
-        if (!root || !card || !workoutView.completedSummary || !workoutView.shareDraft) return;
-
-        const draft = workoutView.shareDraft;
-        if (photo) {
-            photo.style.transform = `translate3d(${(draft.photoOffsetX || 0) / 3}px, ${(draft.photoOffsetY || 0) / 3}px, 0) scale(${draft.photoScale || 1})`;
-        }
-
-        const updates = [
-            ["set-share-photo-scale", `${(draft.photoScale || 1).toFixed(1)}x`],
-            ["set-share-photo-offset-x", `${Math.round(draft.photoOffsetX || 0)}px`],
-            ["set-share-photo-offset-y", `${Math.round(draft.photoOffsetY || 0)}px`],
-        ];
-
-        updates.forEach(([action, text]) => {
-            const input = root.querySelector(`[data-workout-action="${action}"]`);
-            if (!input) return;
-            const small = input.parentElement?.querySelector("small");
-            if (small) small.textContent = text;
+        const canvas = byId("viewWorkoutPlanDetails")?.querySelector("[data-workout-share-canvas]");
+        if (!canvas || !workoutView.completedSummary || !workoutView.shareDraft) return;
+        window.WorkoutShare?.updatePreview(canvas, workoutView.completedSummary, workoutView.shareDraft, ({state, message}) => {
+            if (!canvas.isConnected) return;
+            const button = byId("viewWorkoutPlanDetails").querySelector('[data-workout-action="share-workout-card"]');
+            const status = byId("workoutShareStatus");
+            if (button) { button.disabled = state !== "ready" || !workoutView.shareDraft.selectedExerciseIds.size; button.setAttribute("aria-busy", String(["preparing","sharing"].includes(state))); }
+            if (status) { status.textContent = message; status.setAttribute("role", state === "error" ? "alert" : "status"); }
         });
-    }
-
-    function listWorkoutShareSelection(summary) {
-        const draft = workoutView.shareDraft;
-        return asArray(summary.exercises).filter((exercise) => (
-            draft.selectedExerciseIds.has(String(exercise.exercise_id))
-        ));
-    }
-
-    function wrapCanvasText(ctx, text, maxWidth) {
-        const words = String(text).split(/\s+/);
-        const lines = [];
-        let current = "";
-        words.forEach((word) => {
-            const candidate = current ? `${current} ${word}` : word;
-            if (ctx.measureText(candidate).width <= maxWidth || !current) {
-                current = candidate;
-            } else {
-                lines.push(current);
-                current = word;
-            }
-        });
-        if (current) lines.push(current);
-        return lines;
-    }
-
-    function truncateCanvasText(ctx, text, maxWidth) {
-        const t = String(text || "");
-        if (ctx.measureText(t).width <= maxWidth) return t;
-        let truncated = t;
-        while (truncated.length > 0 && ctx.measureText(truncated + "…").width > maxWidth) {
-            truncated = truncated.slice(0, -1);
-        }
-        return truncated ? truncated + "…" : "";
-    }
-
-    function drawShareRoundedRect(ctx, x, y, w, h, r) {
-        ctx.beginPath();
-        ctx.moveTo(x + r, y);
-        ctx.lineTo(x + w - r, y);
-        ctx.arcTo(x + w, y, x + w, y + r, r);
-        ctx.lineTo(x + w, y + h - r);
-        ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
-        ctx.lineTo(x + r, y + h);
-        ctx.arcTo(x, y + h, x, y + h - r, r);
-        ctx.lineTo(x, y + r);
-        ctx.arcTo(x, y, x + r, y, r);
-        ctx.closePath();
-    }
-
-    function drawWorkoutShareCard(summary) {
-        const W = 1080;
-        const H = 1920;
-        const padX = 72;
-        const safeTop = 160;
-        const safeBottom = 240;
-        const draft = workoutView.shareDraft || {};
-        const isDark = draft.mode === "dark";
-        const selected = listWorkoutShareSelection(summary);
-        const exercises = asArray(summary.exercises);
-        const photoScale = draft.photoScale || 1;
-        const photoOffsetX = draft.photoOffsetX || 0;
-        const photoOffsetY = draft.photoOffsetY || 0;
-        const infoModel = workoutShareInfoModel(summary, selected, draft);
-
-        const canvas = document.createElement("canvas");
-        canvas.width = W;
-        canvas.height = H;
-        const ctx = canvas.getContext("2d");
-
-        const bodyFont = "Inter, Avenir, Helvetica, Arial, sans-serif";
-
-        // === BACKGROUND ===
-        if (!isDark) {
-            const photo = (() => {
-                const dataUrl = draft.photoDataUrl;
-                if (!dataUrl) return null;
-                let image = workoutSharePhotoCache.get(dataUrl);
-                if (image) return image;
-                image = document.querySelector('.workout-share-card__photo[src="' + dataUrl + '"]');
-                if (image && image.complete && image.naturalWidth) return image;
-                return null;
-            })();
-            if (photo) {
-                const baseCover = Math.max(W / photo.naturalWidth, H / photo.naturalHeight);
-                const cover = baseCover * photoScale;
-                const dw = photo.naturalWidth * cover;
-                const dh = photo.naturalHeight * cover;
-                ctx.drawImage(photo, (W - dw) / 2 + photoOffsetX, (H - dh) / 2 + photoOffsetY, dw, dh);
-                const lowerShade = ctx.createLinearGradient(0, H * 0.5, 0, H);
-                lowerShade.addColorStop(0, "rgba(0, 0, 0, 0)");
-                lowerShade.addColorStop(0.4, "rgba(0, 0, 0, 0.35)");
-                lowerShade.addColorStop(1, "rgba(0, 0, 0, 0.88)");
-                ctx.fillStyle = lowerShade;
-                ctx.fillRect(0, H * 0.5, W, H * 0.5);
-                const topShade = ctx.createLinearGradient(0, 0, 0, H * 0.4);
-                topShade.addColorStop(0, "rgba(0, 0, 0, 0.2)");
-                topShade.addColorStop(0.5, "rgba(0, 0, 0, 0)");
-                topShade.addColorStop(1, "rgba(0, 0, 0, 0.05)");
-                ctx.fillStyle = topShade;
-                ctx.fillRect(0, 0, W, H * 0.4);
-            } else {
-                const bg = ctx.createLinearGradient(0, 0, 0, H);
-                bg.addColorStop(0, "#0f172a");
-                bg.addColorStop(1, "#0b1120");
-                ctx.fillStyle = bg;
-                ctx.fillRect(0, 0, W, H);
-            }
-        } else {
-            const bg = ctx.createLinearGradient(0, 0, 0, H);
-            bg.addColorStop(0, "#0a0a0a");
-            bg.addColorStop(0.5, "#0d0d0d");
-            bg.addColorStop(1, "#080808");
-            ctx.fillStyle = bg;
-            ctx.fillRect(0, 0, W, H);
-            const accentGlow = ctx.createRadialGradient(W * 0.3, H * 0.12, 0, W * 0.3, H * 0.12, 350);
-            accentGlow.addColorStop(0, "rgba(52, 211, 153, 0.04)");
-            accentGlow.addColorStop(1, "rgba(52, 211, 153, 0)");
-            ctx.fillStyle = accentGlow;
-            ctx.fillRect(0, 0, W, H);
-        }
-
-        // === TEXT SHADOW HELPER ===
-        function setTextColor(color, shadow) {
-            ctx.fillStyle = color;
-            if (shadow) {
-                ctx.shadowColor = "rgba(0, 0, 0, 0.7)";
-                ctx.shadowBlur = 12;
-                ctx.shadowOffsetX = 0;
-                ctx.shadowOffsetY = 3;
-            } else {
-                ctx.shadowColor = "transparent";
-                ctx.shadowBlur = 0;
-                ctx.shadowOffsetX = 0;
-                ctx.shadowOffsetY = 0;
-            }
-        }
-
-        function clearShadow() {
-            ctx.shadowColor = "transparent";
-            ctx.shadowBlur = 0;
-            ctx.shadowOffsetX = 0;
-            ctx.shadowOffsetY = 0;
-        }
-
-        ctx.save();
-
-        const titleLines = (() => {
-            ctx.font = `800 60px ${bodyFont}`;
-            return wrapCanvasText(ctx, infoModel.title, W - padX * 2).slice(0, 3);
-        })();
-        const titleHeight = titleLines.length * 68;
-        const subtitleHeight = infoModel.subtitle ? 20 : 0;
-        const listHeight = infoModel.preset === "full" ? (infoModel.visibleExercises.length * 68 + (infoModel.extraCount > 0 ? 24 : 0)) : 0;
-        const indicatorsHeight = infoModel.preset === "compact" ? 56 : 0;
-        const blockHeight = 32 + 32 + titleHeight + (subtitleHeight ? 20 + subtitleHeight : 0) + (infoModel.preset === "full" ? 28 + 1 + 28 + listHeight : infoModel.preset === "compact" ? 22 + indicatorsHeight : 18) + 42;
-        const badgeText = "TREINO CONCLUIDO";
-        const badgePadX = 14;
-        const badgeH = 32;
-        ctx.font = `800 14px ${bodyFont}`;
-        const badgeTextW = ctx.measureText(badgeText).width;
-        const badgeW = badgeTextW + badgePadX * 2 + 24;
-        const badgeX = padX;
-        const badgeY = Math.max(safeTop, H - safeBottom - blockHeight);
-
-        // === BADGE ===
-        drawShareRoundedRect(ctx, badgeX, badgeY, badgeW, badgeH, 16);
-        const badgeGrad = ctx.createLinearGradient(badgeX, badgeY, badgeX + badgeW, badgeY);
-        badgeGrad.addColorStop(0, "#34d399");
-        badgeGrad.addColorStop(1, "#22d3a7");
-        ctx.fillStyle = badgeGrad;
-        ctx.fill();
-        clearShadow();
-        ctx.fillStyle = "#0a0a0a";
-        ctx.font = `800 14px ${bodyFont}`;
-        ctx.fillText("\u2713  " + badgeText, badgeX + badgePadX, badgeY + 22);
-
-        // === WORKOUT NAME (hero) ===
-        const nameY = badgeY + badgeH + 32;
-        setTextColor("#ffffff", true);
-        ctx.font = `800 60px ${bodyFont}`;
-        titleLines.forEach((line, i) => ctx.fillText(line, padX, nameY + i * 68));
-        clearShadow();
-
-        // === SUBTITLE ===
-        const subtitleY = nameY + titleLines.length * 68 + 20;
-        if (infoModel.subtitle) {
-            setTextColor("rgba(255, 255, 255, 0.55)", false);
-            ctx.font = `500 20px ${bodyFont}`;
-            ctx.fillText(infoModel.subtitle, padX, subtitleY);
-            clearShadow();
-        }
-
-        if (infoModel.preset === "compact") {
-            const indicatorsY = subtitleY + 28;
-            const pillW = (W - padX * 2 - 12) / 2;
-            const pills = [infoModel.durationText || "-", `${infoModel.exerciseCount || 0} exercícios`];
-            pills.forEach((text, i) => {
-                const x = padX + (pillW + 12) * i;
-                drawShareRoundedRect(ctx, x, indicatorsY, pillW, 56, 14);
-                ctx.fillStyle = "rgba(255, 255, 255, 0.06)";
-                ctx.fill();
-                ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
-                ctx.stroke();
-                ctx.fillStyle = "#ffffff";
-                ctx.font = `800 20px ${bodyFont}`;
-                ctx.textAlign = "center";
-                ctx.fillText(text, x + pillW / 2, indicatorsY + 34);
-                ctx.font = `600 11px ${bodyFont}`;
-                ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
-                ctx.fillText(i === 0 ? "Duração" : "Exercícios", x + pillW / 2, indicatorsY + 48);
-                ctx.textAlign = "left";
-            });
-        } else if (infoModel.preset === "full") {
-            const sepY = subtitleY + 28;
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(padX, sepY);
-            ctx.lineTo(W - padX, sepY);
-            ctx.stroke();
-
-            const listY = sepY + 28;
-            infoModel.visibleExercises.forEach((exercise, i) => {
-                const ey = listY + i * 68;
-                const hasPR = asArray(exercise.personal_records).length > 0;
-                const setName = formatWorkoutBestSet(exercise.best_set);
-
-                setTextColor("#ffffff", false);
-                ctx.font = `600 20px ${bodyFont}`;
-                const maxNameW = hasPR ? W - padX * 2 - 140 : W - padX * 2 - 220;
-                const displayName = truncateCanvasText(ctx, exercise.name || "Exerc\u00edcio", maxNameW);
-                ctx.fillText(displayName, padX, ey + 24);
-
-                if (hasPR) {
-                    const nameW = ctx.measureText(displayName).width;
-                    const prX = padX + nameW + 12;
-                    ctx.font = `800 12px ${bodyFont}`;
-                    const prTextW = ctx.measureText("PR").width;
-                    drawShareRoundedRect(ctx, prX, ey + 7, prTextW + 12, 18, 9);
-                    ctx.fillStyle = "#fbbf24";
-                    ctx.fill();
-                    clearShadow();
-                    ctx.fillStyle = "#0b1120";
-                    ctx.fillText("PR", prX + 6, ey + 20);
-                }
-
-                ctx.textAlign = "right";
-                ctx.font = `500 18px ${bodyFont}`;
-                setTextColor("rgba(255, 255, 255, 0.5)", false);
-                const displaySet = truncateCanvasText(ctx, setName, 200);
-                ctx.fillText(displaySet, W - padX, ey + 24);
-                clearShadow();
-                ctx.textAlign = "left";
-
-                if (i < infoModel.visibleExercises.length - 1) {
-                    ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
-                    ctx.lineWidth = 1;
-                    ctx.beginPath();
-                    ctx.moveTo(padX, ey + 54);
-                    ctx.lineTo(W - padX, ey + 54);
-                    ctx.stroke();
-                }
-            });
-
-            if (infoModel.extraCount > 0) {
-                const extraY = listY + infoModel.visibleExercises.length * 68;
-                setTextColor("rgba(255, 255, 255, 0.35)", false);
-                ctx.font = `600 18px ${bodyFont}`;
-                ctx.fillText(`+${infoModel.extraCount} exercício${infoModel.extraCount > 1 ? "s" : ""}`, padX, extraY + 20);
-                clearShadow();
-            }
-        }
-
-        // === LOGO FOOTER ===
-        const logoFooterY = H - safeBottom;
-        if (shareLogo.complete && shareLogo.naturalWidth) {
-            const maxLogoW = 200;
-            const logoRatio = shareLogo.naturalHeight / shareLogo.naturalWidth;
-            const logoW = maxLogoW;
-            const logoH = maxLogoW * logoRatio;
-            const logoX = (W - logoW) / 2;
-            const logoY = logoFooterY;
-            const outlineW = 3;
-            const pad = outlineW + 1;
-            const tmpCvs = document.createElement("canvas");
-            tmpCvs.width = logoW + pad * 2;
-            tmpCvs.height = logoH + pad * 2;
-            const tmpCtx = tmpCvs.getContext("2d");
-            tmpCtx.drawImage(shareLogo, pad - outlineW, pad - outlineW, logoW + outlineW * 2, logoH + outlineW * 2);
-            tmpCtx.globalCompositeOperation = "destination-out";
-            tmpCtx.drawImage(shareLogo, pad, pad, logoW, logoH);
-            tmpCtx.globalCompositeOperation = "source-atop";
-            tmpCtx.fillStyle = "white";
-            tmpCtx.fillRect(0, 0, tmpCvs.width, tmpCvs.height);
-            tmpCtx.globalCompositeOperation = "source-over";
-            ctx.drawImage(tmpCvs, logoX - pad, logoY - pad);
-            ctx.drawImage(shareLogo, logoX, logoY, logoW, logoH);
-        } else {
-            setTextColor("rgba(52, 211, 153, 0.5)", false);
-            ctx.font = `700 18px ${bodyFont}`;
-            ctx.textAlign = "center";
-            ctx.fillText("Fit-Tracker.AI", W / 2, logoFooterY + 14);
-            clearShadow();
-            ctx.textAlign = "left";
-        }
-
-        ctx.restore();
-        return canvas;
     }
 
     async function shareWorkoutCard(summary) {
         try {
-            const canvas = drawWorkoutShareCard(summary);
-            const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-            const file = new File([blob], "treino-card.png", { type: "image/png" });
-            if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                await navigator.share({ files: [file], title: "Meu treino", text: summary.workout_name || "Treino concluído" });
-            } else {
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement("a");
-                link.href = url;
-                link.download = "treino-card.png";
-                link.click();
-                setTimeout(() => URL.revokeObjectURL(url), 10_000);
-                showToast("Card baixado. Envie como quiser.", "success");
-            }
+            const result = await window.WorkoutShare.sharePrepared(summary, workoutView.shareDraft);
+            if (result.status === "download-started") showToast("Download solicitado. Confira os downloads do navegador.", "info");
         } catch (error) {
-            if (error?.name !== "AbortError") {
-                showToast(error.message || "Não foi possível gerar o card.", "error");
-            }
+            if (byId("workoutShareStatus")) byId("workoutShareStatus").textContent = error.message;
         }
     }
 
@@ -3199,15 +3021,89 @@
         });
     }
 
+    function workoutNodeKey(node) {
+        if (node.nodeType !== 1) return node.nodeType;
+        return `${node.tagName}:${node.id || node.dataset.workoutSetIndex || node.dataset.workoutAction || node.classList[0] || ""}`;
+    }
+
+    // Reconcile only the active player so status, timers and polling keep input nodes alive.
+    function patchWorkoutNode(current, next) {
+        if (!current || !next) return;
+        if (current.nodeType !== next.nodeType || workoutNodeKey(current) !== workoutNodeKey(next)) {
+            current.replaceWith(next);
+            return;
+        }
+        if (current.nodeType !== 1) {
+            if (current.nodeValue !== next.nodeValue) current.nodeValue = next.nodeValue;
+            return;
+        }
+        for (const attribute of Array.from(current.attributes)) {
+            if (attribute.name === "open" || (current.tagName === "INPUT" && ["value", "checked"].includes(attribute.name))) continue;
+            if (!next.hasAttribute(attribute.name)) current.removeAttribute(attribute.name);
+        }
+        for (const attribute of Array.from(next.attributes)) {
+            if (attribute.name === "open" || (current.tagName === "INPUT" && ["value", "checked"].includes(attribute.name))) continue;
+            if (current.getAttribute(attribute.name) !== attribute.value) current.setAttribute(attribute.name, attribute.value);
+        }
+        const wanted = Array.from(next.childNodes);
+        wanted.forEach((child, index) => {
+            let existing = current.childNodes[index];
+            if (existing && workoutNodeKey(existing) !== workoutNodeKey(child)) {
+                const match = Array.from(current.childNodes).slice(index + 1).find((item) => workoutNodeKey(item) === workoutNodeKey(child));
+                if (match) { current.insertBefore(match, existing); existing = match; }
+                else { current.insertBefore(child, existing); return; }
+            }
+            if (!existing) current.appendChild(child);
+            else patchWorkoutNode(existing, child);
+        });
+        while (current.childNodes.length > wanted.length) current.lastChild.remove();
+    }
+
+    let workoutViewportFrame = null;
+    function updateWorkoutVisualViewport() {
+        if (workoutViewportFrame) return;
+        workoutViewportFrame = requestAnimationFrame(() => {
+            workoutViewportFrame = null;
+            const modal = byId("viewWorkoutPlanModal");
+            const viewport = window.visualViewport;
+            if (!modal || !viewport) return;
+            const active = modal.classList.contains("show") && Boolean(workoutView.session);
+            if (!active || Math.abs(viewport.scale - 1) > 0.02) {
+                modal.classList.remove("has-workout-keyboard");
+                modal.style.removeProperty("--workout-viewport-height");
+                modal.style.removeProperty("--workout-viewport-top");
+                return;
+            }
+            modal.style.setProperty("--workout-viewport-height", `${Math.round(viewport.height)}px`);
+            modal.style.setProperty("--workout-viewport-top", `${Math.round(viewport.offsetTop)}px`);
+            const focused = document.activeElement;
+            const isInput = focused?.matches?.("input, textarea") && modal.contains(focused);
+            const keyboard = Boolean(isInput && window.innerHeight - viewport.height > 100);
+            modal.classList.toggle("has-workout-keyboard", keyboard);
+            if (keyboard) {
+                const scroll = focused.closest(".workout-session-sheet__scroll");
+                if (!scroll) return;
+                const field = focused.getBoundingClientRect();
+                const bounds = scroll.getBoundingClientRect();
+                if (field.bottom > bounds.bottom - 12) scroll.scrollTop += field.bottom - bounds.bottom + 12;
+                else if (field.top < bounds.top + 12) scroll.scrollTop -= bounds.top + 12 - field.top;
+            }
+        });
+    }
+
     function renderWorkoutDetail(options = {}) {
         const details = byId("viewWorkoutPlanDetails");
         if (!details) return;
         byId("viewWorkoutPlanModal")?.classList.toggle("workout-execution-mode", Boolean(workoutView.session && !workoutView.completedSummary));
         const previousScroll = options.preserveScroll ? details.scrollTop : 0;
+        const previousSheetScroll = details.querySelector(".workout-session-sheet__scroll")?.scrollTop || 0;
+        const previousExercise = details.querySelector("[data-workout-exercise-card]")?.dataset.exerciseId;
+        const focused = details.contains(document.activeElement) ? document.activeElement : null;
         if (workoutView.completedSummary) {
             const title = byId("viewWorkoutPlanTitle");
             if (title) title.textContent = workoutView.shareOpen ? "Workout Share" : "Resumo do treino";
             details.innerHTML = renderCompletedWorkoutSummary();
+            if (workoutView.shareOpen) syncWorkoutSharePreview();
             details.scrollTop = previousScroll;
             if (options.focusSelector) requestAnimationFrame(() => details.querySelector(options.focusSelector)?.focus());
             return;
@@ -3282,11 +3178,30 @@
             </section>`;
         const title = byId("viewWorkoutPlanTitle");
         if (title) title.textContent = session ? "Treino em andamento" : editing ? "Editar plano" : plan.title || "Plano de Treino";
-        details.innerHTML = `${session ? "" : summary}${tabs}${panel}`;
-        byId("viewWorkoutPlanModal")?.classList.toggle("workout-execution-mode", Boolean(details.querySelector(".active-workout-shell--immersive")));
+        const sameExercise = session && previousExercise && String(workoutView.activeExerciseId) === String(previousExercise)
+            && !details.querySelector("[data-workout-ready]") && !panel.includes("data-workout-ready");
+        if (sameExercise) {
+            const template = document.createElement("template");
+            template.innerHTML = panel.trim();
+            patchWorkoutNode(details.querySelector(".active-workout-shell"), template.content.firstElementChild);
+        } else {
+            details.innerHTML = `${session ? "" : summary}${tabs}${panel}`;
+        }
+        byId("viewWorkoutPlanModal")?.classList.toggle("workout-execution-mode", Boolean(session));
         details.scrollTop = previousScroll;
+        if (sameExercise || options.preserveScroll) {
+            const scroll = details.querySelector(".workout-session-sheet__scroll");
+            if (scroll) scroll.scrollTop = previousSheetScroll;
+        }
+        if (focused?.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true });
         updateWorkoutTimer();
-        if (options.focusSelector) requestAnimationFrame(() => details.querySelector(options.focusSelector)?.focus());
+        updateWorkoutVisualViewport();
+        if (options.focusSelector) requestAnimationFrame(() => details.querySelector(options.focusSelector)?.focus({ preventScroll: true }));
+        if (session && !sameExercise) {
+            const exercises = asArray(day.exercises);
+            const next = exercises[exercises.findIndex((exercise) => String(exercise.id) === String(workoutView.activeExerciseId)) + 1];
+            if (next) { const image = new Image(); image.src = exerciseImage(displayedExercise(next).exercise); }
+        }
     }
 
     async function loadActiveWorkoutSession() {
@@ -3333,49 +3248,61 @@
     }
 
     async function viewWorkoutPlan(id, preferredDayId = null) {
-        const viewVersion = ++workoutView.viewVersion;
-        showGlobalLoading("Carregando detalhes do plano de treino...");
-        try {
-            const plan = await apiRequest(`/workout_plans/${apiSegment(id)}`);
-            if (viewVersion !== workoutView.viewVersion) return null;
-            const reopenSelectedDay = String(workoutView.plan?.id) === String(plan.id)
-                ? workoutView.selectedDay
-                : 0;
-            if (String(workoutView.plan?.id || "") !== String(plan.id)) workoutView.exerciseCatalog = [];
-            workoutView.plan = plan;
-            workoutView.plan.professional_review = await apiRequest(`/workout_plans/${apiSegment(id)}/professional-review`).then((result) => result.professional_review).catch(() => null);
-            workoutView.days = normalizedWorkoutDays(plan);
-            const operationalDayId = preferredDayId == null ? contextualWorkoutDay(plan)?.id : preferredDayId;
-            const preferredDayIndex = operationalDayId == null
-                ? -1
-                : workoutView.days.findIndex((day) => String(day.id) === String(operationalDayId));
-            workoutView.selectedDay = preferredDayIndex >= 0
-                ? preferredDayIndex
-                : Math.min(reopenSelectedDay, Math.max(workoutView.days.length - 1, 0));
-            workoutView.editMode = false;
-            workoutView.session = null;
-            workoutView.completedSummary = null;
-            workoutView.shareOpen = false;
-            workoutView.shareDraft = null;
-            workoutView.sharePhotoToken += 1;
-            workoutView.summaryOrigin = "workout";
-            resetWorkoutExecutionState();
-            workoutView.sessionError = "";
-            workoutView.pendingAction = "";
-            workoutView.replacementPanels.clear();
-            workoutView.addExerciseOpen = false;
-            const title = byId("viewWorkoutPlanTitle");
-            if (title) title.textContent = plan.title || "Plano de Treino";
+        if (workoutView.pendingAction) return null;
+        invalidateWorkoutView();
+        const version = workoutView.viewVersion;
+        const account = workoutAccount();
+        const details = byId("viewWorkoutPlanDetails");
+        const cachedPlan = String(workoutView.plan?.id) === String(id) ? workoutView.plan : null;
+        const knownSession = String(activeWorkoutSummary?.plan?.id) === String(id) ? activeWorkoutSummary.session : null;
+        workoutView.completedSummary = null;
+        workoutView.shareOpen = false;
+        workoutView.shareDraft = null;
+        window.WorkoutShare?.reset();
+        resetWorkoutExecutionState();
+        workoutView.session = knownSession;
+        workoutView.sessionError = "";
+        workoutView.plan = cachedPlan;
+        if (cachedPlan) {
+            workoutView.days = normalizedWorkoutDays(cachedPlan);
+            const target = preferredDayId || knownSession?.workout_day_id;
+            workoutView.selectedDay = Math.max(0, workoutView.days.findIndex(day => String(day.id) === String(target)));
+            if (knownSession) hydrateWorkoutDrafts(knownSession);
             renderWorkoutDetail();
-            openAppModal(byId("viewWorkoutPlanModal"));
-            hideGlobalLoading();
-            await loadActiveWorkoutSession();
+        } else details.innerHTML = '<div class="workout-player-loading" role="status"><div class="home-skeleton" aria-hidden="true"></div>Preparando seu treino…</div>';
+        openAppModal(byId("viewWorkoutPlanModal"));
+        const activeRead = apiRequest("/workout_sessions/active");
+        try {
+            const key = `workout:plan:${account}:${id}`;
+            const planRead = window.AppReadCache
+                ? window.AppReadCache.read(key, ({signal}) => apiRequest(`/workout_plans/${apiSegment(id)}`, {signal}), {ttl: 60000})
+                : apiRequest(`/workout_plans/${apiSegment(id)}`);
+            const [plan, active] = await Promise.all([planRead, activeRead]);
+            if (!workoutContextCurrent(account, version)) return null;
+            workoutView.plan = plan;
+            workoutView.days = normalizedWorkoutDays(plan);
+            const session = String(active.session?.workout_plan_id) === String(id) ? active.session : null;
+            const target = session?.workout_day_id || preferredDayId || contextualWorkoutDay(plan)?.id;
+            workoutView.selectedDay = Math.max(0, workoutView.days.findIndex(day => String(day.id) === String(target)));
+            workoutView.session = session;
+            workoutView.sessionLoading = false;
+            if (session) hydrateWorkoutDrafts(session);
+            activeWorkoutSummary = active;
+            renderActiveWorkoutDock();
+            byId("viewWorkoutPlanTitle").textContent = plan.title || "Plano de treino";
+            renderWorkoutDetail({preserveScroll: true});
+            apiRequest(`/workout_plans/${apiSegment(id)}/professional-review`).then(result => {
+                if (!workoutContextCurrent(account, version)) return;
+                plan.professional_review = result.professional_review;
+                if (!workoutView.session) renderWorkoutDetail({preserveScroll: true});
+            }).catch(() => {});
             return plan;
         } catch (error) {
-            if (viewVersion === workoutView.viewVersion) showToast(error.message, "error");
+            if (workoutContextCurrent(account, version) && error.name !== "AbortError") {
+                if (cachedPlan) { workoutView.sessionError = error.message; renderWorkoutDetail({preserveScroll: true}); }
+                else details.innerHTML = `<div class="workout-player-loading" role="alert"><p>${esc(error.message)}</p><button type="button" data-workout-action="retry-open-plan" data-plan-id="${esc(id)}">Tentar novamente</button></div>`;
+            }
             return null;
-        } finally {
-            hideGlobalLoading();
         }
     }
 
@@ -3383,11 +3310,76 @@
         return asArray(selectedWorkoutDay()?.exercises).find((exercise) => String(exercise.id) === String(id));
     }
 
-    function replacementPayload(exercise) {
-        return {
-            unavailable_equipment: exercise.equipment ? [exercise.equipment] : [],
-            available_equipment: []
-        };
+    function replacementPayload() {
+        return { unavailable_equipment: [], available_equipment: [] };
+    }
+
+    async function reconciledMutationResult(action, sessionId, options) {
+        const active = await apiRequest("/workout_sessions/active");
+        const session = active.session;
+        const exerciseId = action.split("-").slice(1).join("-");
+        if (String(session?.id) === String(sessionId)) {
+            if (action.startsWith("complete-") && asArray(session.completed_exercise_ids).map(String).includes(exerciseId)) return {session};
+            const override = asArray(session.overrides).find(item => String(item.workout_exercise_id) === exerciseId);
+            if (action.startsWith("replace-") && override?.catalog_key === options.body.catalog_key) return {override};
+            if (action.startsWith("restore-") && !override) return {};
+        } else if (action === "cancel") return {};
+        if (action === "finish" && String(session?.id) !== String(sessionId)) {
+            const result = await apiRequest(`/activities/${apiSegment(sessionId)}`);
+            if (result.activity?.completed_at) return {summary: result.activity};
+        }
+        return null;
+    }
+
+    async function performSessionMutation(action, path, options, apply, retry = false) {
+        const sessionId = workoutView.session?.id;
+        if (!sessionId) return false;
+        const account = workoutAccount(), version = workoutView.viewVersion;
+        const lock = beginSessionMutation(action, sessionId);
+        if (!lock) return false;
+        workoutView.sessionError = "";
+        workoutView.mutationErrorStatus = null;
+        workoutView.uncertainMutation = null;
+        cancelWorkoutDraftTimers();
+        renderWorkoutDetail({preserveScroll: true});
+        let succeeded = false;
+        try {
+            const result = await queueSessionWrite(sessionId, async () => {
+                if (!workoutContextCurrent(account, version, sessionId)) throw new DOMException("Contexto alterado", "AbortError");
+                if (retry) {
+                    const confirmed = await reconciledMutationResult(action, sessionId, options);
+                    if (confirmed) return confirmed;
+                }
+                try { return await apiRequest(path, options); }
+                catch (error) {
+                    if (!["timeout", "offline"].includes(error.code)) throw error;
+                    try {
+                        const confirmed = await reconciledMutationResult(action, sessionId, options);
+                        if (confirmed) return confirmed;
+                    } catch (_) { /* Keep the original payload until an explicit retry. */ }
+                    error.uncertain = true;
+                    throw error;
+                }
+            });
+            if (!workoutContextCurrent(account, version, sessionId)) return false;
+            apply(result);
+            succeeded = true;
+        } catch (error) {
+            if (workoutContextCurrent(account, version, sessionId) && error.name !== "AbortError") {
+                workoutView.sessionError = error.uncertain
+                    ? "A confirmação não chegou. Seus registros foram preservados. Verifique antes de continuar."
+                    : error.message;
+                workoutView.mutationErrorStatus = error.status;
+                if (error.uncertain) workoutView.uncertainMutation = () => performSessionMutation(action, path, options, apply, true);
+            }
+        } finally {
+            endSessionMutation(lock, action, account, version);
+            if (workoutContextCurrent(account, version)) {
+                renderWorkoutDetail({preserveScroll: !succeeded});
+                if (succeeded && action.startsWith("complete-")) requestAnimationFrame(() => (byId("currentExerciseTitle") || byId("workoutCompleteTitle"))?.focus({preventScroll: true}));
+            }
+        }
+        return succeeded;
     }
 
     async function startWorkoutSession() {
@@ -3396,13 +3388,15 @@
         const planId = workoutView.plan.id;
         const dayId = day.id;
         const viewVersion = workoutView.viewVersion;
+        const account = workoutAccount();
+        workoutView.mutationRevision += 1;
         activeDockRequestToken += 1;
         workoutView.pendingAction = "start";
         workoutView.sessionError = "";
         renderWorkoutDetail({ preserveScroll: true });
         try {
             const result = await apiRequest(`/workout_plans/${apiSegment(workoutView.plan.id)}/days/${apiSegment(day.id)}/sessions`, { method: "POST" });
-            if (viewVersion !== workoutView.viewVersion || String(workoutView.plan?.id) !== String(planId) || String(selectedWorkoutDay()?.id) !== String(dayId)) return;
+            if (!workoutContextCurrent(account, viewVersion) || String(workoutView.plan?.id) !== String(planId) || String(selectedWorkoutDay()?.id) !== String(dayId)) return;
             workoutView.session = result.session;
             workoutView.editMode = false;
             hydrateWorkoutDrafts(result.session);
@@ -3416,6 +3410,7 @@
         } catch (error) {
             if (viewVersion === workoutView.viewVersion) workoutView.sessionError = error.message;
         } finally {
+            invalidateWorkoutReads();
             if (viewVersion === workoutView.viewVersion && workoutView.pendingAction === "start") {
                 workoutView.pendingAction = "";
                 renderWorkoutDetail({ preserveScroll: true });
@@ -3424,70 +3419,70 @@
     }
 
     async function openReplacementOptions(exerciseId) {
-        const exercise = findSelectedExercise(exerciseId);
-        const session = workoutView.session;
-        if (!exercise || !session) return;
-        const viewVersion = workoutView.viewVersion;
-        const key = String(exercise.id);
-        const payload = replacementPayload(exercise);
-        workoutView.replacementPanels.set(key, { mode: "session", loading: true, options: [], message: "", error: "", payload });
-        renderWorkoutDetail({ preserveScroll: true, focusSelector: `#replacement-panel-${exercise.id}` });
-        try {
-            const result = await apiRequest(`/workout_sessions/${apiSegment(session.id)}/exercises/${apiSegment(exercise.id)}/replacement_options`, { method: "POST", body: payload });
-            if (viewVersion !== workoutView.viewVersion || workoutView.session?.id !== session.id) return;
-            workoutView.replacementPanels.set(key, {
-                mode: "session",
-                loading: false,
-                options: asArray(result.options),
-                message: result.message || "",
-                error: "",
-                expanded: false,
-                payload
-            });
-        } catch (error) {
-            if (viewVersion !== workoutView.viewVersion) return;
-            workoutView.replacementPanels.set(key, { mode: "session", loading: false, options: [], message: "", error: error.message, payload });
+        const exercise = findSelectedExercise(exerciseId), session = workoutView.session;
+        if (!exercise || !session || workoutView.pendingAction || workoutView.uncertainMutation) return;
+        const key = String(exercise.id), account = workoutAccount(), version = workoutView.viewVersion;
+        if (workoutView.replacementPanels.has(key)) {
+            if (!workoutView.replacementPanels.get(key).error) return;
+            closeReplacementPanel(key);
         }
-        if (viewVersion !== workoutView.viewVersion) return;
-        renderWorkoutDetail({ preserveScroll: true, focusSelector: `#replacement-panel-${exercise.id}` });
+        captureWorkoutSetDraft(exercise.id);
+        const payload = replacementPayload(exercise);
+        const panel = {mode: "session", loading: true, options: [], payload, returnFocus: workoutView.lastField, controller: new AbortController()};
+        workoutView.replacementPanels.set(key, panel);
+        renderWorkoutDetail({preserveScroll: true, focusSelector: `#replacement-panel-${key}`});
+        try {
+            const cacheKey = `workout:options:${account}:${session.id}:${key}:${JSON.stringify(session.overrides)}`;
+            const cached = window.AppReadCache?.peek(cacheKey);
+            const result = cached && Date.now() - cached.at < 60000 ? cached.data : await apiRequest(`/workout_sessions/${apiSegment(session.id)}/exercises/${key}/replacement_options`, {method: "POST", body: payload, timeout: 30000, signal: panel.controller.signal});
+            if (!workoutContextCurrent(account, version, session.id) || workoutView.replacementPanels.get(key) !== panel) return;
+            if (window.AppReadCache) await window.AppReadCache.read(cacheKey, () => result, {ttl: 60000, force: true});
+            Object.assign(panel, {loading: false, options: asArray(result.options), message: result.message || "", error: ""});
+        } catch (error) {
+            if (panel.controller.signal.aborted || !workoutContextCurrent(account, version, session.id) || workoutView.replacementPanels.get(key) !== panel) return;
+            Object.assign(panel, {loading: false, error: error.message});
+        }
+        if (workoutView.replacementPanels.get(key) === panel) renderWorkoutDetail({preserveScroll: true, focusSelector: `#replacement-panel-${key}`});
     }
 
     async function applyReplacement(exerciseId, catalogKey) {
-        const exercise = findSelectedExercise(exerciseId);
-        const session = workoutView.session;
-        const key = String(exerciseId);
-        const panel = workoutView.replacementPanels.get(key);
-        const option = asArray(panel?.options).find((item) => item.catalog_key === catalogKey);
-        if (!exercise || !session || !panel || !option || panel.applying) return;
-        const viewVersion = workoutView.viewVersion;
-        activeDockRequestToken += 1;
+        const session = workoutView.session, key = String(exerciseId), panel = workoutView.replacementPanels.get(key);
+        if (!session || !panel || !asArray(panel.options).some(item => item.catalog_key === catalogKey) || workoutView.pendingAction || workoutView.uncertainMutation) return;
         panel.applying = catalogKey;
-        panel.error = "";
-        renderWorkoutDetail({ preserveScroll: true });
-        try {
-            const result = await apiRequest(`/workout_sessions/${apiSegment(session.id)}/exercises/${apiSegment(exercise.id)}/replace`, {
-                method: "POST",
-                body: { ...panel.payload, catalog_key: catalogKey }
-            });
-            if (viewVersion !== workoutView.viewVersion || !isCurrentWorkoutSession(session.id)) return;
-            const overrides = asArray(workoutView.session.overrides).filter((item) => String(item.workout_exercise_id) !== String(exercise.id));
-            overrides.push(result.override);
-            workoutView.session = { ...workoutView.session, overrides };
-            if (String(activeWorkoutSummary?.session?.id || "") === String(session.id)) {
-                activeWorkoutSummary = { ...activeWorkoutSummary, session: workoutView.session };
-            }
-            workoutView.replacementPanels.delete(key);
-            showToast("Exercício trocado somente para esta sessão.", "success");
-            renderWorkoutDetail({ preserveScroll: true, focusSelector: `[data-workout-action="restore-exercise"][data-exercise-id="${exercise.id}"]` });
-        } catch (error) {
-            if (viewVersion !== workoutView.viewVersion) return;
+        const returnFocus = panel.returnFocus;
+        const success = await performSessionMutation(`replace-${key}`, `/workout_sessions/${apiSegment(session.id)}/exercises/${key}/replace`, {method: "POST", body: {...panel.payload, catalog_key: catalogKey}}, result => {
+            workoutView.session.overrides = [...asArray(workoutView.session.overrides).filter(item => String(item.workout_exercise_id) !== key), result.override];
+            closeReplacementPanel(key);
+            persistWorkoutDraftLocally(session.id);
+            if (activeWorkoutSummary?.session?.id === session.id) activeWorkoutSummary.session = workoutView.session;
+        });
+        if (workoutView.replacementPanels.get(key) === panel) {
             panel.applying = "";
-            panel.error = error.message;
-            renderWorkoutDetail({ preserveScroll: true, focusSelector: `#replacement-panel-${exercise.id}` });
+            panel.error = workoutView.sessionError;
+            renderWorkoutDetail({preserveScroll: true});
+        }
+        if (success) {
+            const field = returnFocus?.exerciseId === key && document.querySelector(`[data-workout-set-index="${returnFocus.index}"] [data-workout-set-${returnFocus.field}]`);
+            (field?.offsetParent ? field : byId("currentExerciseTitle"))?.focus({preventScroll: true});
+        } else if (workoutView.mutationErrorStatus === 409 && !panel.refreshed) {
+            panel.refreshed = true;
+            await openReplacementOptions(key);
         }
     }
 
+    async function restoreExercise(exerciseId) {
+        const session = workoutView.session;
+        if (!session || workoutView.uncertainMutation) return;
+        const key = String(exerciseId);
+        await performSessionMutation(`restore-${key}`, `/workout_sessions/${apiSegment(session.id)}/exercises/${key}/replace`, {method: "DELETE"}, () => {
+            workoutView.session.overrides = asArray(workoutView.session.overrides).filter(item => String(item.workout_exercise_id) !== key);
+            closeReplacementPanel(key);
+            persistWorkoutDraftLocally(session.id);
+        });
+    }
+
     function applyWorkoutPlanUpdate(result, preferredDayId) {
+        invalidateWorkoutReads();
         if (!result?.plan) return;
         workoutView.plan = result.plan;
         workoutView.days = normalizedWorkoutDays(result.plan);
@@ -3600,40 +3595,6 @@
         }
     }
 
-    async function restoreExercise(exerciseId) {
-        const exercise = findSelectedExercise(exerciseId);
-        const session = workoutView.session;
-        if (!exercise || !session || workoutView.pendingAction) return;
-        const actionKey = `restore-${exercise.id}`;
-        const viewVersion = workoutView.viewVersion;
-        activeDockRequestToken += 1;
-        workoutView.pendingAction = actionKey;
-        renderWorkoutDetail({ preserveScroll: true });
-        try {
-            await apiRequest(`/workout_sessions/${apiSegment(session.id)}/exercises/${apiSegment(exercise.id)}/replace`, { method: "DELETE" });
-            if (viewVersion !== workoutView.viewVersion || !isCurrentWorkoutSession(session.id)) return;
-            workoutView.session = {
-                ...workoutView.session,
-                overrides: asArray(workoutView.session.overrides).filter((item) => String(item.workout_exercise_id) !== String(exercise.id))
-            };
-            if (String(activeWorkoutSummary?.session?.id || "") === String(session.id)) {
-                activeWorkoutSummary = { ...activeWorkoutSummary, session: workoutView.session };
-            }
-            showToast("Exercício original restaurado.", "success");
-        } catch (error) {
-            if (viewVersion === workoutView.viewVersion) workoutView.sessionError = error.message;
-        } finally {
-            if (viewVersion === workoutView.viewVersion && workoutView.pendingAction === actionKey) {
-                workoutView.pendingAction = "";
-                renderWorkoutDetail({
-                    focusSelector: workoutView.completedSummary
-                        ? '[data-workout-action="open-workout-share"]'
-                        : null,
-                });
-            }
-        }
-    }
-
     function selectSessionExercise(exerciseId) {
         const exercises = asArray(selectedWorkoutDay()?.exercises);
         if (!exercises.some((exercise) => String(exercise.id) === String(exerciseId))) return;
@@ -3702,57 +3663,40 @@
         renderWorkoutDetail({ preserveScroll: true });
     }
 
-    async function completeWorkoutExercise(exerciseId, options = {}) {
-        const exercise = findSelectedExercise(exerciseId);
-        const session = workoutView.session;
-        if (!exercise || !session || workoutView.pendingAction) return;
-        let performedSets;
-        try {
-            performedSets = performedSetsFromView(exercise.id);
-        } catch (error) {
-            showToast(error.message, "error");
-            return;
+    async function completeWorkoutExercise(exerciseId) {
+        const exercise = findSelectedExercise(exerciseId), session = workoutView.session;
+        if (!exercise || !session || workoutView.pendingAction || workoutView.uncertainMutation || completedWorkoutExerciseIds().has(String(exerciseId))) return false;
+        let sets;
+        try { sets = performedSetsFromView(exercise.id); }
+        catch (error) {
+            workoutView.sessionError = error.message;
+            workoutView.sessionSheetExpanded = true;
+            renderWorkoutDetail({preserveScroll: true});
+            const field = document.querySelector(`[data-workout-set-index="${error.index}"] [data-workout-set-${error.field}]`);
+            field?.setAttribute("aria-invalid", "true");
+            field?.focus({preventScroll: true});
+            updateWorkoutVisualViewport();
+            return false;
         }
-        const actionKey = `complete-${exercise.id}`;
-        const viewVersion = workoutView.viewVersion;
-        activeDockRequestToken += 1;
-        workoutView.pendingAction = actionKey;
-        workoutView.sessionError = "";
-        renderWorkoutDetail({ preserveScroll: true });
-        try {
-            const result = await apiRequest(`/workout_sessions/${apiSegment(session.id)}/exercises/${apiSegment(exercise.id)}/complete`, { method: "POST", body: { sets: performedSets } });
-            if (String(activeWorkoutSummary?.session?.id || "") === String(session.id)) {
-                activeWorkoutSummary = { ...activeWorkoutSummary, session: result.session };
-            }
-            if (viewVersion !== workoutView.viewVersion || !isCurrentWorkoutSession(session.id)) return;
+        return performSessionMutation(`complete-${exercise.id}`, `/workout_sessions/${apiSegment(session.id)}/exercises/${apiSegment(exercise.id)}/complete`, {method: "POST", body: {sets}}, result => {
             workoutView.session = result.session;
-            workoutView.completedSetCounts.set(String(exercise.id), performedSets.length);
+            workoutView.completedSetCounts.set(String(exercise.id), sets.length);
             workoutView.skippedExerciseIds.delete(String(exercise.id));
             clearWorkoutExerciseDraft(session.id, exercise.id);
-            workoutView.replacementPanels.delete(String(exercise.id));
-            const nextExercise = firstPendingWorkoutExercise(asArray(selectedWorkoutDay()?.exercises), completedWorkoutExerciseIds());
-            workoutView.activeExerciseId = nextExercise ? String(nextExercise.id) : null;
+            closeReplacementPanel(exercise.id);
+            const next = firstPendingWorkoutExercise(asArray(selectedWorkoutDay()?.exercises), completedWorkoutExerciseIds());
+            workoutView.activeExerciseId = next ? String(next.id) : null;
             workoutView.sessionSheetExpanded = false;
-            if (options.startRest && nextExercise && Number(options.restSeconds) > 0) {
-                const duration = Math.max(0, Math.min(600, Number(options.restSeconds)));
-                workoutView.rest = { duration, endsAt: Date.now() + duration * 1000, exerciseId: String(nextExercise.id) };
-            }
+            workoutView.rest = null;
+            workoutView.draftError = "";
+            activeWorkoutSummary = {...activeWorkoutSummary, session: result.session};
             persistWorkoutDraftLocally(session.id);
-            showToast(nextExercise ? "Exercício concluído. Próximo exercício preparado." : "Todas as séries foram registradas.", "success");
-        } catch (error) {
-            if (viewVersion === workoutView.viewVersion) workoutView.sessionError = error.message;
-        } finally {
-            if (viewVersion === workoutView.viewVersion && workoutView.pendingAction === actionKey) {
-                workoutView.pendingAction = "";
-                renderWorkoutDetail();
-                requestAnimationFrame(() => (byId("currentExerciseTitle") || byId("workoutCompleteTitle"))?.focus());
-            }
-        }
+        });
     }
 
     async function finishWorkoutSession() {
         const session = workoutView.session;
-        if (!session || workoutView.pendingAction) return;
+        if (!session || workoutView.pendingAction || workoutView.uncertainMutation) return;
         const exercises = asArray(selectedWorkoutDay()?.exercises);
         const completedIds = completedWorkoutExerciseIds();
         const skippedExercises = exercises.filter((exercise) => workoutView.skippedExerciseIds.has(String(exercise.id)));
@@ -3765,15 +3709,7 @@
             ? "Finalizar treino incompleto? Exercícios e séries pendentes não serão marcados como concluídos."
             : "Finalizar treino? Revise seus registros antes de confirmar.";
         if (!window.confirm(confirmation)) return;
-        const actionKey = "finish";
-        const viewVersion = workoutView.viewVersion;
-        activeDockRequestToken += 1;
-        workoutView.pendingAction = actionKey;
-        renderWorkoutDetail({ preserveScroll: true });
-        try {
-            const result = await apiRequest(`/workout_sessions/${apiSegment(session.id)}/finish`, { method: "POST" });
-            if (String(activeWorkoutSummary?.session?.id || "") === String(session.id)) clearActiveWorkoutDock();
-            if (viewVersion !== workoutView.viewVersion || !isCurrentWorkoutSession(session.id)) return;
+        await performSessionMutation("finish", `/workout_sessions/${apiSegment(session.id)}/finish`, {method: "POST"}, result => {
             workoutView.session = null;
             workoutView.completedSummary = {
                 ...result.summary,
@@ -3794,47 +3730,20 @@
             workoutView.replacementPanels.clear();
             window.invalidateProgressOverview?.();
             showToast("Treino finalizado. Excelente trabalho!", "success");
-        } catch (error) {
-            if (viewVersion === workoutView.viewVersion) workoutView.sessionError = error.message;
-        } finally {
-            if (viewVersion === workoutView.viewVersion && workoutView.pendingAction === actionKey) {
-                workoutView.pendingAction = "";
-                renderWorkoutDetail({ preserveScroll: true });
-            }
-        }
+        });
     }
 
     async function cancelWorkoutSession() {
         const session = workoutView.session;
-        if (!session || workoutView.pendingAction) return;
+        if (!session || workoutView.pendingAction || workoutView.uncertainMutation) return;
         if (!window.confirm("Cancelar o treino atual? Todo progresso desta sessão será apagado.")) return;
-        const actionKey = "cancel";
-        const viewVersion = workoutView.viewVersion;
-        activeDockRequestToken += 1;
-        workoutView.pendingAction = actionKey;
-        renderWorkoutDetail({ preserveScroll: true });
-        try {
-            await apiRequest(`/workout_sessions/${apiSegment(session.id)}`, { method: "DELETE" });
-            if (String(activeWorkoutSummary?.session?.id || "") === String(session.id)) clearActiveWorkoutDock();
-            if (viewVersion !== workoutView.viewVersion) return;
+        await performSessionMutation("cancel", `/workout_sessions/${apiSegment(session.id)}`, {method: "DELETE"}, () => {
             workoutView.session = null;
-            workoutView.sessionError = "";
-            workoutView.summaryOrigin = "workout";
-            workoutView.shareOpen = false;
-            workoutView.shareDraft = null;
-            workoutView.sharePhotoToken += 1;
             resetWorkoutExecutionState();
             clearLocalWorkoutDraft(session.id);
-            workoutView.replacementPanels.clear();
-            showToast("Treino atual cancelado.", "success");
-        } catch (error) {
-            if (viewVersion === workoutView.viewVersion) workoutView.sessionError = error.message;
-        } finally {
-            if (viewVersion === workoutView.viewVersion && workoutView.pendingAction === actionKey) {
-                workoutView.pendingAction = "";
-                renderWorkoutDetail({ preserveScroll: true });
-            }
-        }
+            clearReplacementPanels();
+            clearActiveWorkoutDock();
+        });
     }
 
     async function deleteWorkoutActivity(activityId) {
@@ -3893,110 +3802,83 @@
         return (currentIndex + direction + total) % total;
     }
 
+    function workoutGestureAllowed(gesture) {
+        return !workoutView.pendingAction && !workoutView.uncertainMutation && !workoutView.replacementPanels.size
+            && (!gesture || workoutContextCurrent(gesture.account, gesture.version, gesture.sessionId));
+    }
+
     function startWorkoutPlayerGesture(event) {
-        if (!event.isPrimary || event.button > 0 || !workoutView.session || workoutView.replacementPanels.size) return;
-        const stage = event.target.closest(".current-exercise-stage--player");
+        if (!event.isPrimary) { cancelWorkoutPlayerGesture(); return; }
+        if (event.button > 0 || !workoutView.session || !workoutGestureAllowed()) return;
+        const stage = event.target.closest(".current-exercise-stage--player, [data-workout-ready]");
         if (!stage) return;
         const handle = event.target.closest(".workout-sheet-handle");
-        const insideSheet = event.target.closest(".workout-session-sheet");
-        if (insideSheet && !handle) return;
+        if (event.target.closest(".workout-session-sheet") && !handle) return;
         if (!handle && event.target.closest("button, input, select, textarea, label, a, summary, details")) return;
-        workoutGesture = {
-            pointerId: event.pointerId,
-            startX: event.clientX,
-            startY: event.clientY,
-            deltaX: 0,
-            deltaY: 0,
-            axis: handle ? "vertical" : null,
-            moved: false,
-            handle: Boolean(handle),
-            expanded: Boolean(workoutView.sessionSheetExpanded),
-            stage,
-            sheet: stage.querySelector(".workout-session-sheet"),
-        };
+        workoutGesture = {pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, deltaX: 0, deltaY: 0,
+            axis: handle ? "vertical" : null, moved: false, handle: Boolean(handle), expanded: workoutView.sessionSheetExpanded,
+            account: workoutAccount(), version: workoutView.viewVersion, sessionId: workoutView.session.id,
+            stage, sheet: stage.querySelector(".workout-session-sheet")};
         stage.setPointerCapture?.(event.pointerId);
     }
 
     function moveWorkoutPlayerGesture(event) {
-        const gesture = workoutGesture;
-        if (!gesture || gesture.pointerId !== event.pointerId) return;
-        gesture.deltaX = event.clientX - gesture.startX;
-        gesture.deltaY = event.clientY - gesture.startY;
-        const absX = Math.abs(gesture.deltaX);
-        const absY = Math.abs(gesture.deltaY);
-        if (!gesture.axis && Math.max(absX, absY) > 8) {
-            gesture.axis = absX > absY * 1.2 ? "horizontal" : "vertical";
+        const g = workoutGesture;
+        if (!g || g.pointerId !== event.pointerId) return;
+        if (!workoutGestureAllowed(g)) { cancelWorkoutPlayerGesture(); return; }
+        g.deltaX = event.clientX - g.startX; g.deltaY = event.clientY - g.startY;
+        const x = Math.abs(g.deltaX), y = Math.abs(g.deltaY);
+        if (!g.axis && Math.max(x,y) >= 12) {
+            if (x >= y * 1.3) g.axis = "horizontal";
+            else if (y >= x * 1.3) g.axis = "vertical";
         }
-        if (!gesture.axis) return;
-        gesture.moved = Math.max(absX, absY) > 12;
+        if (!g.axis) return;
+        g.moved = Math.max(x,y) >= 12;
         event.preventDefault();
-        if (gesture.axis === "horizontal") {
-            const offset = Math.max(-110, Math.min(110, gesture.deltaX * 0.55));
-            gesture.stage.style.setProperty("--player-swipe-x", `${offset}px`);
-            gesture.stage.classList.add("is-player-dragging");
-            return;
+        if (g.axis === "horizontal") {
+            g.stage.style.setProperty("--player-swipe-x", `${Math.max(-110, Math.min(110,g.deltaX*.55))}px`);
+            g.stage.classList.add("is-player-dragging");
+        } else if (g.sheet) {
+            const peek = parseFloat(getComputedStyle(g.stage).getPropertyValue("--sheet-peek")) || 76;
+            const collapsed = Math.max(0,g.sheet.offsetHeight-peek);
+            g.sheet.style.transform = `translateY(${Math.max(0,Math.min(collapsed,(g.expanded ? 0 : collapsed)+g.deltaY))}px)`;
+            g.sheet.classList.add("is-dragging");
         }
-        if (!gesture.sheet) return;
-        const collapsedOffset = Math.max(0, gesture.sheet.offsetHeight - 76);
-        const baseOffset = gesture.expanded ? 0 : collapsedOffset;
-        const offset = Math.max(0, Math.min(collapsedOffset, baseOffset + gesture.deltaY));
-        gesture.sheet.style.transform = `translateY(${offset}px)`;
-        gesture.sheet.classList.add("is-dragging");
     }
 
     function endWorkoutPlayerGesture(event) {
-        const gesture = workoutGesture;
-        if (!gesture || gesture.pointerId !== event.pointerId) return;
-        workoutGesture = null;
-        gesture.stage.classList.remove("is-player-dragging");
-        gesture.stage.style.removeProperty("--player-swipe-x");
-        gesture.sheet?.classList.remove("is-dragging");
-        if (gesture.sheet) gesture.sheet.style.transform = "";
-        if (!gesture.moved) return;
-        if (gesture.handle) {
-            ignoreNextWorkoutSheetClick = true;
-            window.setTimeout(() => { ignoreNextWorkoutSheetClick = false; }, 400);
-        }
-        if (gesture.axis === "vertical" && Math.abs(gesture.deltaY) >= 44) {
-            const expanded = gesture.deltaY < 0;
-            if (expanded !== workoutView.sessionSheetExpanded) {
-                workoutView.sessionSheetExpanded = expanded;
-                renderWorkoutDetail({ preserveScroll: true });
-            }
+        const g = workoutGesture;
+        if (!g || g.pointerId !== event.pointerId) return;
+        const allowed = workoutGestureAllowed(g);
+        cancelWorkoutPlayerGesture(event);
+        if (!allowed || !g.moved) return;
+        if (g.handle) { ignoreNextWorkoutSheetClick = true; setTimeout(() => { ignoreNextWorkoutSheetClick = false; },400); }
+        if (g.stage.hasAttribute("data-workout-ready")) {
+            if ((g.axis === "horizontal" && g.deltaX <= -58) || (g.axis === "vertical" && g.deltaY <= -44)) finishWorkoutSession();
             return;
         }
-        if (gesture.axis === "horizontal" && Math.abs(gesture.deltaX) >= 58 && Math.abs(gesture.deltaX) > Math.abs(gesture.deltaY) * 1.2) {
-            if (Date.now() - lastWorkoutSwipeAt < 700 || workoutView.pendingAction) return;
-            lastWorkoutSwipeAt = Date.now();
-            if (gesture.deltaX < 0) {
-                const exerciseId = gesture.stage.dataset.exerciseId;
-                const exercise = findSelectedExercise(exerciseId);
-                if (!exercise) return;
-                const exercises = asArray(selectedWorkoutDay()?.exercises);
-                const isLastExercise = exercises.length > 0
-                    && String(exercises[exercises.length - 1]?.id) === String(exerciseId);
-                completeWorkoutExercise(exerciseId, {
-                    startRest: true,
-                    restSeconds: displayedExercise(exercise).exercise.rest_seconds,
-                }).then(() => {
-                    if (isLastExercise && !workoutView.pendingAction && completedWorkoutExerciseIds().has(String(exerciseId))) {
-                        finishWorkoutSession();
-                    }
-                });
-            } else {
-                navigateSessionExercise(-1);
-            }
-        }
+        if (g.axis === "vertical" && Math.abs(g.deltaY) >= 44) { setWorkoutSheetExpanded(g.deltaY < 0); return; }
+        if (g.axis !== "horizontal" || Math.abs(g.deltaX) < 58 || Math.abs(g.deltaX) < Math.abs(g.deltaY)*1.3) return;
+        if (g.deltaX < 0) completeWorkoutExercise(g.stage.dataset.exerciseId);
+        else navigateSessionExercise(-1);
     }
 
     function cancelWorkoutPlayerGesture(event) {
-        const gesture = workoutGesture;
-        if (!gesture || gesture.pointerId !== event.pointerId) return;
+        const g = workoutGesture;
+        if (!g || (event && g.pointerId !== event.pointerId)) return;
         workoutGesture = null;
-        gesture.stage.classList.remove("is-player-dragging");
-        gesture.stage.style.removeProperty("--player-swipe-x");
-        gesture.sheet?.classList.remove("is-dragging");
-        if (gesture.sheet) gesture.sheet.style.transform = "";
+        g.stage.classList.remove("is-player-dragging");
+        g.stage.style.removeProperty("--player-swipe-x");
+        g.sheet?.classList.remove("is-dragging");
+        if (g.sheet) g.sheet.style.transform = "";
+        if (g.stage.hasPointerCapture?.(g.pointerId)) g.stage.releasePointerCapture(g.pointerId);
+    }
+
+    async function resumeWorkoutSession() {
+        if (!window.currentUser || document.hidden || workoutView.pendingAction) return;
+        cancelWorkoutPlayerGesture();
+        await loadActiveWorkoutDock(true);
+        if (!workoutView.uncertainMutation) await syncWorkoutDrafts();
     }
 
     function initializePlanExperience() {
@@ -4043,24 +3925,18 @@
             if (event.target === event.currentTarget) closePlanWizard();
         });
         document.addEventListener("keydown", trapWizardFocus, true);
-        loadIngredientPool();
         if (!workoutTimerInterval) workoutTimerInterval = window.setInterval(updateWorkoutTimer, 1000);
         if (!workoutRestInterval) workoutRestInterval = window.setInterval(updateWorkoutRestTimer, 1000);
         if (!workoutSyncInterval) {
             workoutSyncInterval = window.setInterval(() => {
-                if (window.currentUser && !byId("mainScreen")?.classList.contains("hidden")) loadActiveWorkoutDock();
+                if (window.currentUser && !document.hidden && !workoutView.pendingAction && !workoutView.uncertainMutation && !byId("mainScreen")?.classList.contains("hidden")) loadActiveWorkoutDock();
             }, 30000);
         }
-        document.addEventListener("visibilitychange", () => {
-            if (window.currentUser && document.visibilityState === "visible" && !byId("mainScreen")?.classList.contains("hidden")) {
-                loadActiveWorkoutDock();
-                syncWorkoutDrafts();
-            }
-        });
-        window.addEventListener("online", () => {
-            syncWorkoutDrafts();
-            loadActiveWorkoutDock();
-        });
+        document.addEventListener("visibilitychange", () => { if (document.hidden) cancelWorkoutPlayerGesture(); });
+        window.visualViewport?.addEventListener("resize", updateWorkoutVisualViewport);
+        window.visualViewport?.addEventListener("scroll", updateWorkoutVisualViewport);
+        byId("viewWorkoutPlanDetails")?.addEventListener("focusin", updateWorkoutVisualViewport);
+        byId("viewWorkoutPlanDetails")?.addEventListener("focusout", updateWorkoutVisualViewport);
         window.addEventListener("pagehide", () => persistWorkoutDraftLocally(workoutView.session?.id));
         byId("activeWorkoutDock")?.addEventListener("click", openActiveWorkout);
         ["workoutGoalFilter", "workoutExperienceFilter", "workoutDaysFilter"].forEach((id) => {
@@ -4217,6 +4093,8 @@
             const control = event.target.closest("[data-workout-action]");
             if (!control) return;
             const action = control.dataset.workoutAction;
+            if ((workoutView.pendingAction || workoutView.uncertainMutation) && !["retry-session", "close-active-workout"].includes(action)) return;
+            if (action === "retry-open-plan") { await viewWorkoutPlan(control.dataset.planId); return; }
             const exerciseId = control.dataset.exerciseId || control.closest("[data-exercise-id]")?.dataset.exerciseId;
             if (action === "select-day") {
                 const index = Number(control.dataset.dayIndex);
@@ -4252,8 +4130,7 @@
                     ignoreNextWorkoutSheetClick = false;
                     return;
                 }
-                workoutView.sessionSheetExpanded = !workoutView.sessionSheetExpanded;
-                renderWorkoutDetail({ preserveScroll: true, focusSelector: ".workout-sheet-handle" });
+                setWorkoutSheetExpanded(!workoutView.sessionSheetExpanded);
             } else if (action === "replacement-options") {
                 await openReplacementOptions(exerciseId);
             } else if (action === "permanent-replacement-options") {
@@ -4264,7 +4141,7 @@
                 panel.expanded = true;
                 renderWorkoutDetail({ preserveScroll: true, focusSelector: `#replacement-panel-${exerciseId}` });
             } else if (action === "close-replacements") {
-                workoutView.replacementPanels.delete(String(exerciseId));
+                closeReplacementPanel(exerciseId);
                 const triggerAction = workoutView.editMode ? "permanent-replacement-options" : "replacement-options";
                 renderWorkoutDetail({ preserveScroll: true, focusSelector: `[data-workout-action="${triggerAction}"][data-exercise-id="${exerciseId}"]` });
             } else if (action === "apply-replacement") {
@@ -4305,7 +4182,8 @@
                 persistWorkoutDraftLocally(workoutView.session?.id);
                 renderWorkoutDetail({ preserveScroll: true });
             } else if (action === "retry-session") {
-                await loadActiveWorkoutSession();
+                if (workoutView.uncertainMutation) await workoutView.uncertainMutation();
+                else await loadActiveWorkoutSession();
             } else if (action === "finish-session") {
                 await finishWorkoutSession();
             } else if (action === "cancel-session") {
@@ -4408,9 +4286,6 @@
                         || String(workoutView.completedSummary?.session_id) !== String(sessionId)
                     ) return;
                     workoutShareDraft(workoutView.completedSummary).photoDataUrl = image.dataUrl;
-                    const cached = new Image();
-                    cached.src = image.dataUrl;
-                    cached.decode?.().then(() => workoutSharePhotoCache.set(image.dataUrl, cached)).catch(() => workoutSharePhotoCache.set(image.dataUrl, cached));
                     renderWorkoutDetail({ preserveScroll: true, focusSelector: '[data-workout-action="choose-share-photo"]' });
                 } catch (error) {
                     showToast(error.message || "Não foi possível carregar a foto.", "error");
@@ -4425,6 +4300,7 @@
         byId("viewWorkoutPlanDetails")?.addEventListener("input", (event) => {
             if (event.target.matches("[data-workout-set-load], [data-workout-set-repetitions], [data-workout-set-warmup]")) {
                 const exerciseId = event.target.closest("[data-workout-exercise-card]")?.dataset.exerciseId;
+                event.target.removeAttribute("aria-invalid");
                 captureWorkoutSetDraft(exerciseId);
                 return;
             }
@@ -4458,10 +4334,16 @@
             await loadActiveWorkoutSession();
             requestAnimationFrame(() => byId(`workout-day-tab-${index}`)?.focus());
         });
+        byId("viewWorkoutPlanDetails")?.addEventListener("focusin", event => {
+            const field = event.target;
+            if (!field.matches("[data-workout-set-load], [data-workout-set-repetitions]")) return;
+            workoutView.lastField = {exerciseId: String(workoutView.activeExerciseId), index: field.closest("[data-workout-set-index]").dataset.workoutSetIndex, field: field.hasAttribute("data-workout-set-load") ? "load" : "repetitions"};
+        });
         byId("viewWorkoutPlanDetails")?.addEventListener("pointerdown", startWorkoutPlayerGesture);
         byId("viewWorkoutPlanDetails")?.addEventListener("pointermove", moveWorkoutPlayerGesture);
         byId("viewWorkoutPlanDetails")?.addEventListener("pointerup", endWorkoutPlayerGesture);
         byId("viewWorkoutPlanDetails")?.addEventListener("pointercancel", cancelWorkoutPlayerGesture);
+        byId("viewWorkoutPlanDetails")?.addEventListener("lostpointercapture", cancelWorkoutPlayerGesture);
     }
 
     window.openPlanWizard = openPlanWizard;
@@ -4472,6 +4354,7 @@
     window.loadDietPlans = loadDietPlans;
     window.loadWorkoutPlans = loadWorkoutPlans;
     window.loadWorkoutTodayCard = loadWorkoutTodayCard;
+    window.resetWorkoutAccount = resetWorkoutAccount;
     window.renderWorkoutTodayCard = renderWorkoutTodayCard;
     window.openWorkoutTodayPlan = openWorkoutTodayPlan;
     window.openWorkoutCurrentModal = openWorkoutCurrentModal;
@@ -4482,6 +4365,7 @@
     window.viewWorkoutPlan = viewWorkoutPlan;
     window.openWorkoutActivity = openWorkoutActivity;
     window.loadActiveWorkoutDock = loadActiveWorkoutDock;
+    window.resumeWorkoutSession = resumeWorkoutSession;
     window.clearActiveWorkoutDock = clearActiveWorkoutDock;
     window.invalidateWorkoutView = invalidateWorkoutView;
 
