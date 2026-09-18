@@ -3,6 +3,7 @@
   "appName": "Fit Tracker",
   "webDir": "copilot",
   "ios": {
+    "loggingBehavior": "none",
     "zoomEnabled": true
   }
 }

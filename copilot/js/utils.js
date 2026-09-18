@@ -89,6 +89,42 @@ function getCsrfToken() {
     return csrfToken;
 }
 
+function diagnosticPath(value) {
+    try {
+        return new URL(value, 'https://localhost').pathname
+            .replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/ig, ':id')
+            .replace(/(\/profiles\/(?:by-id\/)?)[^/]+/g, '$1:id')
+            .replace(/\d+/g, ':id');
+    } catch (_error) { return '[invalid-url]'; }
+}
+
+function sanitizeDiagnostic(value) {
+    return String(value || '').replace(/https?:\/\/[^\s)]+|capacitor:\/\/[^\s)]+/g, url => diagnosticPath(url))
+        .replace(/eyJ[A-Za-z0-9_.-]+/g, '[token]')
+        .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]+\b/g, '[email]')
+        .replace(/(?:token|cookie|credential|password|authorization)\s*[:=]\s*\S+/ig, '[credential]')
+        .replace(/Bearer\s+\S+/ig, '[credential]')
+        .replace(/\/Users\/[^/\s]+\//g, '[local]/')
+        .replace(/(["'`]).*?\1/g, '[value]').slice(0, 1500);
+}
+
+async function confirmAuthSession(apiBase, expectedUser) {
+    const response = await fetchWithTimeout(`${apiBase}/check_session`, {
+        credentials: 'include', cache: 'no-store', fitTrackerNetworkOnly: true,
+    }, 8000);
+    const data = await response.json();
+    if (!response.ok || data.logged_in !== true || !data.user?.id || !expectedUser?.id || typeof data.csrf_token !== 'string' || !data.csrf_token.trim()) {
+        throw new Error('A sessão não foi mantida pelo servidor. Tente confirmar novamente.');
+    }
+    if (String(data.user.id) !== String(expectedUser?.id)) {
+        const error = new Error('A sessão pertence a outra conta. Saia e entre usando o método original de login.');
+        error.code = 'session_account_mismatch';
+        error.sessionCsrfToken = data.csrf_token;
+        throw error;
+    }
+    return data;
+}
+
 function wait(milliseconds) {
     return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
@@ -269,9 +305,20 @@ if (typeof window !== "undefined") {
     window.fetchWithTimeout = fetchWithTimeout;
     window.AppReadCache = AppReadCache;
     window.readApiJson = readApiJson;
+    window.confirmAuthSession = confirmAuthSession;
     if (window.Capacitor?.getPlatform?.() === 'ios') document.documentElement.dataset.nativePlatform = 'ios';
     window.formatDietPlanItem = formatDietPlanItem;
     window.formatDietPlanItemsText = formatDietPlanItemsText;
+}
+
+if (typeof window !== 'undefined' && window.addEventListener) {
+    const report = (kind, error, event = {}) => console.error('[App]', {
+        kind, message: sanitizeDiagnostic(error?.message || error),
+        file: diagnosticPath(event.filename || ''), line: event.lineno || null,
+        stack: sanitizeDiagnostic(error?.stack),
+    });
+    window.addEventListener('error', event => report('javascript_error', event.error || event.message, event));
+    window.addEventListener('unhandledrejection', event => report('unhandled_rejection', event.reason));
 }
 
 if (typeof window !== "undefined" && typeof window.fetch === "function" && !window.__csrfFetchPatched) {
@@ -285,39 +332,49 @@ if (typeof window !== "undefined" && typeof window.fetch === "function" && !wind
             const rewritten = `${configuredApiOrigin}${inputUrl.pathname}${inputUrl.search}`;
             input = input instanceof Request ? new Request(rewritten, input) : rewritten;
         }
-        const request = new Request(input, init);
+        const { fitTrackerNetworkOnly = false, ...requestInit } = init;
+        const request = new Request(input, requestInit);
         const method = (request.method || "GET").toUpperCase();
         const unsafe = !["GET", "HEAD", "OPTIONS", "TRACE"].includes(method);
         const url = new URL(request.url, window.location.origin);
         const isApiRequest = url.pathname.startsWith("/api/") && (url.origin === window.location.origin || url.origin === configuredApiOrigin);
-        let prepared = request;
+        let prepared = isApiRequest ? new Request(request, { credentials: 'include' }) : request;
         if (unsafe && isApiRequest) {
             const headers = new Headers(request.headers);
             if (csrfToken && !headers.has("X-CSRF-Token")) headers.set("X-CSRF-Token", csrfToken);
             if (window.AppOffline?.allowedMutation(url, method) && !headers.has("Idempotency-Key")) {
                 headers.set("Idempotency-Key", window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`);
             }
-            prepared = new Request(request, { headers });
+            prepared = new Request(prepared, { headers });
         }
         const ownerVersion = AppReadCache.accountVersion;
+        const owner = String(window.currentUser?.id || 'anonymous');
+        const started = Date.now();
+        const logApi = (status, category) => {
+            if (isApiRequest) console.info('[API]', { method, path: diagnosticPath(url), status, duration: Date.now() - started, category });
+        };
         if (window.AppOffline?.allowedMutation(url, method) && navigator.onLine === false && !request.headers.has("X-Offline-Replay")) {
             return window.AppOffline.enqueue(prepared, url);
         }
         try {
             const response = await originalFetch(prepared);
+            logApi(response.status, response.ok ? 'success' : 'http_error');
             if (response.ok && unsafe && isApiRequest && ownerVersion === AppReadCache.accountVersion &&
                 /^\/api\/(diet(?:\/|$)|diet_plans(?:\/|$)|profile(?:\/|$))/.test(url.pathname)) {
                 AppReadCache.invalidate('diet:');
             }
-            if (response.ok && isApiRequest && (!unsafe || /\/replacement_options(?:\?|$)/.test(url.pathname))) window.AppOffline?.saveSnapshot(url, response);
+            if (response.ok && isApiRequest && !fitTrackerNetworkOnly && (!unsafe || /\/replacement_options(?:\?|$)/.test(url.pathname))) {
+                await window.AppOffline?.saveSnapshot(url, response, owner, () => ownerVersion === AppReadCache.accountVersion);
+            }
             if (response.ok && unsafe) window.AppOffline?.sync();
             return response;
         } catch (error) {
+            logApi(null, request.signal.aborted ? 'aborted' : 'network_error');
             if (window.AppOffline?.allowedMutation(url, method) && !request.signal?.aborted && !request.headers.has("X-Offline-Replay")) {
                 return window.AppOffline.enqueue(prepared, url, "connection");
             }
-            if (!unsafe && isApiRequest && window.AppOffline) {
-                const cached = await window.AppOffline.readSnapshot(url);
+            if (!fitTrackerNetworkOnly && !unsafe && isApiRequest && window.AppOffline && ownerVersion === AppReadCache.accountVersion) {
+                const cached = await window.AppOffline.readSnapshot(url, owner);
                 if (cached?.data) {
                     document.body.dataset.offline = "true";
                     window.updateOfflineStatus?.();

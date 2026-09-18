@@ -22,6 +22,9 @@ let googleSignupToken = null;
 let legalVersions = null;
 let authMessageTimer = null;
 let authRequestInFlight = false;
+let nativeGoogleInFlight = false;
+let pendingSessionUser = null;
+let sessionConfirmationInFlight = false;
 let authCheckInFlight = null;
 let lastAuthCheckAt = 0;
 let authState = 'unknown';
@@ -476,6 +479,7 @@ async function bootApp() {
 }
 
 async function resumeApp() {
+    if (nativeGoogleInFlight || authRequestInFlight || pendingSessionUser) return;
     if (document.hidden || navigator.onLine === false || resumeInFlight || Date.now() - lastResumeAt < 1000) return resumeInFlight;
     resumeInFlight = (async () => {
         if (authState === 'unknown' || Date.now() - lastAuthCheckAt > 60_000) await checkAuthStatus({ resume: true });
@@ -725,8 +729,6 @@ function setDefaultDates() {
     const weekAgo = localDateInputValue(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
     
     const dateFields = [
-        { id: 'dietStartDate', value: today },
-        { id: 'dietEndDate', value: today },
         { id: 'measurementStartDate', value: '' },
         { id: 'measurementEndDate', value: '' },
         { id: 'dietDate', value: today },
@@ -1005,24 +1007,31 @@ function startAuthChoiceGoogle() {
 }
 
 async function startNativeGoogleSignIn() {
+    if (nativeGoogleInFlight || authRequestInFlight || sessionConfirmationInFlight) return;
     const plugin = window.Capacitor?.Plugins?.FitTrackerGoogleAuth;
     if (!plugin?.signIn) {
         showAuthMessage('Atualize o app para concluir o login com Google. Você ainda pode entrar com e-mail e senha.', 'info');
         return;
     }
+    nativeGoogleInFlight = true;
+    console.info('[Auth]', { stage: 'native_start' });
     setGoogleAuthPending(true, 'Abrindo suas contas Google...');
     try {
         const result = await plugin.signIn();
         if (!result?.idToken) throw new Error('O Google não devolveu uma credencial válida. Tente novamente.');
         await handleGoogleCredential({ credential: result.idToken });
     } catch (error) {
+        console.info('[Auth]', { stage: error?.message === 'cancelled' ? 'native_cancelled' : 'native_failed' });
         if (error?.message !== 'cancelled') showAuthMessage(error.message || 'Não foi possível entrar com Google.', 'error');
     } finally {
+        nativeGoogleInFlight = false;
         setGoogleAuthPending(false);
     }
 }
 
 function setGoogleAuthPending(pending, message = '') {
+    pending = pending || nativeGoogleInFlight || authRequestInFlight || sessionConfirmationInFlight;
+    document.querySelectorAll('#authChoiceGoogleButton, #googleHeaderButton, .google-native-signin').forEach(button => { button.disabled = pending; });
     const section = getElement('googleAuthSection');
     const submit = getElement('googleSignupSubmit');
     section?.setAttribute('aria-busy', String(pending));
@@ -1048,6 +1057,7 @@ async function handleGoogleCredential(result) {
     if (authRequestInFlight) return;
     authRequestInFlight = true;
     setGoogleAuthPending(true, 'Entrando com Google...');
+    console.info('[Auth]', { stage: 'google_backend_start' });
     try {
         const response = await window.fetchWithTimeout(`${API_BASE}/auth/google`, {
             method: 'POST',
@@ -1065,6 +1075,7 @@ async function handleGoogleCredential(result) {
             return;
         }
         if (!response.ok) throw new Error(data.error || 'Não foi possível entrar com Google. Tente novamente.');
+        console.info('[Auth]', { stage: 'google_backend_accepted' });
         await completeAuthentication(data.user, data.csrf_token);
     } catch (error) {
         showAuthMessage(error.message, 'error');
@@ -1076,6 +1087,7 @@ async function handleGoogleCredential(result) {
 
 async function finishGoogleSignup(event) {
     event.preventDefault();
+    if (authRequestInFlight || nativeGoogleInFlight || sessionConfirmationInFlight) return;
     const username = getElement('googleUsername')?.value.trim();
     if (!googleSignupToken || !username) return;
     if (!getElement('googleTerms')?.checked || !getElement('googlePrivacy')?.checked || !legalVersions) {
@@ -1083,6 +1095,7 @@ async function finishGoogleSignup(event) {
         return;
     }
     setGoogleAuthPending(true, 'Concluindo cadastro...');
+    authRequestInFlight = true;
     try {
         const response = await fetch(`${API_BASE}/auth/google`, {
             method: 'POST',
@@ -1108,18 +1121,75 @@ async function finishGoogleSignup(event) {
     } catch (error) {
         showAuthMessage(error.message, 'error');
     } finally {
+        authRequestInFlight = false;
         setGoogleAuthPending(false);
     }
 }
 
 async function completeAuthentication(user, csrfToken = null) {
-    setCurrentUser(user);
-    setCsrfToken(csrfToken);
+    if (sessionConfirmationInFlight) return;
+    pendingSessionUser = user;
+    sessionConfirmationInFlight = true;
+    setGoogleAuthPending(true, 'Confirmando sua sessão...');
+    console.info('[Auth]', { stage: 'session_confirmation' });
+    try {
+        const session = await window.confirmAuthSession(API_BASE, user);
+        const accountVersion = window.AppReadCache.accountVersion;
+        await window.AppOffline?.saveSnapshot(`${API_BASE}/check_session`, new Response(JSON.stringify(session), { headers: { 'Content-Type': 'application/json' } }), String(session.user.id), () => accountVersion === window.AppReadCache.accountVersion);
+        setCurrentUser(session.user);
+        setCsrfToken(session.csrf_token);
+        document.body.dataset.offline = 'false';
+        updateOfflineStatus();
+        pendingSessionUser = null;
+        console.info('[Auth]', { stage: 'session_confirmed' });
+    } catch (error) {
+        console.info('[Auth]', { stage: 'session_failed', category: error?.name === 'TimeoutError' ? 'timeout' : 'unconfirmed' });
+        showAuthMessage(error.message || 'Não foi possível confirmar sua sessão.', 'error');
+        clearTimeout(authMessageTimer);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'text-button';
+        button.textContent = 'Confirmar sessão novamente';
+        button.addEventListener('click', async () => {
+            button.disabled = true;
+            try { await completeAuthentication(pendingSessionUser); }
+            finally { button.disabled = false; }
+        });
+        getElement('authMessage')?.append(button);
+        if (error.code === 'session_account_mismatch') {
+            const signOut = document.createElement('button');
+            signOut.type = 'button';
+            signOut.className = 'text-button';
+            signOut.textContent = 'Sair dessa sessão';
+            signOut.addEventListener('click', async () => {
+                signOut.disabled = true;
+                try {
+                    const response = await window.fetchWithTimeout(`${API_BASE}/logout`, {
+                        method: 'POST', credentials: 'include',
+                        headers: { 'X-CSRF-Token': error.sessionCsrfToken },
+                    });
+                    if (!response.ok) throw new Error('Não foi possível sair. Tente novamente.');
+                    await window.AppOffline?.clearAuth();
+                    pendingSessionUser = null;
+                    setCurrentUser(null);
+                    setCsrfToken(null);
+                    showAuthMessage('Entre usando o método original da sua conta.', 'info');
+                } catch (_error) { showAuthMessage('Não foi possível sair. Tente novamente.', 'error'); }
+                finally { signOut.disabled = false; }
+            });
+            getElement('authMessage')?.append(signOut);
+        }
+        return;
+    } finally {
+        sessionConfirmationInFlight = false;
+        setGoogleAuthPending(false);
+    }
     closeAppModal(getElement('loginScreen'));
     const intent = pendingAuthIntent;
     const destination = intent?.tab || viewForPath() || currentTab;
     pendingAuthIntent = null;
     finishAuthenticatedRoute(destination, { skipProfile: Boolean(intent?.resume) });
+    window.AppOffline?.sync();
     if (!userNeedsOnboarding() && intent?.resume) resumeAfterAuthentication(intent.resume, intent.requiresProfile);
     showToast('Você entrou com sucesso.', 'success');
 }
@@ -1152,8 +1222,6 @@ function showMainScreen(options = {}) {
     if (currentUser) {
         const username = currentUser.username || 'Usuário';
         const initial = username.trim().charAt(0).toUpperCase() || 'U';
-        const welcomeUser = getElement('welcomeUser');
-        if (welcomeUser) welcomeUser.textContent = `Olá, ${username}`;
         ['headerUserInitial', 'homeUserInitial', 'profileUserInitial'].forEach(id => {
             const element = getElement(id);
             if (element) element.textContent = initial;
@@ -1164,11 +1232,6 @@ function showMainScreen(options = {}) {
         if (profileMembership) profileMembership.textContent = currentUser.is_premium ? 'Membro Premium' : 'Plano gratuito';
         renderProfileBadges(currentUser);
         window.applyCurrentUserAvatar?.(currentUser.avatar_url);
-        const aiAccessLabel = getElement('homeAiAccessLabel');
-        if (aiAccessLabel) {
-            const remaining = Math.max(0, 3 - Number(currentUser.ai_trial_uses || 0));
-            aiAccessLabel.textContent = currentUser.is_premium ? 'Premium' : `${remaining} ${remaining === 1 ? 'uso grátis' : 'usos grátis'}`;
-        }
 
 
         const isAdmin = Boolean(currentUser.is_admin);
@@ -1179,8 +1242,6 @@ function showMainScreen(options = {}) {
         getElement('profileProfessionalDashboard')?.classList.toggle('hidden', !isProfessional);
         getElement('networkHeaderButton')?.classList.remove('hidden');
     } else {
-        const welcomeUser = getElement('welcomeUser');
-        if (welcomeUser) welcomeUser.textContent = 'Explore o Fit-Tracker.AI';
         ['headerUserInitial', 'homeUserInitial', 'profileUserInitial'].forEach(id => {
             const element = getElement(id);
             if (element) element.textContent = 'F';
@@ -1192,8 +1253,6 @@ function showMainScreen(options = {}) {
         if (profileMembership) profileMembership.textContent = 'Entre para acompanhar sua evolução';
         const profileBadges = getElement('profileBadges');
         if (profileBadges) profileBadges.innerHTML = '';
-        const aiAccessLabel = getElement('homeAiAccessLabel');
-        if (aiAccessLabel) aiAccessLabel.textContent = '3 usos grátis';
         getElement('adminPanelBtn')?.classList.add('hidden');
         getElement('profileAdminLink')?.classList.add('hidden');
         getElement('professionalPanelBtn')?.classList.add('hidden');
@@ -1558,8 +1617,6 @@ function renderGuestPresentation(tabName) {
         if (container) container.innerHTML = `<div class="guest-presentation guest-presentation--standalone"><i class="fas fa-lock-open"></i><div><strong>${presentation[1]}</strong><p>${presentation[2]}</p></div><button type="button" class="btn-primary" onclick="openAuthModal('Crie sua conta para salvar seus dados.', 'register')">Criar conta</button></div>`;
     }
     if (tabName === 'diet') {
-        getElement('guestDailySummary')?.classList.remove('hidden');
-        getElement('dailyMacroGrid')?.classList.add('hidden');
         const cardapio = getElement('todayCardapioBody');
         if (cardapio) cardapio.innerHTML = '<p class="today-muted">Entre para salvar suas refeições.</p><button type="button" class="today-food-primary" onclick="showAddDietModal()">Registrar refeição</button>';
     }
@@ -1892,7 +1949,7 @@ async function readAuthResponse(response) {
 
 async function handleLogin(e) {
     e.preventDefault();
-    if (authRequestInFlight) return;
+    if (authRequestInFlight || nativeGoogleInFlight || sessionConfirmationInFlight) return;
     const username = getElement("loginUsername").value.trim();
     const password = getElement("loginPassword").value.trim();
 
@@ -1931,6 +1988,7 @@ async function handleLogin(e) {
 
 async function handleRegister(e) {
     e.preventDefault();
+    if (authRequestInFlight || nativeGoogleInFlight || sessionConfirmationInFlight) return;
     const username = getElement("registerUsername").value.trim();
     const password = getElement("registerPassword").value.trim();
     const confirmPassword = getElement("confirmPassword").value.trim();
@@ -1954,8 +2012,9 @@ async function handleRegister(e) {
         return;
     }
 
+    authRequestInFlight = true;
     try {
-        const response = await fetch(`${API_BASE}/register`, {
+        const response = await window.fetchWithTimeout(`${API_BASE}/register`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
@@ -1983,6 +2042,9 @@ async function handleRegister(e) {
     } catch (error) {
         console.error("Register error:", error);
         showAuthMessage("Erro de conexão. Tente novamente.", "error");
+    } finally {
+        authRequestInFlight = false;
+        setGoogleAuthPending(false);
     }
 }
 
@@ -2054,6 +2116,7 @@ async function deleteAccount() {
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Não foi possível excluir a conta.');
+        await window.AppOffline?.clearAuth();
         setCurrentUser(null);
         setCsrfToken(null);
         window.analytics?.clearAttribution();
@@ -2074,6 +2137,8 @@ async function logout() {
         });
         if (!response.ok) throw new Error('Não foi possível encerrar sua sessão. Tente novamente.');
         try { await window.Capacitor?.Plugins?.FitTrackerGoogleAuth?.signOut?.(); } catch (_error) { /* a sessão do backend já foi encerrada */ }
+        await window.AppOffline?.clearAuth();
+        pendingSessionUser = null;
         setCurrentUser(null);
         setCsrfToken(null);
         window.clearWorkoutProgress?.();
@@ -2161,8 +2226,6 @@ function showTab(tabName, options = {}) {
         return true;
     }
 
-    getElement('guestDailySummary')?.classList.add('hidden');
-    getElement('dailyMacroGrid')?.classList.remove('hidden');
     if (tabName === 'diet') {
         loadTodayCardapio();
         window.loadWorkoutTodayCard?.();
@@ -2710,8 +2773,8 @@ async function loadDietEntries(options = {}) {
     if (!currentUser) return;
     const today = localDateInputValue();
     if (currentTab === 'diet' && !options.startDate && !options.endDate) return loadTodayCardapio(options);
-    const startDate = options.startDate || getElement('dietStartDate')?.value;
-    const endDate = options.endDate || getElement('dietEndDate')?.value;
+    const startDate = options.startDate;
+    const endDate = options.endDate;
     const owner = currentUser.id;
     const params = new URLSearchParams();
     if (startDate) params.set('start_date', startDate);
@@ -2753,7 +2816,6 @@ function setCurrentUser(user) {
         currentProfile = null;
     }
     currentUser = user;
-    window.currentUser = user;
     if (typeof updateOfflineStatus === 'function') updateOfflineStatus();
 }
 
@@ -2795,10 +2857,8 @@ async function loadMeasurements(loadMore = false) {
     const token = ++measurementRequestToken;
     const accountVersion = measurementAccountVersion;
     if (!append) {
-        measurements = [];
         measurementHasMore = false;
         measurementRange = range;
-        getElement('measurementTableBody').innerHTML = '';
     }
     measurementLoading = true;
     showGlobalLoading();
@@ -2838,7 +2898,8 @@ async function loadMeasurementSummary() {
         if (summary) summary.innerHTML = '';
         return;
     }
-    summary.innerHTML = '<p role="status">Carregando evolução...</p>';
+    const previousMarkup = summary.innerHTML;
+    if (!previousMarkup) summary.innerHTML = '<p role="status">Carregando evolução...</p>';
     const token = ++measurementSummaryToken;
     const accountVersion = measurementAccountVersion;
     try {
@@ -2853,7 +2914,7 @@ async function loadMeasurementSummary() {
         summary.innerHTML = renderBodyEvolution(data, getElement('bodyMetric')?.value || 'weight');
     } catch (error) {
         if (token === measurementSummaryToken && accountVersion === measurementAccountVersion) {
-            summary.innerHTML = `<div role="alert"><p class="session-inline-error">${escapeHtml(error.message)}</p><button type="button" onclick="loadMeasurementSummary()">Tentar novamente</button></div>`;
+            summary.innerHTML = previousMarkup + `<div role="alert"><p class="session-inline-error">${escapeHtml(error.message)}</p><button type="button" onclick="loadMeasurementSummary()">Tentar novamente</button></div>`;
         }
     }
 }
@@ -4042,13 +4103,6 @@ async function deleteMeasurement(id) {
 
 // Filter and Chat functions
 function clearDietFilters() {
-    const startDate = getElement("dietStartDate");
-    const endDate = getElement("dietEndDate");
-
-    const today = localDateInputValue();
-    if (startDate) startDate.value = today;
-    if (endDate) endDate.value = today;
-    
     loadDietEntries();
 }
 function clearMeasurementFilters() {

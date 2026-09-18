@@ -42,6 +42,14 @@ Defina as envs: `APP_ENV=production`, `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`,
 
 Redis, fila de IA, métricas, Grafana Cloud, Asaas e backups estão detalhados em [`OPERATIONS.md`](OPERATIONS.md).
 
+### Diagnóstico de login no iOS
+
+Depois de alterar as variáveis de cookie, aguarde o deploy do Render e faça login novamente. O app confirma `/api/check_session` pela rede antes de anunciar sucesso; o botão de confirmar novamente não repete o login ou cadastro.
+
+No Console do Xcode, procure `[Auth]`, `[API]` e `[App]`. Os registros incluem etapa, caminho sem query, status HTTP e duração, sem corpos, cookies ou tokens. O logging bruto do bridge Capacitor está desabilitado no iOS para evitar registrar o `idToken`; somente os registros de diagnóstico do app são encaminhados ao Xcode. Use o inspetor Web do Safari para examinar Network e Console e os Logs do Render para correlacionar pelo horário. Não compartilhe cookies ou credenciais capturados pelo inspetor.
+
+Para validar uma compilação nova: execute `npm run ios:sync`, instale pelo Xcode com Main Thread Checker ativo, entre na conta, confira treino/dieta/perfil, cancele e repita o login, teste toques rápidos, reabra em modo avião e confirme que logout impede a restauração offline da conta. A atualização do IndexedDB invalida snapshots antigos; operações e fotos pendentes são preservadas, mas os dados precisam ser recarregados online uma vez.
+
 ## Segurança
 
 Não use a URL de banco e a chave de sessão que existiam em versões anteriores. Elas devem ser rotacionadas. Nunca versione `.env`.

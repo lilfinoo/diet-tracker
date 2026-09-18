@@ -253,11 +253,12 @@
         workoutTodayAt = 0;
         workoutTodayError = "";
         workoutPlans = [];
+        dietPlans = [];
         window.WorkoutShare?.reset();
         clearActiveWorkoutDock();
         const modal = byId("viewWorkoutPlanModal");
         if (modal?.classList.contains("show")) closeAppModal(modal);
-        ["viewWorkoutPlanDetails", "workoutTodayCard", "workoutPlansTableBody", "workoutPlanHub"].forEach(id => {
+        ["viewWorkoutPlanDetails", "workoutTodayCard", "workoutPlansTableBody", "workoutPlanHub", "dietPlansTableBody"].forEach(id => {
             const element = byId(id);
             if (element) element.replaceChildren();
         });
@@ -1765,17 +1766,25 @@
             return [];
         }
         const container = byId("dietPlansTableBody");
+        const owner = workoutAccount();
         if (container) {
             container.setAttribute("aria-busy", "true");
             if (!container.children.length) container.innerHTML = planLoadingMarkup("Carregando planos alimentares...");
         }
         try {
             const result = await apiRequest("/diet_plans");
+            if (owner !== workoutAccount()) return [];
             dietPlans = Array.isArray(result) ? result : [];
             renderPlanList("diet", dietPlans);
             return dietPlans;
         } catch (error) {
-            if (container) container.innerHTML = `<div class="plans-empty" role="alert"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i><h3>Planos indisponíveis</h3><p>${esc(error.message)}</p><button type="button" class="btn-secondary" data-retry-plan-list="diet">Tentar novamente</button></div>`;
+            if (owner !== workoutAccount()) return [];
+            if (dietPlans.length) renderPlanList("diet", dietPlans);
+            if (container) {
+                const feedback = `<div class="plans-empty" role="alert"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i><h3>Não foi possível atualizar os planos</h3><p>${esc(error.message)}</p><button type="button" class="btn-secondary" data-retry-plan-list="diet">Tentar novamente</button></div>`;
+                if (dietPlans.length) container.insertAdjacentHTML('beforeend', feedback);
+                else container.innerHTML = feedback;
+            }
             return [];
         } finally {
             container?.setAttribute("aria-busy", "false");
@@ -1791,6 +1800,7 @@
             return [];
         }
         const container = byId("workoutPlansTableBody");
+        const owner = workoutAccount();
         if (container) {
             container.setAttribute("aria-busy", "true");
             if (!container.children.length) container.innerHTML = planLoadingMarkup("Carregando planos de treino...");
@@ -1803,12 +1813,19 @@
                 workoutTodayError = error.message;
             }
             const plansResult = await apiRequest("/workout_plans");
+            if (owner !== workoutAccount()) return [];
             workoutPlans = Array.isArray(plansResult) ? plansResult : [];
             renderFilteredWorkoutPlans();
             window.renderWorkoutTodayCard?.();
             return workoutPlans;
         } catch (error) {
-            if (container) container.innerHTML = `<div class="plans-empty" role="alert"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i><h3>Planos indisponíveis</h3><p>${esc(error.message)}</p><button type="button" class="btn-secondary" data-retry-plan-list="workout">Tentar novamente</button></div>`;
+            if (owner !== workoutAccount()) return [];
+            if (workoutPlans.length) renderFilteredWorkoutPlans();
+            if (container) {
+                const feedback = `<div class="plans-empty" role="alert"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i><h3>Não foi possível atualizar os planos</h3><p>${esc(error.message)}</p><button type="button" class="btn-secondary" data-retry-plan-list="workout">Tentar novamente</button></div>`;
+                if (workoutPlans.length) container.insertAdjacentHTML('beforeend', feedback);
+                else container.innerHTML = feedback;
+            }
             return [];
         } finally {
             container?.setAttribute("aria-busy", "false");

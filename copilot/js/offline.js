@@ -3,13 +3,14 @@
     "use strict";
 
     const DB_NAME = "fittracker-offline";
-    const DB_VERSION = 1;
+    const DB_VERSION = 2;
     const STORES = { snapshots: "snapshots", outbox: "outbox", media: "media" };
     const configuredOrigin = window.FIT_TRACKER_CONFIG?.apiOrigin || document.querySelector('meta[name="fit-tracker-api-origin"]')?.content || window.location.origin;
     const API_ORIGIN = (document.documentElement.dataset.nativePlatform === "ios" ? configuredOrigin : window.location.origin).replace(/\/$/, "");
     const memorySnapshots = new Map();
     let dbPromise = null;
     let syncing = null;
+    let authGeneration = 0;
 
     function accountId() {
         return String(window.currentUser?.id || "anonymous");
@@ -24,8 +25,9 @@
         if (!window.indexedDB) return Promise.resolve(null);
         dbPromise = new Promise((resolve) => {
             const request = indexedDB.open(DB_NAME, DB_VERSION);
-            request.onupgradeneeded = () => {
+            request.onupgradeneeded = (event) => {
                 const database = request.result;
+                if (event.oldVersion === 1) request.transaction.objectStore(STORES.snapshots).clear();
                 if (!database.objectStoreNames.contains(STORES.snapshots)) database.createObjectStore(STORES.snapshots, { keyPath: "key" });
                 if (!database.objectStoreNames.contains(STORES.outbox)) {
                     const store = database.createObjectStore(STORES.outbox, { keyPath: "id" });
@@ -80,6 +82,11 @@
         try {
             const transaction = database.transaction(storeName, "readwrite");
             transaction.objectStore(storeName).delete(key);
+            await new Promise((resolve) => {
+                transaction.oncomplete = resolve;
+                transaction.onerror = resolve;
+                transaction.onabort = resolve;
+            });
         } catch (_error) { /* Storage cleanup is best effort. */ }
     }
 
@@ -143,20 +150,27 @@
         return jsonResponse({ queued: true, operation_id: id, message: "Salvo neste dispositivo. Será sincronizado quando a conexão voltar." });
     }
 
-    async function saveSnapshot(url, response) {
+    async function saveSnapshot(url, response, owner = accountId(), isCurrent = () => accountId() === owner) {
+        const generation = authGeneration;
         if (!response.ok || response.status === 204) return;
         let data;
         try { data = await response.clone().json(); } catch (_error) { return; }
-        const userId = String(data.user?.id || data.profile?.user_id || window.currentUser?.id || "anonymous");
+        if (!isCurrent()) return;
+        const userId = String(data.user?.id || owner);
         const key = new URL(url).pathname + new URL(url).search;
+        if (key.endsWith('/check_session') && data.logged_in !== true) {
+            await window.AppOffline.clearAuth();
+            return;
+        }
         const safeData = key.endsWith("/check_session") && data.user ? { ...data, csrf_token: null } : data;
-        const snapshot = { key: keyFor(key, userId), userId, key, data: safeData, savedAt: Date.now() };
+        const snapshot = { key: keyFor(key, userId), userId, resourceKey: key, data: safeData, savedAt: Date.now() };
         await put(STORES.snapshots, snapshot);
+        if (!isCurrent()) return;
         memorySnapshots.set(snapshot.key, snapshot);
-        if (key.endsWith("/check_session") && data.user) {
+        if (key.endsWith("/check_session") && data.user && generation === authGeneration) {
             const authSnapshot = { ...snapshot, key: keyFor(key, "anonymous"), userId: "anonymous" };
             await put(STORES.snapshots, authSnapshot);
-            memorySnapshots.set(authSnapshot.key, authSnapshot);
+            if (generation === authGeneration && isCurrent()) memorySnapshots.set(authSnapshot.key, authSnapshot);
         }
     }
 
@@ -213,6 +227,12 @@
         enqueue,
         saveSnapshot,
         readSnapshot,
+        async clearAuth() {
+            authGeneration += 1;
+            const key = keyFor("/api/check_session", "anonymous");
+            memorySnapshots.delete(key);
+            await remove(STORES.snapshots, key);
+        },
         listOutbox,
         sync,
         async saveMedia(id, blob, metadata = {}) {
