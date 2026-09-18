@@ -40,6 +40,7 @@ let audioInitialized = false;
 let billingReturnHandled = false;
 let profileAchievementsState = { selected: [], achievements: [], badges: [], records: [], limit: 3, filter: 'all', savingToken: null };
 let appBootCompleted = false;
+const APP_VERSION = 'v1.1';
 
 // API Base URL. The native shell is local, so only its API calls use Render.
 const configuredApiOrigin = window.FIT_TRACKER_CONFIG?.apiOrigin || document.querySelector('meta[name="fit-tracker-api-origin"]')?.content || window.location.origin;
@@ -523,7 +524,7 @@ async function refreshDisplayedVersion() {
         const response = await window.fetchWithTimeout(`${API_BASE}/version`);
         if (!response.ok) return;
         const data = await response.json();
-        const label = [data.version, data.commit && data.commit !== 'local' ? data.commit : ''].filter(Boolean).join(' · ');
+        const label = [APP_VERSION, data.commit && data.commit !== 'local' ? data.commit : ''].filter(Boolean).join(' · ');
         document.querySelectorAll('.app-version').forEach((element) => { element.textContent = label; });
     } catch (_error) {
         // A versão estática continua visível quando a rede ainda não está disponível.
