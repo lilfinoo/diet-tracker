@@ -113,10 +113,19 @@ async function confirmAuthSession(apiBase, expectedUser) {
     const response = await fetchWithTimeout(`${apiBase}/check_session`, {
         credentials: 'include', cache: 'no-store', fitTrackerNetworkOnly: true,
     }, 8000);
-    const data = await response.json();
     const fail = (code, message) => { const error = new Error(message); error.code = code; throw error; };
     if (ownerVersion !== AppReadCache.accountVersion) fail('session_stale', 'A conta mudou durante a confirmação. Entre novamente.');
-    if (!response.ok) fail('session_http_error', 'Não foi possível consultar sua sessão. Tente novamente.');
+    if (!response.ok) {
+        await response.text();
+        fail('session_http_error', 'Não foi possível consultar sua sessão. Tente novamente.');
+    }
+    let data;
+    try { data = await response.json(); }
+    catch (error) {
+        if (error.name !== 'SyntaxError') throw error;
+        fail('session_invalid_response', 'O servidor retornou uma confirmação inválida. Tente novamente.');
+    }
+    if (ownerVersion !== AppReadCache.accountVersion) fail('session_stale', 'A conta mudou durante a confirmação. Entre novamente.');
     if (data.logged_in !== true || !data.user?.id || !expectedUser?.id) fail('session_missing', 'A sessão não foi mantida pelo servidor. Tente confirmar novamente.');
     if (String(data.user.id) !== String(expectedUser?.id)) {
         const error = new Error('A sessão pertence a outra conta. Saia e entre usando o método original de login.');

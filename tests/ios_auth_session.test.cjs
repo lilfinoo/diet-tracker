@@ -76,6 +76,10 @@ test('native transport receives JSON and intact multipart files from Request inp
 });
 
 test('confirmation identifies semantic failures and rejects account changes during response', async () => {
+    for (const status of [401, 403, 500]) {
+        const { window } = harness(async () => new Response('<html>Error</html>', { status }));
+        await assert.rejects(window.confirmAuthSession('https://api.example/api', { id: 'alice' }), { code: 'session_http_error' });
+    }
     for (const [data, code] of [[{ logged_in: false }, 'session_missing'], [session('bob'), 'session_account_mismatch'], [{ ...session(), csrf_token: '' }, 'session_csrf_missing']]) {
         const { window } = harness(async () => response(data));
         await assert.rejects(window.confirmAuthSession('https://api.example/api', { id: 'alice' }), { code });
