@@ -40,7 +40,7 @@ let audioInitialized = false;
 let billingReturnHandled = false;
 let profileAchievementsState = { selected: [], achievements: [], badges: [], records: [], limit: 3, filter: 'all', savingToken: null };
 let appBootCompleted = false;
-const APP_VERSION = 'v1.1';
+const APP_VERSION = 'v1.1.1';
 
 // API Base URL. The native shell is local, so only its API calls use Render.
 const configuredApiOrigin = window.FIT_TRACKER_CONFIG?.apiOrigin || document.querySelector('meta[name="fit-tracker-api-origin"]')?.content || window.location.origin;
@@ -1133,10 +1133,11 @@ async function completeAuthentication(user, csrfToken = null) {
     sessionConfirmationInFlight = true;
     setGoogleAuthPending(true, 'Confirmando sua sessão...');
     console.info('[Auth]', { stage: 'session_confirmation' });
+    const accountVersion = window.AppReadCache.accountVersion;
     try {
         const session = await window.confirmAuthSession(API_BASE, user);
-        const accountVersion = window.AppReadCache.accountVersion;
         await window.AppOffline?.saveSnapshot(`${API_BASE}/check_session`, new Response(JSON.stringify(session), { headers: { 'Content-Type': 'application/json' } }), String(session.user.id), () => accountVersion === window.AppReadCache.accountVersion);
+        if (accountVersion !== window.AppReadCache.accountVersion || pendingSessionUser !== user) return;
         setCurrentUser(session.user);
         setCsrfToken(session.csrf_token);
         document.body.dataset.offline = 'false';
@@ -1144,7 +1145,8 @@ async function completeAuthentication(user, csrfToken = null) {
         pendingSessionUser = null;
         console.info('[Auth]', { stage: 'session_confirmed' });
     } catch (error) {
-        console.info('[Auth]', { stage: 'session_failed', category: error?.name === 'TimeoutError' ? 'timeout' : 'unconfirmed' });
+        if (accountVersion !== window.AppReadCache.accountVersion || pendingSessionUser !== user) return;
+        console.info('[Auth]', { stage: 'session_failed', category: error?.code || (error?.name === 'TimeoutError' ? 'timeout' : 'network_error') });
         showAuthMessage(error.message || 'Não foi possível confirmar sua sessão.', 'error');
         clearTimeout(authMessageTimer);
         const button = document.createElement('button');

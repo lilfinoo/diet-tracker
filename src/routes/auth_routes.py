@@ -1,5 +1,6 @@
 from datetime import datetime
-from flask import Blueprint, current_app, jsonify, session
+import logging
+from flask import Blueprint, current_app, jsonify, request, session
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 from itsdangerous import BadSignature, SignatureExpired
@@ -14,6 +15,21 @@ from src.services.rate_limit import rate_limit
 
 
 auth_bp = Blueprint("auth", __name__)
+
+
+@auth_bp.after_request
+def log_session_diagnostic(response):
+    if request.endpoint in {"auth.login", "auth.register", "auth.google_auth", "auth.check_session", "auth.logout"}:
+        payload = response.get_json(silent=True) or {}
+        logger = current_app.logger.getChild("auth")
+        logger.setLevel(logging.INFO)
+        logger.info(
+            "[Auth] endpoint=%s status=%s cookie_present=%s session_user_present=%s confirmed=%s",
+            request.endpoint, response.status_code,
+            current_app.config.get("SESSION_COOKIE_NAME", "session") in request.cookies,
+            bool(session.get("user_id")), payload.get("logged_in") is True,
+        )
+    return response
 
 
 def _account_fields(data, default_name):

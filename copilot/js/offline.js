@@ -130,16 +130,17 @@
     }
 
     async function enqueue(request, url, reason = "offline") {
+        const owner = accountId();
         const body = await serializeBody(request);
-        const id = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const id = request.headers.get("Idempotency-Key") || window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
         const item = {
             id,
-            account: accountId(),
+            account: owner,
             url: url.toString(),
             method: request.method,
             headers: Array.from(request.headers.entries()).filter(([name]) => {
                 const normalized = name.toLowerCase();
-                return normalized !== "content-length" && !(body.type === "form" && normalized === "content-type");
+                return normalized !== "content-length" && normalized !== "x-csrf-token" && !(body.type === "form" && normalized === "content-type");
             }),
             body,
             createdAt: Date.now(),
@@ -192,15 +193,28 @@
     async function sync() {
         if (syncing || navigator.onLine === false || !window.currentUser) return syncing;
         syncing = (async () => {
-            const items = await listOutbox();
+            const owner = accountId();
+            const generation = authGeneration;
+            const version = window.AppReadCache.accountVersion;
+            const isCurrent = () => owner === accountId() && generation === authGeneration && version === window.AppReadCache.accountVersion;
+            const items = await listOutbox(owner);
+            if (!items.length || !isCurrent()) return;
+            try {
+                const confirmed = await window.confirmAuthSession(`${API_ORIGIN}/api`, { id: owner });
+                if (!isCurrent()) return;
+                window.setCsrfToken(confirmed.csrf_token);
+            } catch (_error) { return; }
             for (const item of items) {
-                if (navigator.onLine === false) break;
+                if (navigator.onLine === false || !isCurrent()) break;
                 const headers = new Headers(item.headers || []);
                 headers.set("Idempotency-Key", item.id);
                 headers.set("X-Offline-Replay", "1");
                 if (window.csrfToken) headers.set("X-CSRF-Token", window.csrfToken);
                 try {
-                    const response = await window.fetch(item.url, { method: item.method, headers, body: await restoreBody(item.body), credentials: "include" });
+                    const body = await restoreBody(item.body);
+                    if (!isCurrent()) break;
+                    const response = await window.fetch(item.url, { method: item.method, headers, body, credentials: "include" });
+                    if (!isCurrent() || response.status === 401 || response.status === 403) break;
                     if (!response.ok && response.status >= 400 && response.status < 500 && response.status !== 409) {
                         await remove(STORES.outbox, item.id);
                         window.dispatchEvent(new CustomEvent("fittracker:offline-failed", { detail: { item, status: response.status } }));

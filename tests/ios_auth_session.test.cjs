@@ -51,6 +51,7 @@ function harness(network = async () => new Response('{}'), oldVersion = 0) {
     const context = { window, document, indexedDB, navigator: { onLine: true },
         fetch: (...args) => window.fetch(...args), URL, Request, Response, Headers,
         AbortController, DOMException, Blob, FormData, Date, setTimeout, clearTimeout,
+        CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options?.detail; } },
         console: { info: (...args) => logs.push(args), error: (...args) => logs.push(args) } };
     vm.createContext(context);
     vm.runInContext(read('js/utils.js'), context);
@@ -59,6 +60,68 @@ function harness(network = async () => new Response('{}'), oldVersion = 0) {
 }
 const session = (id = 'alice') => ({ logged_in: true, user: { id }, csrf_token: 'csrf' });
 const response = data => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
+
+test('native transport receives JSON and intact multipart files from Request inputs', async () => {
+    let received;
+    const { window } = harness(async (url, options) => { received = { url, options }; return response({}); });
+    await window.fetch(new Request('https://api.example/api/auth/google', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"idToken":"test"}' }));
+    assert.equal(received.options.body, '{"idToken":"test"}');
+    const bytes = new Uint8Array([0, 255, 128, 13, 10]);
+    const form = new FormData();
+    form.append('photo', new Blob([bytes], { type: 'image/jpeg' }), 'photo.jpg');
+    await window.fetch(new Request('https://api.example/api/profile/avatar', { method: 'POST', body: form }));
+    assert.ok(received.options.body instanceof FormData);
+    assert.equal(received.options.headers.has('Content-Type'), false);
+    assert.deepEqual(new Uint8Array(await received.options.body.get('photo').arrayBuffer()), bytes);
+});
+
+test('confirmation identifies semantic failures and rejects account changes during response', async () => {
+    for (const [data, code] of [[{ logged_in: false }, 'session_missing'], [session('bob'), 'session_account_mismatch'], [{ ...session(), csrf_token: '' }, 'session_csrf_missing']]) {
+        const { window } = harness(async () => response(data));
+        await assert.rejects(window.confirmAuthSession('https://api.example/api', { id: 'alice' }), { code });
+    }
+    let resolve;
+    const { window } = harness(() => new Promise(done => { resolve = done; }));
+    const pending = window.confirmAuthSession('https://api.example/api', { id: 'alice' });
+    await tick(); window.AppReadCache.reset(); resolve(response(session()));
+    await assert.rejects(pending, { code: 'session_stale' });
+});
+
+test('outbox pauses on missing or divergent session and preserves authorization failures', async () => {
+    for (const result of [{ logged_in: false }, session('bob'), session()]) {
+        let mutations = 0;
+        const { window, stores } = harness(async input => {
+            const url = typeof input === 'string' ? input : input.url;
+            if (url.endsWith('/check_session')) return response(result);
+            mutations++; return new Response('{}', { status: 403 });
+        });
+        window.currentUser = { id: 'alice' };
+        stores.get('outbox').set('pending', { id: 'pending', account: 'alice', url: 'https://api.example/api/diet', method: 'POST', body: { type: 'text', value: '{}' } });
+        await window.AppOffline.sync();
+        assert.ok(stores.get('outbox').has('pending'));
+        assert.equal(mutations, result.user?.id === 'alice' ? 1 : 0);
+    }
+});
+
+test('outbox refreshes CSRF and replays a queued photo with the original idempotency key', async () => {
+    let uploaded;
+    const { window, stores } = harness(async (input, options) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url.endsWith('/check_session')) return response(session());
+        uploaded = options;
+        return response({ saved: true });
+    });
+    window.currentUser = { id: 'alice' };
+    stores.get('outbox').clear();
+    const form = new FormData(); form.append('photo', new Blob(['photo'], { type: 'image/jpeg' }), 'a.jpg');
+    await window.AppOffline.enqueue(new Request('https://api.example/api/profile/avatar', { method: 'POST', headers: { 'Idempotency-Key': 'original', 'X-CSRF-Token': 'old' }, body: form }), new URL('https://api.example/api/profile/avatar'));
+    assert.ok(stores.get('outbox').has('original'));
+    await window.AppOffline.sync();
+    assert.equal(uploaded.headers.get('X-CSRF-Token'), 'csrf');
+    assert.equal(uploaded.headers.get('Idempotency-Key'), 'original');
+    assert.equal(await uploaded.body.get('photo').text(), 'photo');
+    assert.equal(stores.get('outbox').size, 0);
+});
 
 test('confirmation uses the network, credentials and an eight-second deadline', async () => {
     let options;

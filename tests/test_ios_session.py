@@ -1,6 +1,17 @@
 from tests.helpers import registration_payload
 
 
+def test_session_diagnostics_are_booleans_without_credentials(client, caplog):
+    client.get("/api/check_session")
+    assert "cookie_present=False session_user_present=False confirmed=False" in caplog.text
+    result = client.post("/api/register", json=registration_payload("diagnostic-private"))
+    csrf = result.get_json()["csrf_token"]
+    client.get("/api/check_session")
+    assert "cookie_present=True session_user_present=True confirmed=True" in caplog.text
+    assert csrf not in caplog.text
+    assert "diagnostic-private" not in caplog.text
+
+
 def test_native_session_cookie_cors_and_csrf(app, client):
     app.config.update(
         SESSION_COOKIE_SECURE=True,

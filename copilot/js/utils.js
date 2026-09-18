@@ -109,19 +109,22 @@ function sanitizeDiagnostic(value) {
 }
 
 async function confirmAuthSession(apiBase, expectedUser) {
+    const ownerVersion = AppReadCache.accountVersion;
     const response = await fetchWithTimeout(`${apiBase}/check_session`, {
         credentials: 'include', cache: 'no-store', fitTrackerNetworkOnly: true,
     }, 8000);
     const data = await response.json();
-    if (!response.ok || data.logged_in !== true || !data.user?.id || !expectedUser?.id || typeof data.csrf_token !== 'string' || !data.csrf_token.trim()) {
-        throw new Error('A sessão não foi mantida pelo servidor. Tente confirmar novamente.');
-    }
+    const fail = (code, message) => { const error = new Error(message); error.code = code; throw error; };
+    if (ownerVersion !== AppReadCache.accountVersion) fail('session_stale', 'A conta mudou durante a confirmação. Entre novamente.');
+    if (!response.ok) fail('session_http_error', 'Não foi possível consultar sua sessão. Tente novamente.');
+    if (data.logged_in !== true || !data.user?.id || !expectedUser?.id) fail('session_missing', 'A sessão não foi mantida pelo servidor. Tente confirmar novamente.');
     if (String(data.user.id) !== String(expectedUser?.id)) {
         const error = new Error('A sessão pertence a outra conta. Saia e entre usando o método original de login.');
         error.code = 'session_account_mismatch';
         error.sessionCsrfToken = data.csrf_token;
         throw error;
     }
+    if (typeof data.csrf_token !== 'string' || !data.csrf_token.trim()) fail('session_csrf_missing', 'A sessão não retornou a confirmação de segurança. Tente novamente.');
     return data;
 }
 
@@ -306,6 +309,7 @@ if (typeof window !== "undefined") {
     window.AppReadCache = AppReadCache;
     window.readApiJson = readApiJson;
     window.confirmAuthSession = confirmAuthSession;
+    window.setCsrfToken = setCsrfToken;
     if (window.Capacitor?.getPlatform?.() === 'ios') document.documentElement.dataset.nativePlatform = 'ios';
     window.formatDietPlanItem = formatDietPlanItem;
     window.formatDietPlanItemsText = formatDietPlanItemsText;
@@ -357,7 +361,21 @@ if (typeof window !== "undefined" && typeof window.fetch === "function" && !wind
             return window.AppOffline.enqueue(prepared, url);
         }
         try {
-            const response = await originalFetch(prepared);
+            // Capacitor must receive FormData, not a multipart ReadableStream:
+            // its stream converter decodes bytes as text and corrupts binary photos.
+            let response;
+            if (isApiRequest && document.documentElement.dataset.nativePlatform === 'ios' && unsafe && prepared.body) {
+                const headers = new Headers(prepared.headers);
+                const multipart = (headers.get('Content-Type') || '').startsWith('multipart/form-data');
+                const body = multipart ? await prepared.clone().formData() : await prepared.clone().text();
+                if (multipart) headers.delete('Content-Type');
+                response = await originalFetch(prepared.url, { method, headers, body, credentials: 'include', signal: prepared.signal });
+            } else {
+                response = await originalFetch(prepared);
+            }
+            if (prepared.signal.aborted) {
+                throw new DOMException('Request no longer current', 'AbortError');
+            }
             logApi(response.status, response.ok ? 'success' : 'http_error');
             if (response.ok && unsafe && isApiRequest && ownerVersion === AppReadCache.accountVersion &&
                 /^\/api\/(diet(?:\/|$)|diet_plans(?:\/|$)|profile(?:\/|$))/.test(url.pathname)) {

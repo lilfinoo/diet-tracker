@@ -2,6 +2,9 @@
   "appId": "ai.fittracker.app",
   "appName": "Fit Tracker",
   "webDir": "copilot",
+  "plugins": {
+    "CapacitorHttp": { "enabled": true }
+  },
   "ios": {
     "loggingBehavior": "none",
     "zoomEnabled": true
