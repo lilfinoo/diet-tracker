@@ -112,6 +112,8 @@ class ProductionConfig(Config):
     APP_ENV = "production"
     IS_PRODUCTION = True
     SESSION_COOKIE_SECURE = True
+    # The packaged Capacitor UI and the Render API are different origins.
+    SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "None")
     HSTS_ENABLED = True
     AI_ASYNC_ENABLED = os.getenv("AI_ASYNC_ENABLED", "true").lower() == "true"
     METRICS_ENABLED = os.getenv("METRICS_ENABLED", "true").lower() == "true"

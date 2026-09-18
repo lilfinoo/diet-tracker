@@ -12,6 +12,13 @@
         estimateDescription = '';
         stale = false;
     }
+    function dataUrlBlob(dataUrl) {
+        const match = String(dataUrl).match(/^data:([^;,]+)(?:;[^,]+)*,([^]*)$/);
+        if (!match) return null;
+        const binary = atob(match[2]);
+        const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+        return new Blob([bytes], { type: match[1] });
+    }
     function summary() {
         const values = fields.map(id => el(id).value);
         const empty = values.every(value => value === '');
@@ -185,14 +192,7 @@
             if (fields.includes(event.target.id) && !stale) estimateDescription = el('dietDescription').value.trim();
             render();
         });
-        el('dietPhotoBtn').addEventListener('click', () => el('dietPhotoInput').click());
-        el('dietPhotoRemove').addEventListener('click', () => {
-            invalidate(); photoVersion++; loadingPhoto = false; photo = null; dirty = true; clearNutrients();
-            el('dietPhotoInput').value = ''; el('dietPhotoPreview').hidden = true; el('dietReviewPhoto').hidden = true;
-            el('dietPhotoPreviewImg').removeAttribute('src'); render();
-        });
-        el('dietPhotoInput').addEventListener('change', async event => {
-            const file = event.target.files?.[0];
+        const handlePhotoFile = async file => {
             if (!file) return;
             invalidate(); const token = ++photoVersion, owner = account();
             photo = null; dirty = true; clearNutrients(); el('dietPhotoPreview').hidden = true;
@@ -201,16 +201,29 @@
                 const result = await downscaleImageFile(file, 1024);
                 if (token !== photoVersion || owner !== account()) return;
                 const mime = result.dataUrl.match(/^data:([^;]+);/)?.[1];
-                photo = { data: result.base64, mime_type: mime || file.type };
+                photo = { data: result.base64, mime_type: mime || 'image/jpeg' };
+                const imageBlob = dataUrlBlob(result.dataUrl);
+                await window.AppOffline?.saveMedia('diet-photo-pending', imageBlob, { type: 'diet-photo', date: new Date().toISOString() });
                 el('dietPhotoPreviewImg').src = result.dataUrl; el('dietPhotoPreview').hidden = false; message();
             } catch (error) {
                 if (token === photoVersion && owner === account()) message(error.message === 'Arquivo de imagem inválido'
                     ? 'Escolha uma foto válida.'
                     : 'Não foi possível abrir a foto. Escolha JPG/PNG ou escreva a refeição.');
             } finally {
+                el('dietPhotoInput').value = '';
                 if (token === photoVersion && owner === account()) { loadingPhoto = false; render(); }
             }
+        };
+        el('dietPhotoBtn').addEventListener('click', () => {
+            const pickerRequest = window.FitTrackerImagePicker?.open({ inputId: 'dietPhotoInput', onFile: handlePhotoFile });
+            pickerRequest?.catch(() => message('Não foi possível abrir a câmera ou fototeca.'));
         });
+        el('dietPhotoRemove').addEventListener('click', () => {
+            invalidate(); photoVersion++; loadingPhoto = false; photo = null; dirty = true; clearNutrients();
+            el('dietPhotoInput').value = ''; el('dietPhotoPreview').hidden = true; el('dietReviewPhoto').hidden = true;
+            el('dietPhotoPreviewImg').removeAttribute('src'); render();
+        });
+        el('dietPhotoInput').addEventListener('change', event => handlePhotoFile(event.target.files?.[0]));
     });
     window.DietEntryFlow = { begin, canClose, canSave, reset, analyze, lockSaving, revision: () => version,
         saved() { dirty = false; el('dietSaveBtn').disabled = false; }, invalidate };

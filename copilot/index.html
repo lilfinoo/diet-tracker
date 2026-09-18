@@ -4,7 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#06101f">
+    <meta name="fit-tracker-api-origin" content="https://diet-tracker-6i67.onrender.com">
     <title>Fit-Tracker.AI</title>
+    <style>
+        html, body { background: #06101f; }
+        #appBootScreen { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; padding: 2rem; background: #06101f; color: #e5eefb; font: 500 16px Inter, system-ui, sans-serif; }
+        #appBootScreen[hidden] { display: none; }
+        .app-boot-card { display: grid; justify-items: center; gap: 1rem; text-align: center; }
+        .app-boot-card img { width: 76px; height: 76px; object-fit: contain; }
+        .app-boot-spinner { width: 28px; height: 28px; border: 3px solid rgba(147,197,253,.24); border-top-color: #60a5fa; border-radius: 50%; animation: app-boot-spin .8s linear infinite; }
+        .app-boot-retry { display: none; border: 0; border-radius: 999px; padding: .75rem 1rem; background: #2563eb; color: white; font: inherit; }
+        #appBootScreen.is-error .app-boot-spinner, #appBootScreen.is-offline .app-boot-spinner { display: none; }
+        #appBootScreen.is-error .app-boot-retry, #appBootScreen.is-offline .app-boot-retry { display: inline-flex; }
+        @keyframes app-boot-spin { to { transform: rotate(360deg); } }
+    </style>
     <link rel="icon" href="/assets/logoIsolada.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,10 +27,19 @@
     <link rel="stylesheet" href="/fluid.css?v=20260828-achievements">
 </head>
 <body data-auth-state="unknown">
+    <div id="appBootScreen" role="status" aria-live="polite">
+        <div class="app-boot-card">
+            <img src="/assets/logoIsolada.png" alt="Fit-Tracker.AI">
+            <div class="app-boot-spinner" aria-hidden="true"></div>
+            <p id="appBootMessage">Preparando seu espaço...</p>
+            <button id="appBootRetry" class="app-boot-retry" type="button">Tentar novamente</button>
+        </div>
+    </div>
+    <div id="offlineStatus" class="offline-status" role="status" aria-live="polite" hidden>Modo offline: mostrando dados salvos. Alterações serão sincronizadas quando a conexão voltar.</div>
     <a class="skip-link" href="#appContent">Ir para o conteúdo</a>
     <div id="loginScreen" class="modal" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
         <div class="modal-content auth-modal-content">
-            <button type="button" class="btn-close auth-modal-close" onclick="closeAuthModal()" aria-label="Continuar explorando">&times;</button>
+            <button type="button" class="btn-close auth-modal-close" onclick="closeAuthModal()" aria-label="Fechar autenticação">&times;</button>
             <div class="login-card">
                     <div class="login-header">
                         <div class="logo-container">
@@ -27,7 +49,16 @@
                         <p class="login-subtitle" id="authContext">Entre para salvar seus dados e acompanhar sua evolução.</p>
                     </div>
                     
-                    <div class="login-tabs">
+                    <div id="authChoicePanel" class="auth-choice-panel">
+                        <button id="authChoiceGoogleButton" type="button" class="auth-choice-button auth-choice-button--google hidden" onclick="startAuthChoiceGoogle()">
+                            <svg class="google-g" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92a8.78 8.78 0 0 0 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.32A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.97 10.72a5.41 5.41 0 0 1 0-3.44V4.96H.96a9 9 0 0 0 0 8.08l3.01-2.32z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.51.45 3.44 1.35l2.58-2.58C13.46.9 11.42 0 9 0A9 9 0 0 0 .96 4.96l3.01 2.32C4.68 5.16 6.66 3.58 9 3.58z"/></svg>
+                            <span>Continuar com Google</span>
+                        </button>
+                        <button type="button" class="auth-choice-button" onclick="showRegister()"><i class="fas fa-user-plus"></i><span>Criar conta</span></button>
+                        <button type="button" class="auth-choice-button auth-choice-button--secondary" onclick="showLogin()"><i class="fas fa-sign-in-alt"></i><span>Entrar</span></button>
+                    </div>
+
+                    <div class="login-tabs hidden">
                         <button class="tab-btn active" onclick="showLogin()">
                             <i class="fas fa-sign-in-alt"></i>
                             <span>Entrar</span>
@@ -60,20 +91,6 @@
                     </form>
                     
                     <form id="registerForm" class="auth-form hidden">
-                        <div class="field-group">
-                            <label class="field-label" for="registerName"><i class="fas fa-id-card"></i> Nome</label>
-                            <div class="field-input">
-                                <i class="fas fa-id-card field-input__icon" aria-hidden="true"></i>
-                                <input type="text" id="registerName" maxlength="255" placeholder="Como devemos chamar você" autocomplete="name" required>
-                            </div>
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label" for="registerEmail"><i class="fas fa-envelope"></i> E-mail</label>
-                            <div class="field-input">
-                                <i class="fas fa-envelope field-input__icon" aria-hidden="true"></i>
-                                <input type="email" id="registerEmail" maxlength="320" placeholder="voce@exemplo.com" autocomplete="email" required>
-                            </div>
-                        </div>
                         <div class="field-group">
                             <label class="field-label" for="registerUsername"><i class="fas fa-user"></i> Nome de usuário</label>
                             <div class="field-input">
@@ -137,6 +154,7 @@
                     <button type="button" class="btn-close" onclick="closeProfileModal()" aria-label="Fechar perfil">&times;</button>
                 </div>
                 <form id="profileForm">
+                    <input type="hidden" id="profileTimezone">
                     <select id="profileGender" class="field-hidden" hidden>
                         <option value="">Selecione...</option>
                         <option value="masculino">Masculino</option>
@@ -207,7 +225,7 @@
                             <div class="profile-section__label"><span class="profile-section__icon"><i class="fas fa-ruler-vertical"></i></span><div><strong>Altura</strong><small>cm</small></div></div>
                             <div class="stepper" data-field="profileHeight">
                                 <button type="button" class="stepper__btn stepper__minus" aria-label="Diminuir altura"><i class="fas fa-minus"></i></button>
-                                <input type="number" id="profileHeight" class="stepper__input" step="1" min="0" value="" placeholder="—">
+                                <input type="text" id="profileHeight" class="stepper__input" inputmode="decimal" value="" placeholder="Ex: 180 ou 1,80">
                                 <button type="button" class="stepper__btn stepper__plus" aria-label="Aumentar altura"><i class="fas fa-plus"></i></button>
                             </div>
                         </div>
@@ -219,7 +237,7 @@
                     </section>
 
                     <div class="sheet-actions">
-                        <button type="button" onclick="skipProfile()" class="btn-secondary">Pular por Agora</button>
+                        <button type="button" id="profileSkipButton" onclick="skipProfile()" class="btn-secondary">Pular por Agora</button>
                         <button type="submit" class="btn-primary">Salvar Perfil</button>
                     </div>
                 </form>
@@ -227,7 +245,7 @@
         </div>
     </div>
 
-    <div id="mainScreen" class="screen">
+    <div id="mainScreen" class="screen hidden">
         <p id="authSessionStatus" role="status" aria-live="polite">Preparando seu dia…</p>
         <header class="app-header">
             <div class="app-header__inner">
@@ -568,7 +586,7 @@
             <div class="modal-content network-sheet">
                 <div class="modal-header"><div><span class="content-kicker">Sua rede</span><h3 id="networkModalTitle">Pessoas e solicitações</h3><p>Seu perfil público não expõe dieta, medidas ou histórico de saúde.</p></div><button type="button" class="btn-close" onclick="closeAppModal(document.getElementById('networkModal'))" aria-label="Fechar">&times;</button></div>
                 <div class="network-settings">
-                    <div class="network-avatar-editor"><img id="networkAvatarPreview" class="hidden" alt="Sua foto"><span id="networkAvatarFallback">U</span><label class="btn-secondary">Escolher foto<input id="networkAvatarInput" type="file" accept="image/jpeg,image/png,image/webp" hidden></label><button id="networkAvatarRemove" type="button" class="btn-link">Remover</button></div>
+                    <div class="network-avatar-editor"><img id="networkAvatarPreview" class="hidden" alt="Sua foto"><span id="networkAvatarFallback">U</span><button id="networkAvatarChoose" type="button" class="btn-secondary">Escolher foto</button><input id="networkAvatarInput" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" hidden><button id="networkAvatarRemove" type="button" class="btn-link">Remover</button></div>
                     <label class="legal-check"><input id="publicProfileToggle" type="checkbox"><span>Permitir que outros usuários encontrem meu perfil</span></label>
                     <label id="externalReviewsSetting" class="legal-check hidden"><input id="externalReviewsToggle" type="checkbox"><span>Aceitar revisões avulsas de treino</span></label>
                     <label id="externalDietReviewsSetting" class="legal-check hidden"><input id="externalDietReviewsToggle" type="checkbox"><span>Aceitar revisões avulsas de dieta</span></label>
@@ -790,7 +808,7 @@
                         </div>
                         <div class="form-group">
                             <label for="measurementHeight">Altura (cm)</label>
-                            <input type="number" id="measurementHeight" step="0.1" min="0">
+                            <input type="text" id="measurementHeight" inputmode="decimal" placeholder="Ex: 180 ou 1,80">
                         </div>
                     </div>
                     <div class="form-row">
@@ -976,6 +994,8 @@
     <script defer src="/fluid.js?v=20260828-achievements"></script>
     <script defer src="/js/exercise-media.js?v=20260828-achievements"></script>
     <script defer src="/js/utils.js?v=20260914-ios-fluid"></script>
+    <script defer src="/js/offline.js?v=20260917-offline"></script>
+    <script defer src="/js/image-input.js?v=20260917-offline"></script>
     <script defer src="/js/analytics.js?v=20260829-funnel"></script>
     <script defer src="/js/body-evolution.js?v=20260909"></script>
     <script defer src="/script.js?v=20260914-ios-fluid"></script>

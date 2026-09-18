@@ -26,6 +26,10 @@
 	<string>$(GOOGLE_IOS_CLIENT_ID)</string>
 	<key>GIDServerClientID</key>
 	<string>$(GOOGLE_SERVER_CLIENT_ID)</string>
+	<key>NSCameraUsageDescription</key>
+	<string>O Fit Tracker usa a câmera para registrar sua foto de perfil e refeições.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>O Fit Tracker usa sua fototeca para selecionar fotos de perfil e refeições.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

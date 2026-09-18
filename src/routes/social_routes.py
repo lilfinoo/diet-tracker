@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from src.legal import PROFESSIONAL_SHARING_VERSION
 from src.models.user import ProfessionalStudentRelationship, User, UserProfile, db
-from src.routes.common import json_body, login_required, page_query
+from src.routes.common import idempotent_mutation, json_body, login_required, page_query
 from src.services.badges import serialize_profile_highlights
 from src.services.media_storage import (
     MediaStorageError,
@@ -132,6 +132,7 @@ def update_public_profile():
 
 @social_bp.route("/profile/avatar", methods=["POST", "DELETE"])
 @login_required
+@idempotent_mutation
 @rate_limit("avatar", 10, 3600)
 def own_avatar():
     profile = _profile_for(g.user)

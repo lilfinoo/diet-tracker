@@ -161,7 +161,17 @@ class User(db.Model):
     def account_name(self):
         return self.name or self.username
 
+    def profile_onboarding_state(self):
+        if not self.profile:
+            return {
+                "onboarding_status": "new",
+                "profile_missing_fields": list(UserProfile.REQUIRED_ONBOARDING_FIELDS),
+                "profile_complete": False,
+            }
+        return self.profile.onboarding_state()
+
     def session_dict(self):
+        onboarding = self.profile_onboarding_state()
         return {
             "id": self.id,
             "username": self.username,
@@ -185,6 +195,7 @@ class User(db.Model):
             ),
             "badges": [badge.to_dict() for badge in self.badges],
             "profile_highlights": [highlight.to_dict() for highlight in self.profile_highlights],
+            **onboarding,
         }
 
     def admin_dict(self):
@@ -411,6 +422,23 @@ class AnalyticsEvent(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
+class IdempotentOperation(db.Model):
+    __tablename__ = "idempotent_operation"
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "idempotency_key", name="uq_idempotent_operation_user_key"),
+        db.Index("ix_idempotent_operation_user_created", "user_id", "created_at"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    idempotency_key = db.Column(db.String(128), nullable=False)
+    method = db.Column(db.String(8), nullable=False)
+    path = db.Column(db.String(255), nullable=False)
+    status_code = db.Column(db.Integer, nullable=False)
+    response_payload = db.Column(db.JSON, nullable=False, default=dict)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
 class AITask(db.Model):
     __tablename__ = "ai_task"
     __table_args__ = (
@@ -499,6 +527,10 @@ class ProfessionalApplication(db.Model):
         }
 
 class UserProfile(db.Model):
+    REQUIRED_ONBOARDING_FIELDS = ("goal", "activity_level", "age", "gender", "weight", "height")
+    VALID_GENDERS = {"masculino", "homem", "male", "feminino", "mulher", "female"}
+    VALID_ACTIVITY_LEVELS = {"sedentario", "leve", "moderado", "intenso"}
+
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=False, unique=True) # Perfil único por usuário
     age = db.Column(db.Integer, nullable=True)
@@ -577,6 +609,38 @@ class UserProfile(db.Model):
             "workout_schedule_timezone": self.workout_schedule_timezone,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
+        }
+
+    def onboarding_missing_fields(self):
+        missing = []
+        if not self.goal:
+            missing.append("goal")
+        activity = str(self.activity_level or "").strip().lower()
+        if activity not in self.VALID_ACTIVITY_LEVELS:
+            missing.append("activity_level")
+        try:
+            age = int(self.age) if self.age is not None else None
+        except (TypeError, ValueError):
+            age = None
+        if age is None or not 18 <= age <= 120:
+            missing.append("age")
+        gender = str(self.gender or "").strip().lower()
+        if gender not in self.VALID_GENDERS:
+            missing.append("gender")
+        weight = self.weight
+        if weight is None or not 30 <= float(weight) <= 300:
+            missing.append("weight")
+        height = self.height
+        if height is None or not 120 <= float(height) <= 250:
+            missing.append("height")
+        return missing
+
+    def onboarding_state(self):
+        missing = self.onboarding_missing_fields()
+        return {
+            "onboarding_status": "complete" if not missing else "incomplete",
+            "profile_missing_fields": missing,
+            "profile_complete": not missing,
         }
 
 class ChatMessage(db.Model):

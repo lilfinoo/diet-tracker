@@ -6,10 +6,11 @@ import unicodedata
 from functools import wraps
 
 from itsdangerous import URLSafeTimedSerializer
+from sqlalchemy.exc import IntegrityError
 
 from flask import abort, current_app, jsonify, request, session
 
-from src.models.user import User, db
+from src.models.user import IdempotentOperation, User, db
 from src.services.analytics import record_event
 
 
@@ -65,6 +66,58 @@ def login_required(f):
         from flask import g
         g.user = g_user
         return f(*args, **kwargs)
+
+    return decorated_function
+
+
+def idempotent_mutation(f):
+    """Replay the original JSON response for a repeated mutation key."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        key = request.headers.get("Idempotency-Key", "").strip()
+        if not key:
+            return f(*args, **kwargs)
+        if len(key) > 128:
+            return jsonify({"error": "Idempotency-Key inválida."}), 400
+
+        user_id = session.get("user_id")
+        existing = IdempotentOperation.query.filter_by(
+            user_id=user_id,
+            idempotency_key=key,
+        ).first()
+        if existing:
+            if existing.method != request.method or existing.path != request.path:
+                return jsonify({"error": "A chave de idempotência já foi usada em outra operação."}), 409
+            return jsonify(existing.response_payload), existing.status_code
+
+        response = current_app.make_response(f(*args, **kwargs))
+        if not 200 <= response.status_code < 300 or not response.is_json:
+            return response
+        payload = response.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return response
+
+        operation = IdempotentOperation(
+            user_id=user_id,
+            idempotency_key=key,
+            method=request.method,
+            path=request.path,
+            status_code=response.status_code,
+            response_payload=payload,
+        )
+        db.session.add(operation)
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            existing = IdempotentOperation.query.filter_by(
+                user_id=user_id,
+                idempotency_key=key,
+            ).first()
+            if existing:
+                return jsonify(existing.response_payload), existing.status_code
+            raise
+        return response
 
     return decorated_function
 
@@ -199,16 +252,31 @@ def __getattr__(name):
     raise AttributeError(f"module 'src.routes.common' has no attribute {name!r}")
 
 
-def coerce_numbers(data, fields):
+def _coerce_number(value):
+    if isinstance(value, bool):
+        raise ValueError
+    if isinstance(value, str):
+        value = value.strip().replace(",", ".")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError
+    return number
+
+
+def normalize_height(value):
+    number = _coerce_number(value)
+    if 0 < number <= 3:
+        number *= 100
+    return round(number, 6)
+
+
+def coerce_numbers(data, fields, *, height_fields=()):
     data = data.copy()
+    height_fields = set(height_fields)
     try:
         for field in fields:
             if field in data and data[field] not in (None, ""):
-                if isinstance(data[field], bool):
-                    raise ValueError
-                data[field] = float(data[field])
-                if not math.isfinite(data[field]):
-                    raise ValueError
+                data[field] = normalize_height(data[field]) if field in height_fields else _coerce_number(data[field])
             elif field in data:
                 data[field] = None
     except (TypeError, ValueError):

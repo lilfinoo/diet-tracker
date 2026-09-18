@@ -351,7 +351,7 @@
         let data = {};
         try {
             response = await fetch(`${API_BASE}${path}`, fetchOptions);
-            data = await response.json();
+            data = await response.json().catch(() => ({}));
         } catch (error) {
             if (options.signal?.aborted) throw error;
             const connectionError = new Error(timedOut
@@ -2440,6 +2440,38 @@
             : "";
     }
 
+    async function preloadWorkoutAssets(day) {
+        const exercises = asArray(day?.exercises);
+        await Promise.all(exercises.flatMap((original) => {
+            const exercise = displayedExercise(original).exercise;
+            const paths = [exerciseImage(exercise), typeof exerciseFallbackImagePath === "function" ? exerciseFallbackImagePath(exercise?.catalog_key) : ""];
+            return paths.filter(Boolean).map((src) => new Promise((resolve) => {
+                const image = new Image();
+                image.onload = () => {
+                    if (!image.decode) return resolve();
+                    image.decode().catch(() => {}).finally(resolve);
+                };
+                image.onerror = resolve;
+                image.src = src;
+            }));
+        }));
+    }
+
+    async function preloadReplacementOptions(day, session) {
+        if (!session || navigator.onLine === false) return;
+        const account = workoutAccount();
+        const payload = replacementPayload();
+        await Promise.allSettled(asArray(day?.exercises).map(async (exercise) => {
+            const key = String(exercise.id);
+            const cacheKey = `workout:options:${account}:${session.id}:${key}:${JSON.stringify(session.overrides)}`;
+            const cached = window.AppReadCache?.peek(cacheKey);
+            if (cached && Date.now() - cached.at < 60000) return;
+            const path = `/workout_sessions/${apiSegment(session.id)}/exercises/${apiSegment(key)}/replacement_options`;
+            const result = await apiRequest(path, { method: "POST", body: payload, timeout: 30000 });
+            if (window.AppReadCache) await window.AppReadCache.read(cacheKey, () => result, { ttl: 60000, force: true });
+        }));
+    }
+
     function exerciseImageMarkup(exercise, eager = false) {
         const imagePath = exerciseImage(exercise);
         const fallbackPath = typeof exerciseFallbackImagePath === "function"
@@ -2726,6 +2758,8 @@
         const { exercise, override } = displayedExercise(currentOriginal);
         const panel = workoutView.replacementPanels.get(currentId);
         const currentIndex = exercises.indexOf(currentOriginal);
+        const nextOriginal = exercises[currentIndex + 1];
+        const nextExercise = nextOriginal ? displayedExercise(nextOriginal).exercise : null;
         const exerciseDone = completedIds.has(currentId);
         const exerciseSkipped = workoutView.skippedExerciseIds.has(currentId);
         const details = [
@@ -2768,6 +2802,7 @@
             <section class="active-workout-shell active-workout-shell--immersive">
                 <article class="current-exercise-stage current-exercise-stage--player${exerciseDone ? " is-completed-view" : exerciseSkipped ? " is-skipped-view" : ""}" data-workout-exercise-card data-exercise-id="${esc(currentOriginal.id)}">
                     <figure class="current-exercise-media">${exerciseImageMarkup(exercise, true)}</figure>
+                    ${nextExercise ? `<figure class="current-exercise-next-preview" aria-hidden="true">${exerciseImageMarkup(nextExercise, true)}</figure>` : ""}
                     ${toolbar}
                     ${navigation}
                     <div class="current-exercise-content current-exercise-content--overlay">
@@ -3224,6 +3259,7 @@
             if (workoutView.session) {
                 workoutView.editMode = false;
                 hydrateWorkoutDrafts(workoutView.session);
+                await preloadWorkoutAssets(day);
                 activeWorkoutSummary = {
                     session: workoutView.session,
                     plan: { id: workoutView.plan.id, title: workoutView.plan.title },
@@ -3286,10 +3322,14 @@
             workoutView.selectedDay = Math.max(0, workoutView.days.findIndex(day => String(day.id) === String(target)));
             workoutView.session = session;
             workoutView.sessionLoading = false;
-            if (session) hydrateWorkoutDrafts(session);
+            if (session) {
+                hydrateWorkoutDrafts(session);
+                await preloadWorkoutAssets(workoutView.days[workoutView.selectedDay]);
+            }
             activeWorkoutSummary = active;
             renderActiveWorkoutDock();
             byId("viewWorkoutPlanTitle").textContent = plan.title || "Plano de treino";
+            if (session) preloadReplacementOptions(workoutView.days[workoutView.selectedDay], session).catch(() => {});
             renderWorkoutDetail({preserveScroll: true});
             apiRequest(`/workout_plans/${apiSegment(id)}/professional-review`).then(result => {
                 if (!workoutContextCurrent(account, version)) return;
@@ -3434,7 +3474,16 @@
         try {
             const cacheKey = `workout:options:${account}:${session.id}:${key}:${JSON.stringify(session.overrides)}`;
             const cached = window.AppReadCache?.peek(cacheKey);
-            const result = cached && Date.now() - cached.at < 60000 ? cached.data : await apiRequest(`/workout_sessions/${apiSegment(session.id)}/exercises/${key}/replacement_options`, {method: "POST", body: payload, timeout: 30000, signal: panel.controller.signal});
+            const optionsPath = `/workout_sessions/${apiSegment(session.id)}/exercises/${key}/replacement_options`;
+            let result;
+            if (cached && Date.now() - cached.at < 60000) result = cached.data;
+            else if (navigator.onLine === false) {
+                const snapshot = await window.AppOffline?.readSnapshot(`${API_BASE}${optionsPath}`);
+                if (!snapshot?.data) throw new Error("Conecte-se para carregar alternativas deste exercício.");
+                result = snapshot.data;
+            } else {
+                result = await apiRequest(optionsPath, {method: "POST", body: payload, timeout: 30000, signal: panel.controller.signal});
+            }
             if (!workoutContextCurrent(account, version, session.id) || workoutView.replacementPanels.get(key) !== panel) return;
             if (window.AppReadCache) await window.AppReadCache.read(cacheKey, () => result, {ttl: 60000, force: true});
             Object.assign(panel, {loading: false, options: asArray(result.options), message: result.message || "", error: ""});
@@ -3679,7 +3728,14 @@
             return false;
         }
         return performSessionMutation(`complete-${exercise.id}`, `/workout_sessions/${apiSegment(session.id)}/exercises/${apiSegment(exercise.id)}/complete`, {method: "POST", body: {sets}}, result => {
-            workoutView.session = result.session;
+            const optimisticIds = [...completedWorkoutExerciseIds(), String(exercise.id)];
+            workoutView.session = result.session || {
+                ...session,
+                completed_exercise_ids: optimisticIds,
+            };
+            if (!result.session) {
+                workoutView.sessionError = "Concluído neste dispositivo. Aguardando sincronização.";
+            }
             workoutView.completedSetCounts.set(String(exercise.id), sets.length);
             workoutView.skippedExerciseIds.delete(String(exercise.id));
             clearWorkoutExerciseDraft(session.id, exercise.id);

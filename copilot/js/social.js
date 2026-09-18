@@ -4,6 +4,10 @@
     const byId = (id) => document.getElementById(id);
     const esc = (value) => escapeHtml(value == null ? "" : String(value));
     const asArray = (value) => Array.isArray(value) ? value : [];
+    const mediaUrl = (value) => {
+        const url = String(value || "");
+        return url.startsWith("/") && window.FIT_TRACKER_API_ORIGIN ? `${window.FIT_TRACKER_API_ORIGIN}${url}` : url;
+    };
 
     function renderRequestCount() {
         const count = byId("networkRequestCount");
@@ -37,14 +41,14 @@
             const image = byId(imageId);
             const fallback = byId(fallbackId);
             if (image) {
-                image.src = url || "";
+                image.src = mediaUrl(url);
                 image.classList.toggle("hidden", !url);
             }
             fallback?.classList.toggle("hidden", Boolean(url));
         });
         const preview = byId("networkAvatarPreview");
         if (preview) {
-            preview.src = url || "";
+            preview.src = mediaUrl(url);
             preview.classList.toggle("hidden", !url);
         }
         const previewFallback = byId("networkAvatarFallback");
@@ -63,7 +67,7 @@
 
     function profileCard(profile) {
         const initial = esc(String(profile.username || "U").charAt(0).toUpperCase());
-        return `<article class="network-card"><div class="network-card__avatar">${profile.avatar_url ? `<img src="${esc(profile.avatar_url)}" alt="">` : `<span>${initial}</span>`}</div><div><strong>${esc(profile.username)}</strong><small>${profile.is_professional ? `Profissional · ${esc(profile.professional_scope || "")}` : "Aluno"}</small></div><div class="network-card__actions">${connectionActions(profile)}</div></article>`;
+        return `<article class="network-card"><div class="network-card__avatar">${profile.avatar_url ? `<img src="${esc(mediaUrl(profile.avatar_url))}" alt="">` : `<span>${initial}</span>`}</div><div><strong>${esc(profile.username)}</strong><small>${profile.is_professional ? `Profissional · ${esc(profile.professional_scope || "")}` : "Aluno"}</small></div><div class="network-card__actions">${connectionActions(profile)}</div></article>`;
     }
 
     async function search() {
@@ -155,9 +159,10 @@
         if (input) input.dataset.uploading = "true";
         if (input) input.disabled = true;
         const form = new FormData();
+        let blob;
         try {
             const image = await downscaleImageFile(file, 1200);
-            const blob = await fetch(image.dataUrl).then(response => response.blob());
+            blob = await fetch(image.dataUrl).then(response => response.blob());
             form.append("photo", blob, "avatar.jpg");
         } catch (error) {
             showToast("Não foi possível preparar a foto. Escolha JPG/PNG ou tente outra imagem.", "error");
@@ -170,14 +175,18 @@
             const response = await window.fetchWithTimeout(`${API_BASE}/profile/avatar`, { method: "POST", credentials: "include", body: form }, 60_000);
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || "Não foi possível atualizar a foto.");
-            currentUser.avatar_url = data.avatar_url;
-            showAvatar(data.avatar_url);
-            showToast(data.message, "success");
+            const localUrl = URL.createObjectURL(blob);
+            if (data.queued) await window.AppOffline?.saveMedia("avatar-pending", blob, { type: "avatar" });
+            currentUser.avatar_url = data.avatar_url || localUrl;
+            window.currentUser = currentUser;
+            showAvatar(currentUser.avatar_url);
+            showToast(data.message || "Foto atualizada.", "success");
         } catch (error) {
             showToast(error.message, "error");
         } finally {
             delete input?.dataset.uploading;
             if (input) input.disabled = false;
+            if (input) input.value = "";
             input?.removeAttribute("aria-busy");
         }
     }
@@ -224,6 +233,10 @@
 
     document.addEventListener("click", async (event) => {
         if (event.target.closest("#networkSearchButton")) search();
+        if (event.target.closest("#networkAvatarChoose")) {
+            const pickerRequest = window.FitTrackerImagePicker?.open({ inputId: "networkAvatarInput", onFile: uploadPhoto });
+            pickerRequest?.catch(() => showToast("Não foi possível abrir a câmera ou fototeca.", "error"));
+        }
         if (event.target.closest("#networkAvatarRemove")) removePhoto();
         const connectButton = event.target.closest("[data-network-connect]");
         if (connectButton) connect(connectButton.dataset.networkUsername, connectButton.dataset.networkConnect);
@@ -244,4 +257,16 @@
     window.loadNetworkInbox = loadInbox;
     window.applyCurrentUserAvatar = showAvatar;
     window.setNetworkReviewCount = setNetworkReviewCount;
+    window.addEventListener("fittracker:offline-synced", async (event) => {
+        if (!String(event.detail?.url || "").includes("/profile/avatar")) return;
+        try {
+            const result = await api("/profile");
+            const avatarUrl = result.profile?.avatar_url || null;
+            currentUser.avatar_url = avatarUrl;
+            window.currentUser = currentUser;
+            showAvatar(avatarUrl);
+            await window.AppOffline?.removeMedia("avatar-pending");
+            showToast("Foto sincronizada.", "success");
+        } catch (_error) { /* Reconcile again on the next foreground sync. */ }
+    });
 })();

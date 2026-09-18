@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, abort, current_app, g, jsonify, request, send_file
 
 from src.models.user import AnalyticsEvent, DietEntry, Measurement, UserProfile, db
-from src.routes.common import _local_date_for_timezone, _require_lengths, ai_consent_required, coerce_numbers, json_body, login_required, page_query, premium_required
+from src.routes.common import _local_date_for_timezone, _require_lengths, ai_consent_required, coerce_numbers, idempotent_mutation, json_body, login_required, page_query, premium_required
 from src.services.badges import BADGE_CODES, available_profile_items, apply_profile_highlights, serialize_badges, serialize_profile_highlights
 from src.services.ai import AIQuotaExceededError, AIResponseError, AIServiceError, AIServiceUnavailableError, calculate_nutrition
 from src.services.analytics import record_event
@@ -41,8 +41,8 @@ def _validate_measurement_values(data):
 def get_profile():
     profile = UserProfile.query.filter_by(user_id=g.user.id).first()
     if profile:
-        return jsonify({"profile": profile.to_dict()}), 200
-    return jsonify({"profile": None}), 200
+        return jsonify({"profile": profile.to_dict(), **g.user.profile_onboarding_state()}), 200
+    return jsonify({"profile": None, **g.user.profile_onboarding_state()}), 200
 
 
 @profile_bp.route("/profile/badges", methods=["GET"])
@@ -82,7 +82,7 @@ def profile_highlights():
 @login_required
 def update_profile():
     user = g.user
-    data = coerce_numbers(json_body(), ("age", "weight", "height"))
+    data = coerce_numbers(json_body(), ("age", "weight", "height"), height_fields=("height",))
     _require_lengths(data, {
         "gender": (10, "Gênero"),
         "goal": (100, "Objetivo"),
@@ -148,11 +148,16 @@ def update_profile():
             user_id=user.id,
         )
     db.session.commit()
-    return jsonify({"message": "Perfil atualizado com sucesso", "profile": profile.to_dict()}), 200
+    return jsonify({
+        "message": "Perfil atualizado com sucesso",
+        "profile": profile.to_dict(),
+        **user.profile_onboarding_state(),
+    }), 200
 
 
 @profile_bp.route("/diet", methods=["POST"])
 @login_required
+@idempotent_mutation
 def add_diet_entry():
     user = g.user
     data = coerce_numbers(json_body(), ("calories", "protein", "carbs", "fat"))
@@ -230,6 +235,7 @@ def get_diet_entries():
 
 @profile_bp.route("/diet/<int:entry_id>", methods=["PUT"])
 @login_required
+@idempotent_mutation
 def update_diet_entry(entry_id):
     user = g.user
     data = coerce_numbers(json_body(), ("calories", "protein", "carbs", "fat"))
@@ -366,9 +372,14 @@ def get_exercise_media(catalog_key):
 
 @profile_bp.route("/measurements", methods=["POST"])
 @login_required
+@idempotent_mutation
 def add_measurement():
     user = g.user
-    data = coerce_numbers(json_body(), ("weight", "height", "body_fat", "muscle_mass", "waist", "chest", "arm", "thigh"))
+    data = coerce_numbers(
+        json_body(),
+        ("weight", "height", "body_fat", "muscle_mass", "waist", "chest", "arm", "thigh"),
+        height_fields=("height",),
+    )
     _require_lengths(data, {"notes": (2000, "Observações")})
     date_str = data.get("date")
     if not date_str:
@@ -461,9 +472,14 @@ def measurement_summary():
 
 @profile_bp.route("/measurements/<int:measurement_id>", methods=["PUT"])
 @login_required
+@idempotent_mutation
 def update_measurement(measurement_id):
     user = g.user
-    data = coerce_numbers(json_body(), ("weight", "height", "body_fat", "muscle_mass", "waist", "chest", "arm", "thigh"))
+    data = coerce_numbers(
+        json_body(),
+        ("weight", "height", "body_fat", "muscle_mass", "waist", "chest", "arm", "thigh"),
+        height_fields=("height",),
+    )
     _require_lengths(data, {"notes": (2000, "Observações")})
     measurement = Measurement.query.filter_by(id=measurement_id, user_id=user.id).first_or_404()
     validation_error = _validate_measurement_values(data)

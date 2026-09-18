@@ -85,7 +85,9 @@ def create_app(config_class=None):
     if app.config["IS_PRODUCTION"]:
         ProductionConfig.validate(app.config)
 
-    cors_origins = app.config["CORS_ORIGINS"]
+    cors_origins = list(app.config["CORS_ORIGINS"])
+    if "capacitor://localhost" not in cors_origins:
+        cors_origins.append("capacitor://localhost")
     if cors_origins:
         CORS(app, supports_credentials=True, origins=cors_origins)
 
@@ -144,7 +146,10 @@ def create_app(config_class=None):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "same-origin")
-        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        response.headers.setdefault(
+            "Permissions-Policy",
+            'camera=(self "capacitor://localhost"), microphone=(), geolocation=()',
+        )
         if app.config["HSTS_ENABLED"]:
             response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         if request.path in {"/", "/app", "/app/"} or request.path.startswith("/app/"):

@@ -277,26 +277,55 @@ if (typeof window !== "undefined") {
 if (typeof window !== "undefined" && typeof window.fetch === "function" && !window.__csrfFetchPatched) {
     const originalFetch = window.fetch.bind(window);
     window.__csrfFetchPatched = true;
-    window.fetch = function(input, init = {}) {
-        const request = typeof input === "string" ? new Request(input, init) : new Request(input, init);
+    window.fetch = async function(input, init = {}) {
+        const configuredOrigin = window.FIT_TRACKER_CONFIG?.apiOrigin || document.querySelector('meta[name="fit-tracker-api-origin"]')?.content || window.location.origin;
+        const configuredApiOrigin = (document.documentElement.dataset.nativePlatform === "ios" ? configuredOrigin : window.location.origin).replace(/\/$/, "");
+        const inputUrl = new URL(typeof input === "string" ? input : input.url, window.location.origin);
+        if (inputUrl.pathname.startsWith("/api/") && inputUrl.origin === window.location.origin && configuredApiOrigin !== window.location.origin) {
+            const rewritten = `${configuredApiOrigin}${inputUrl.pathname}${inputUrl.search}`;
+            input = input instanceof Request ? new Request(rewritten, input) : rewritten;
+        }
+        const request = new Request(input, init);
         const method = (request.method || "GET").toUpperCase();
         const unsafe = !["GET", "HEAD", "OPTIONS", "TRACE"].includes(method);
         const url = new URL(request.url, window.location.origin);
-        const isApiRequest = url.origin === window.location.origin && url.pathname.startsWith("/api/");
+        const isApiRequest = url.pathname.startsWith("/api/") && (url.origin === window.location.origin || url.origin === configuredApiOrigin);
         let prepared = request;
-        if (unsafe && isApiRequest && csrfToken) {
+        if (unsafe && isApiRequest) {
             const headers = new Headers(request.headers);
-            if (!headers.has("X-CSRF-Token")) headers.set("X-CSRF-Token", csrfToken);
+            if (csrfToken && !headers.has("X-CSRF-Token")) headers.set("X-CSRF-Token", csrfToken);
+            if (window.AppOffline?.allowedMutation(url, method) && !headers.has("Idempotency-Key")) {
+                headers.set("Idempotency-Key", window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+            }
             prepared = new Request(request, { headers });
         }
         const ownerVersion = AppReadCache.accountVersion;
-        return originalFetch(prepared).then(response => {
+        if (window.AppOffline?.allowedMutation(url, method) && navigator.onLine === false && !request.headers.has("X-Offline-Replay")) {
+            return window.AppOffline.enqueue(prepared, url);
+        }
+        try {
+            const response = await originalFetch(prepared);
             if (response.ok && unsafe && isApiRequest && ownerVersion === AppReadCache.accountVersion &&
                 /^\/api\/(diet(?:\/|$)|diet_plans(?:\/|$)|profile(?:\/|$))/.test(url.pathname)) {
                 AppReadCache.invalidate('diet:');
             }
+            if (response.ok && isApiRequest && (!unsafe || /\/replacement_options(?:\?|$)/.test(url.pathname))) window.AppOffline?.saveSnapshot(url, response);
+            if (response.ok && unsafe) window.AppOffline?.sync();
             return response;
-        });
+        } catch (error) {
+            if (window.AppOffline?.allowedMutation(url, method) && !request.signal?.aborted && !request.headers.has("X-Offline-Replay")) {
+                return window.AppOffline.enqueue(prepared, url, "connection");
+            }
+            if (!unsafe && isApiRequest && window.AppOffline) {
+                const cached = await window.AppOffline.readSnapshot(url);
+                if (cached?.data) {
+                    document.body.dataset.offline = "true";
+                    window.updateOfflineStatus?.();
+                    return new Response(JSON.stringify(cached.data), { status: 200, headers: { "Content-Type": "application/json", "X-FitTracker-Cache": "stale" } });
+                }
+            }
+            throw error;
+        }
     };
 }
 

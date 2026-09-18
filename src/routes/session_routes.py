@@ -19,7 +19,7 @@ from src.models.user import (
     WorkoutSetPerformance,
     db,
 )
-from src.routes.common import _activity_list_item, _ensure_user_workout_history, _owned_active_session, _performed_sets_payload, _session_exercise, _workout_session_summary, ai_consent_error, json_body, login_required
+from src.routes.common import _activity_list_item, _ensure_user_workout_history, _owned_active_session, _performed_sets_payload, _session_exercise, _workout_session_summary, ai_consent_error, idempotent_mutation, json_body, login_required
 from src.services.ai import AIQuotaExceededError, AIServiceError, classify_exercise_catalog_key
 from src.services.achievements import evaluate_achievements, reconcile_achievements, serialize_unlock
 from src.services.analytics import record_event
@@ -209,6 +209,7 @@ def get_exercise_replacement_options(session_id, exercise_id):
 
 @session_bp.route("/workout_sessions/<int:session_id>/exercises/<int:exercise_id>/replace", methods=["POST"])
 @login_required
+@idempotent_mutation
 def replace_exercise_for_session(session_id, exercise_id):
     session_record = _owned_active_session(session_id)
     exercise = _session_exercise(session_record, exercise_id) if session_record else None
@@ -273,6 +274,7 @@ def restore_session_exercise(session_id, exercise_id):
 
 @session_bp.route("/workout_sessions/<int:session_id>/exercises/<int:exercise_id>/complete", methods=["POST"])
 @login_required
+@idempotent_mutation
 def complete_session_exercise(session_id, exercise_id):
     session_record = _owned_active_session(session_id)
     exercise = _session_exercise(session_record, exercise_id) if session_record else None
@@ -343,6 +345,7 @@ def save_session_exercise_draft(session_id, exercise_id):
 
 @session_bp.route("/workout_sessions/<int:session_id>/finish", methods=["POST"])
 @login_required
+@idempotent_mutation
 def finish_workout_session(session_id):
     User.query.filter_by(id=g.user.id).with_for_update().first()
     session_record = WorkoutSession.query.filter_by(

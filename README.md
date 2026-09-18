@@ -34,7 +34,7 @@ As associações aprovadas e seus IDs exatos de imagem ficam em `scripts/wger-ov
 
 ## Deploy (Render)
 
-Defina as envs: `APP_ENV=production`, `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, `GEMINI_API_KEY`, `WORKOUTX_API_KEY`, `SESSION_COOKIE_SECURE=true`, `CORS_ORIGINS`, `METRICS_ENABLED=true`, `METRICS_TOKEN` e as quatro variáveis `MEDIA_R2_*`. No Render:
+Defina as envs: `APP_ENV=production`, `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, `GEMINI_API_KEY`, `WORKOUTX_API_KEY`, `SESSION_COOKIE_SECURE=true`, `SESSION_COOKIE_SAMESITE=None`, `CORS_ORIGINS`, `METRICS_ENABLED=true`, `METRICS_TOKEN` e as quatro variáveis `MEDIA_R2_*`. `CORS_ORIGINS` deve conter a origem web publicada; `capacitor://localhost` é adicionado automaticamente para o app iOS empacotado. No Render:
 
 - **Start command**: use o `Procfile`, que aplica migrations e aceita `WEB_CONCURRENCY`/`GUNICORN_THREADS`. Mantenha `WEB_CONCURRENCY=1` enquanto as métricas Prometheus não estiverem em modo multiprocess e ajuste threads/pool somente após teste de carga.
 - **Health check path**: `/api/health`.

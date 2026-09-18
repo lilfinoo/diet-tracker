@@ -2,6 +2,7 @@
 
 // Global variables
 let currentUser = null;
+let currentProfile = null;
 let currentTab = 'diet';
 let lastPrimaryTab = 'diet';
 let dietEntries = [];
@@ -24,6 +25,8 @@ let authRequestInFlight = false;
 let authCheckInFlight = null;
 let lastAuthCheckAt = 0;
 let authState = 'unknown';
+let pendingOnboardingDestination = null;
+let mandatoryOnboarding = false;
 let homeRequestVersion = 0;
 let dietScreenRequestVersion = 0;
 let resumeInFlight = null;
@@ -33,9 +36,13 @@ let secondaryOwner = null;
 let audioInitialized = false;
 let billingReturnHandled = false;
 let profileAchievementsState = { selected: [], achievements: [], badges: [], records: [], limit: 3, filter: 'all', savingToken: null };
+let appBootCompleted = false;
 
-// API Base URL
-const API_BASE = '/api';
+// API Base URL. The native shell is local, so only its API calls use Render.
+const configuredApiOrigin = window.FIT_TRACKER_CONFIG?.apiOrigin || document.querySelector('meta[name="fit-tracker-api-origin"]')?.content || window.location.origin;
+const API_ORIGIN = (document.documentElement.dataset.nativePlatform === 'ios' ? configuredApiOrigin : window.location.origin).replace(/\/$/, '');
+const API_BASE = `${API_ORIGIN}/api`;
+window.FIT_TRACKER_API_ORIGIN = API_ORIGIN;
 const PRIMARY_VIEWS = new Set(['diet', 'diet_plans', 'workout_plans', 'progress', 'stats']);
 const VIEW_LABELS = {
     diet: 'Hoje', diet_plans: 'Dieta', workout_plans: 'Treino', progress: 'Progresso',
@@ -323,7 +330,7 @@ function syncChoiceCards() {
 // Adiciona listeners ao carregar a página
 document.addEventListener('DOMContentLoaded', function() {
     setDefaultDates();
-    checkAuthStatus();
+    bootApp();
     setupAppStyleControls();
     bindTodayMacroControls();
     syncChoiceCards();
@@ -388,6 +395,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Modal close events
     setupModalEvents();
     getElement('loginScreen')?.addEventListener('click', function(event) {
+        if (!currentUser && document.body.dataset.authRequired === 'true') return;
         if (event.target === this) closeAuthModal();
     });
     
@@ -395,6 +403,77 @@ document.addEventListener('DOMContentLoaded', function() {
 
 
 });
+
+function setAppBootState(state, message) {
+    const screen = getElement('appBootScreen');
+    const label = getElement('appBootMessage');
+    if (!screen) return;
+    document.body.dataset.bootState = state;
+    screen.classList.toggle('is-error', state === 'error');
+    screen.classList.toggle('is-offline', state === 'offline' || state === 'offline-empty');
+    if (label && message) label.textContent = message;
+}
+
+function finishAppBoot() {
+    if (appBootCompleted) return;
+    appBootCompleted = true;
+    getElement('appBootScreen')?.setAttribute('hidden', '');
+}
+
+function updateOfflineStatus() {
+    const status = getElement('offlineStatus');
+    if (!status) return;
+    const offline = navigator.onLine === false || document.body.dataset.offline === 'true';
+    status.hidden = !offline;
+}
+
+async function bootApp() {
+    setAppBootState('loading', navigator.onLine === false ? 'Verificando dados salvos neste dispositivo...' : 'Confirmando sua sessão...');
+    const cachedAuth = await window.AppOffline?.readSnapshot(`${API_BASE}/check_session`, 'anonymous');
+    if (navigator.onLine === false) {
+        if (cachedAuth?.data?.logged_in && cachedAuth.data.user) {
+            setCsrfToken(null);
+            setCurrentUser(cachedAuth.data.user);
+            authState = 'authenticated';
+            document.body.dataset.authState = authState;
+            document.body.dataset.offline = 'true';
+            updateOfflineStatus();
+            finishAuthenticatedRoute(viewForPath() || 'diet', { offline: true });
+            const status = getElement('authSessionStatus');
+            if (status) status.textContent = 'Modo offline: seus registros serão sincronizados quando a conexão voltar.';
+            finishAppBoot();
+        } else {
+            setAppBootState('offline-empty', 'Conecte-se uma vez para carregar sua conta neste dispositivo.');
+            getElement('appBootRetry')?.addEventListener('click', () => { setAppBootState('loading', 'Tentando conectar...'); bootApp(); }, { once: true });
+            openAuthLanding();
+        }
+        return;
+    }
+    await checkAuthStatus({ boot: true });
+    if (authState !== 'unknown') {
+        setAppBootState(currentUser ? 'connected' : 'session-expired', currentUser ? 'Conectado.' : 'Entre para continuar.');
+        document.body.dataset.offline = 'false';
+        updateOfflineStatus();
+        finishAppBoot();
+        return;
+    }
+    if (cachedAuth?.data?.logged_in && cachedAuth.data.user) {
+        setAppBootState('offline', 'Servidor indisponível. Exibindo seus últimos dados sincronizados.');
+        setCsrfToken(null);
+        setCurrentUser(cachedAuth.data.user);
+        authState = 'authenticated';
+        document.body.dataset.authState = authState;
+        document.body.dataset.offline = 'true';
+        updateOfflineStatus();
+        finishAuthenticatedRoute(viewForPath() || 'diet', { offline: true });
+        const status = getElement('authSessionStatus');
+        if (status) status.textContent = 'Servidor indisponível. Exibindo seus últimos dados sincronizados.';
+        finishAppBoot();
+    } else {
+        setAppBootState('error', 'Não foi possível iniciar agora.');
+        getElement('appBootRetry')?.addEventListener('click', () => { setAppBootState('loading', 'Tentando conectar...'); bootApp(); }, { once: true });
+    }
+}
 
 async function resumeApp() {
     if (document.hidden || navigator.onLine === false || resumeInFlight || Date.now() - lastResumeAt < 1000) return resumeInFlight;
@@ -412,6 +491,10 @@ async function resumeApp() {
 document.addEventListener('visibilitychange', () => { if (!document.hidden) resumeApp(); });
 window.addEventListener('pageshow', event => { if (event.persisted) resumeApp(); });
 window.addEventListener('online', resumeApp);
+window.addEventListener('online', () => { document.body.dataset.offline = 'false'; updateOfflineStatus(); });
+window.addEventListener('offline', updateOfflineStatus);
+window.addEventListener('fittracker:offline-queued', updateOfflineStatus);
+window.addEventListener('fittracker:offline-synced', updateOfflineStatus);
 
 function scheduleSecondaryLoads(skipProfile = false) {
     const owner = currentUser?.id || 'guest';
@@ -531,6 +614,12 @@ async function handleMeasurementFormSubmit() {
     function parseNumber(val) {
         return val && val !== "" ? Number(val) : null;
     }
+    function parseHeight(val) {
+        if (!val || val === "") return null;
+        const number = Number(String(val).trim().replace(',', '.'));
+        if (!Number.isFinite(number) || number <= 0) return NaN;
+        return number <= 3 ? Math.round(number * 1000) / 10 : number;
+    }
 
     const measurementIdRaw = document.getElementById("measurementId")?.value;
     const measurementId = Number(measurementIdRaw);
@@ -540,7 +629,7 @@ async function handleMeasurementFormSubmit() {
         id: measurementIdRaw,
         date: document.getElementById("measurementDate").value,
         weight: parseNumber(document.getElementById("measurementWeight").value),
-        height: parseNumber(document.getElementById("measurementHeight").value),
+        height: parseHeight(document.getElementById("measurementHeight").value),
         body_fat: parseNumber(document.getElementById("measurementBodyFat").value),
         muscle_mass: parseNumber(document.getElementById("measurementMuscleMass").value),
         waist: parseNumber(document.getElementById("measurementWaist").value),
@@ -549,6 +638,12 @@ async function handleMeasurementFormSubmit() {
         thigh: parseNumber(document.getElementById("measurementThigh").value),
         notes: document.getElementById("measurementNotes").value
     };
+    if (document.getElementById("measurementHeight").value && !Number.isFinite(payload.height)) {
+        showToast("Altura inválida. Use centímetros ou metros, como 180 ou 1,80.", "error");
+        btn.disabled = false;
+        loading.classList.add("hidden");
+        return;
+    }
 
     try {
         const url = isEdit ? `/api/measurements/${measurementId}` : "/api/measurements";
@@ -596,6 +691,7 @@ function setupModalEvents() {
         if (element) {
             element.addEventListener("click", function(e) {
                 if (e.target === this) {
+                    if (modal.id === "profileModal" && mandatoryOnboarding) return;
                     modal.closeFunc();
                 }
             });
@@ -646,6 +742,97 @@ function setDefaultDates() {
 }
 
 // Authentication functions
+function hasCompletedOnboarding(user = currentUser) {
+    return Boolean(user?.profile_complete || user?.onboarding_status === 'complete');
+}
+
+function userNeedsOnboarding(user = currentUser) {
+    return Boolean(user && !hasCompletedOnboarding(user));
+}
+
+function setAuthRequired(required) {
+    document.body.dataset.authRequired = required ? 'true' : 'false';
+}
+
+function setOnboardingRequired(required) {
+    mandatoryOnboarding = Boolean(required);
+    document.body.dataset.onboardingRequired = mandatoryOnboarding ? 'true' : 'false';
+}
+
+function profileTimezoneValue(profile = null) {
+    return profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
+function normalizeNaturalHeight(value) {
+    if (value == null || value === '') return null;
+    const number = Number(String(value).trim().replace(',', '.'));
+    if (!Number.isFinite(number) || number <= 0) return NaN;
+    return number <= 3 ? Math.round(number * 1000) / 10 : number;
+}
+
+function missingOnboardingFieldsFromForm() {
+    const values = {
+        goal: getElement("profileGoal")?.value,
+        activity_level: getElement("profileActivity")?.value,
+        age: Number(getElement("profileAge")?.value),
+        gender: getElement("profileGender")?.value,
+        weight: Number(getElement("profileWeight")?.value),
+        height: normalizeNaturalHeight(getElement("profileHeight")?.value)
+    };
+    const valid = {
+        goal: Boolean(values.goal),
+        activity_level: ["sedentario", "leve", "moderado", "intenso"].includes(String(values.activity_level || '').toLowerCase()),
+        age: Number.isFinite(values.age) && values.age >= 18 && values.age <= 120,
+        gender: Boolean(values.gender),
+        weight: Number.isFinite(values.weight) && values.weight >= 30 && values.weight <= 300,
+        height: Number.isFinite(values.height) && values.height >= 120 && values.height <= 250
+    };
+    return Object.keys(valid).filter(field => !valid[field]);
+}
+
+async function openRequiredOnboarding(destination = null) {
+    if (!currentUser) return;
+    pendingOnboardingDestination = destination || pendingOnboardingDestination || viewForPath() || currentTab || 'diet';
+    setAuthRequired(false);
+    setOnboardingRequired(true);
+    const mainScreen = getElement('mainScreen');
+    if (mainScreen) mainScreen.classList.add('hidden');
+    const status = getElement('authSessionStatus');
+    if (status) status.textContent = 'Complete seu perfil para preparar sua Home.';
+    try {
+        const response = await fetch(`${API_BASE}/profile`, { credentials: 'include' });
+        const data = response.ok ? await response.json() : {};
+        fillProfileForm(data.profile || null);
+    } catch (error) {
+        console.error('Profile load before onboarding failed:', error);
+        fillProfileForm(null);
+    }
+    openAppModal(getElement('profileModal'));
+}
+
+function finishAuthenticatedRoute(destination = null, options = {}) {
+    setAuthRequired(false);
+    if (userNeedsOnboarding()) {
+        openRequiredOnboarding(destination);
+        return;
+    }
+    setOnboardingRequired(false);
+    showMainScreen({ tab: destination || viewForPath() || currentTab || 'diet', ...options });
+}
+
+function openAuthLanding() {
+    setCurrentUser(null);
+    setCsrfToken(null);
+    authState = 'guest';
+    document.body.dataset.authState = authState;
+    setAuthRequired(true);
+    setOnboardingRequired(false);
+    getElement('mainScreen')?.classList.add('hidden');
+    const status = getElement('authSessionStatus');
+    if (status) status.innerHTML = '';
+    openAuthModal('Comece em poucos segundos.', 'choice', { tab: 'diet' });
+}
+
 async function checkAuthStatus(options = {}) {
     if (authCheckInFlight) return authCheckInFlight;
     const ownerVersion = window.AppReadCache?.accountVersion;
@@ -665,8 +852,15 @@ async function checkAuthStatus(options = {}) {
             if (status) status.innerHTML = '';
             if (!currentUser) window.clearWorkoutProgress?.();
             if (currentUser) window.analytics?.trackReturns(currentUser);
-            if (wasUnknown || previousOwner !== currentUser?.id) showMainScreen();
-            else if (!options.resume) showMainScreen({ tab: currentTab, refreshOnly: true });
+            if (!currentUser) {
+                openAuthLanding();
+            } else if (userNeedsOnboarding()) {
+                await openRequiredOnboarding(viewForPath() || currentTab || 'diet');
+            } else if (wasUnknown || previousOwner !== currentUser?.id) {
+                finishAuthenticatedRoute(viewForPath() || currentTab || 'diet');
+            } else if (!options.resume) {
+                showMainScreen({ tab: currentTab, refreshOnly: true });
+            }
             lastAuthCheckAt = Date.now();
             handleBillingReturn();
         } catch (error) {
@@ -705,18 +899,20 @@ function handleBillingReturn() {
 }
 
 // Screen management
-function openAuthModal(reason = 'Entre para salvar seus dados e acompanhar sua evolução.', mode = 'login', intent = null) {
+function openAuthModal(reason = 'Entre para salvar seus dados e acompanhar sua evolução.', mode = 'choice', intent = null) {
     initializeGoogleAuth();
     const loginScreen = getElement('loginScreen');
     const context = getElement('authContext');
     if (context) context.textContent = reason;
     pendingAuthIntent = intent || { tab: currentTab };
     if (mode === 'register') showRegister();
-    else showLogin();
+    else if (mode === 'login') showLogin();
+    else showAuthChoice();
     openAppModal(loginScreen);
 }
 
 function closeAuthModal() {
+    if (!currentUser && document.body.dataset.authRequired === 'true') return;
     pendingAuthIntent = null;
     closeAppModal(getElement('loginScreen'));
     if (viewForPath() !== currentTab) syncViewPath(currentTab, 'replace');
@@ -755,6 +951,7 @@ async function initializeGoogleAuth() {
         if (!config.google_client_id) return;
         getElement('googleAuthSection')?.classList.remove('hidden');
         getElement('googleHeaderButton')?.classList.remove('hidden');
+        getElement('authChoiceGoogleButton')?.classList.remove('hidden');
         if (window.Capacitor?.getPlatform?.() === 'ios') {
             getElement('googleSignInButton')?.replaceChildren();
             const button = document.createElement('button');
@@ -788,6 +985,23 @@ async function initializeGoogleAuth() {
     }
     })();
     return googleAuthReady;
+}
+
+function startAuthChoiceGoogle() {
+    if (window.Capacitor?.getPlatform?.() === 'ios') {
+        startNativeGoogleSignIn();
+        return;
+    }
+    if (window.google?.accounts?.id) {
+        try {
+            google.accounts.id.prompt();
+            return;
+        } catch (error) {
+            console.warn('Google prompt failed:', error);
+        }
+    }
+    showLogin();
+    showAuthMessage('Use o botão do Google abaixo para continuar.', 'info');
 }
 
 async function startNativeGoogleSignIn() {
@@ -851,7 +1065,7 @@ async function handleGoogleCredential(result) {
             return;
         }
         if (!response.ok) throw new Error(data.error || 'Não foi possível entrar com Google. Tente novamente.');
-        completeAuthentication(data.user, data.csrf_token);
+        await completeAuthentication(data.user, data.csrf_token);
     } catch (error) {
         showAuthMessage(error.message, 'error');
     } finally {
@@ -890,7 +1104,7 @@ async function finishGoogleSignup(event) {
         if (!response.ok) throw new Error(data.error || 'Não foi possível concluir o cadastro.');
         googleSignupToken = null;
         getElement('googleUsernameForm')?.classList.add('hidden');
-        completeAuthentication(data.user, data.csrf_token);
+        await completeAuthentication(data.user, data.csrf_token);
     } catch (error) {
         showAuthMessage(error.message, 'error');
     } finally {
@@ -898,16 +1112,15 @@ async function finishGoogleSignup(event) {
     }
 }
 
-function completeAuthentication(user, csrfToken = null) {
+async function completeAuthentication(user, csrfToken = null) {
     setCurrentUser(user);
     setCsrfToken(csrfToken);
     closeAppModal(getElement('loginScreen'));
     const intent = pendingAuthIntent;
     const destination = intent?.tab || viewForPath() || currentTab;
     pendingAuthIntent = null;
-    showMainScreen({ tab: destination, skipProfile: Boolean(intent?.resume) });
-    if (intent?.resume) resumeAfterAuthentication(intent.resume, intent.requiresProfile);
-    else checkUserProfile();
+    finishAuthenticatedRoute(destination, { skipProfile: Boolean(intent?.resume) });
+    if (!userNeedsOnboarding() && intent?.resume) resumeAfterAuthentication(intent.resume, intent.requiresProfile);
     showToast('Você entrou com sucesso.', 'success');
 }
 
@@ -1703,14 +1916,7 @@ async function handleLogin(e) {
 
         const data = await readAuthResponse(response);
         if (response.ok && data.user) {
-            setCurrentUser(data.user);
-            if (data.csrf_token) setCsrfToken(data.csrf_token);
-            const intent = pendingAuthIntent;
-            const destination = intent?.tab || currentTab;
-            pendingAuthIntent = null;
-            showMainScreen({ tab: destination, skipProfile: Boolean(intent?.resume) });
-            showToast(data.message, "success");
-            if (intent?.resume) resumeAfterAuthentication(intent.resume, intent.requiresProfile);
+            await completeAuthentication(data.user, data.csrf_token);
         } else {
             showAuthMessage(data.error || "Não foi possível entrar.", "error");
         }
@@ -1725,13 +1931,11 @@ async function handleLogin(e) {
 
 async function handleRegister(e) {
     e.preventDefault();
-    const name = getElement("registerName").value.trim();
-    const email = getElement("registerEmail").value.trim();
     const username = getElement("registerUsername").value.trim();
     const password = getElement("registerPassword").value.trim();
     const confirmPassword = getElement("confirmPassword").value.trim();
 
-    if (!name || !email || !username || !password || !confirmPassword) {
+    if (!username || !password || !confirmPassword) {
         showAuthMessage("Preencha todos os campos", "error");
         return;
     }
@@ -1759,8 +1963,6 @@ async function handleRegister(e) {
             credentials: "include",
             body: JSON.stringify({
                 username,
-                name,
-                email,
                 password,
                 terms_accepted: true,
                 terms_version: legalVersions.terms.version,
@@ -1774,14 +1976,7 @@ async function handleRegister(e) {
 
         const data = await readAuthResponse(response);
         if (response.ok && data.user) {
-            setCurrentUser(data.user);
-            if (data.csrf_token) setCsrfToken(data.csrf_token);
-            const intent = pendingAuthIntent;
-            const destination = intent?.tab || currentTab;
-            pendingAuthIntent = null;
-            showMainScreen({ tab: destination, skipProfile: Boolean(intent?.resume) });
-            showToast(data.message, "success");
-            if (intent?.resume) resumeAfterAuthentication(intent.resume, intent.requiresProfile);
+            await completeAuthentication(data.user, data.csrf_token);
         } else {
             showAuthMessage(data.error || "Não foi possível criar a conta.", "error");
         }
@@ -1882,7 +2077,7 @@ async function logout() {
         setCurrentUser(null);
         setCsrfToken(null);
         window.clearWorkoutProgress?.();
-        showMainScreen({ tab: 'diet' });
+        openAuthLanding();
         showToast("Logout realizado com sucesso", "success");
     } catch (error) {
         console.error("Logout error:", error);
@@ -2184,6 +2379,8 @@ function closePlansModal() {
 }
 
 function showLogin() {
+    getElement("authChoicePanel")?.classList.add('hidden');
+    document.querySelector('.login-tabs')?.classList.remove('hidden');
     const loginForm = getElement("loginForm");
     const registerForm = getElement("registerForm");
     const loginTab = document.querySelector('.tab-btn:first-child');
@@ -2197,6 +2394,8 @@ function showLogin() {
 
 function showRegister() {
     window.analytics?.track('signup_started', { surface: 'auth_modal' });
+    getElement("authChoicePanel")?.classList.add('hidden');
+    document.querySelector('.login-tabs')?.classList.remove('hidden');
     const loginForm = getElement("loginForm");
     const registerForm = getElement("registerForm");
     const loginTab = document.querySelector('.tab-btn:first-child');
@@ -2206,6 +2405,14 @@ function showRegister() {
     if (registerForm) registerForm.classList.remove('hidden');
     if (loginTab) loginTab.classList.remove('active');
     if (registerTab) registerTab.classList.add('active');
+}
+
+function showAuthChoice() {
+    getElement("authChoicePanel")?.classList.remove('hidden');
+    document.querySelector('.login-tabs')?.classList.add('hidden');
+    getElement("loginForm")?.classList.add('hidden');
+    getElement("registerForm")?.classList.add('hidden');
+    getElement("googleUsernameForm")?.classList.add('hidden');
 }
 
 function clearForms() {
@@ -2442,6 +2649,7 @@ function closeMeasurementModal() {
 }
 
 function closeProfileModal() {
+    if (mandatoryOnboarding) return;
     pendingPostProfileResume = null;
     pendingProfileRequiredFields = [];
     const modal = getElement("profileModal");
@@ -2449,11 +2657,13 @@ function closeProfileModal() {
 }
 
 function skipProfile() {
+    if (mandatoryOnboarding) return;
     pendingPostProfileResume = null;
     closeProfileModal();
 }
 
 function fillProfileForm(profile) {
+    if (profile) currentProfile = profile;
     const values = {
         profileAge: profile?.age,
         profileGender: profile?.gender,
@@ -2461,7 +2671,8 @@ function fillProfileForm(profile) {
         profileActivity: profile?.activity_level,
         profileRestrictions: profile?.dietary_restrictions,
         profileWeight: profile?.weight,
-        profileHeight: profile?.height
+        profileHeight: profile?.height,
+        profileTimezone: profileTimezoneValue(profile)
     };
     Object.entries(values).forEach(([id, value]) => {
         const field = getElement(id);
@@ -2539,8 +2750,11 @@ function setCurrentUser(user) {
         clearMeasurements();
         window.DietEntryFlow?.reset();
         if (getElement("dietModal")?.classList.contains("show")) closeDietModal();
+        currentProfile = null;
     }
     currentUser = user;
+    window.currentUser = user;
+    if (typeof updateOfflineStatus === 'function') updateOfflineStatus();
 }
 
 function clearMeasurements() {
@@ -3002,6 +3216,37 @@ function editDailyNutritionTargets() {
     if (window.openDietPlanWizardWithPlan) window.openDietPlanWizardWithPlan(cardapioActivePlan);
 }
 
+function renderPersonalizedHomeIntro(profile = currentProfile) {
+    const bodyEl = getElement('todayCardapioBody');
+    if (!bodyEl || !currentUser || !profile) return false;
+    const goalLabels = {
+        'perder peso': 'perder peso',
+        'ganhar massa muscular': 'ganhar massa muscular',
+        'manter peso': 'manter o peso',
+        'melhorar saude': 'melhorar a saúde'
+    };
+    const activityLabels = {
+        sedentario: 'rotina sedentária',
+        leve: 'atividade leve',
+        moderado: 'atividade moderada',
+        intenso: 'atividade intensa'
+    };
+    const goal = goalLabels[profile.goal] || profile.goal || 'seu objetivo';
+    const activity = activityLabels[profile.activity_level] || profile.activity_level || 'sua rotina';
+    const body = [profile.weight ? `${Number(profile.weight).toLocaleString('pt-BR')} kg` : null, profile.height ? `${Number(profile.height).toLocaleString('pt-BR')} cm` : null].filter(Boolean).join(' · ');
+    bodyEl.innerHTML = `
+        <div class="home-onboarding-summary">
+            <strong>Home pronta para ${escapeHtml(goal)}.</strong>
+            <p>Personalizamos o ponto de partida com ${escapeHtml(activity)}${body ? ` e suas medidas atuais (${escapeHtml(body)})` : ''}. Agora você pode registrar a primeira refeição ou gerar um plano quando quiser.</p>
+            <div class="home-onboarding-summary__actions">
+                <button type="button" class="btn-primary" onclick="showAddDietModal()">Registrar refeição</button>
+                <button type="button" class="btn-secondary" onclick="window.openPlanWizard && window.openPlanWizard('diet')">Gerar cardápio</button>
+                <button type="button" class="btn-secondary" onclick="window.openPlanWizard && window.openPlanWizard('workout')">Montar treino</button>
+            </div>
+        </div>`;
+    return true;
+}
+
 function renderTodayCardapio(dailyView, errorMessage) {
     const bodyEl = getElement('todayCardapioBody');
     if (!bodyEl) return;
@@ -3014,6 +3259,7 @@ function renderTodayCardapio(dailyView, errorMessage) {
     const slots = Array.isArray(dailyView?.slots) ? dailyView.slots : [];
     const slot = slots.find(item => item.result === 'pending');
     if (!slot) {
+        if (!dailyView?.plan && renderPersonalizedHomeIntro()) return;
         const message = !dailyView?.plan ? 'Você pode registrar sua alimentação sem ter um plano.' : slots.length ? 'Todas as refeições planejadas de hoje já têm um resultado.' : 'Sem refeições previstas para hoje.';
         bodyEl.innerHTML = `<p class="today-muted">${message}</p>${register}`;
         return;
@@ -3619,33 +3865,38 @@ async function handleProfileSubmit(e) {
     const activity = getElement("profileActivity")?.value;
     const restrictions = getElement("profileRestrictions")?.value.trim();
     const weight = getElement("profileWeight")?.value;
-    const height = getElement("profileHeight")?.value;
+    const height = normalizeNaturalHeight(getElement("profileHeight")?.value);
+    const timezone = getElement("profileTimezone")?.value || profileTimezoneValue();
 
-    if (pendingProfileRequiredFields.length) {
+    if (pendingProfileRequiredFields.length || mandatoryOnboarding) {
+        const requiredFields = mandatoryOnboarding ? missingOnboardingFieldsFromForm() : pendingProfileRequiredFields;
         const values = {
+            goal,
             age: Number(age),
             gender,
             activity_level: activity,
             weight: Number(weight),
-            height: Number(height)
+            height
         };
         const valid = {
+            goal: Boolean(values.goal),
             age: Number.isFinite(values.age) && values.age >= 18 && values.age <= 120,
             gender: Boolean(values.gender),
             activity_level: Boolean(values.activity_level),
             weight: Number.isFinite(values.weight) && values.weight >= 30 && values.weight <= 300,
             height: Number.isFinite(values.height) && values.height >= 120 && values.height <= 250
         };
-        const firstMissing = pendingProfileRequiredFields.find(field => !valid[field]);
+        const firstMissing = requiredFields.find(field => !valid[field]);
         if (firstMissing) {
             const focusTargets = {
+                goal: 'goalCards',
                 age: 'profileAge',
                 gender: 'genderCards',
                 activity_level: 'activityCards',
                 weight: 'profileWeight',
                 height: 'profileHeight'
             };
-            showToast('Preencha os dados obrigatórios para gerar sua dieta.', 'error');
+            showToast(mandatoryOnboarding ? 'Complete os dados mínimos para preparar sua Home.' : 'Preencha os dados obrigatórios para gerar sua dieta.', 'error');
             getElement(focusTargets[firstMissing])?.focus();
             return;
         }
@@ -3665,17 +3916,36 @@ async function handleProfileSubmit(e) {
                 activity_level: activity,
                 dietary_restrictions: restrictions,
                 weight: weight ? parseFloat(weight) : null,
-                height: height ? parseFloat(height) : null
+                height: height,
+                timezone
             })
         });
 
         if (response.ok) {
+            const data = await response.json().catch(() => ({}));
+            if (data.profile && currentUser) {
+                currentProfile = data.profile;
+                currentUser = {
+                    ...currentUser,
+                    onboarding_status: data.onboarding_status,
+                    profile_missing_fields: data.profile_missing_fields || [],
+                    profile_complete: Boolean(data.profile_complete)
+                };
+                window.currentUser = currentUser;
+            }
             const resume = pendingPostProfileResume;
             pendingPostProfileResume = null;
             pendingProfileRequiredFields = [];
+            const wasMandatory = mandatoryOnboarding;
+            setOnboardingRequired(false);
             closeAppModal(getElement("profileModal"));
             showToast("Perfil salvo com sucesso!", "success");
-            if (resume) {
+            if (wasMandatory) {
+                showMainScreen({ tab: pendingOnboardingDestination || 'diet', skipProfile: true });
+                pendingOnboardingDestination = null;
+                renderPersonalizedHomeIntro(data.profile);
+                await Promise.all([loadTodayCardapio({ force: true }), window.loadWorkoutTodayCard?.(true)]);
+            } else if (resume) {
                 requestAnimationFrame(resume);
             }
         } else {

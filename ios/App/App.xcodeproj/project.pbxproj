@@ -32,9 +32,9 @@
 		504EC3131FED79650016851F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
+		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		A1B2C3D4E5F60708090A0B0D /* FitTrackerGoogleAuthPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FitTrackerGoogleAuthPlugin.swift; sourceTree = "<group>"; };
 		B8D471AA2026091400000002 /* FitTrackerSharePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FitTrackerSharePlugin.swift; sourceTree = "<group>"; };
-		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -197,25 +197,6 @@
 		};
 /* End PBXVariantGroup section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		A1B2C3D4E5F60708090A0B10 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 7.1.0;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		A1B2C3D4E5F60708090A0B0F /* GoogleSignIn */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A1B2C3D4E5F60708090A0B10 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
-			productName = GoogleSignIn;
-		};
-/* End XCSwiftPackageProductDependency section */
-
 /* Begin XCBuildConfiguration section */
 		504EC3141FED79650016851F /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -345,9 +326,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
-				GOOGLE_IOS_CLIENT_ID = "";
-				GOOGLE_IOS_REVERSED_CLIENT_ID = "";
-				GOOGLE_SERVER_CLIENT_ID = "";
+				GOOGLE_IOS_CLIENT_ID = "962052909671-o5ilrh1029cbodkkl4phgfobe0ibs1a5.apps.googleusercontent.com";
+				GOOGLE_IOS_REVERSED_CLIENT_ID = "com.googleusercontent.apps.962052909671-o5ilrh1029cbodkkl4phgfobe0ibs1a5";
+				GOOGLE_SERVER_CLIENT_ID = "962052909671-3m6t5ifo07gurgh8ris841hsvc68dr79.apps.googleusercontent.com";
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -370,9 +351,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
-				GOOGLE_IOS_CLIENT_ID = "";
-				GOOGLE_IOS_REVERSED_CLIENT_ID = "";
-				GOOGLE_SERVER_CLIENT_ID = "";
+				GOOGLE_IOS_CLIENT_ID = "962052909671-o5ilrh1029cbodkkl4phgfobe0ibs1a5.apps.googleusercontent.com";
+				GOOGLE_IOS_REVERSED_CLIENT_ID = "com.googleusercontent.apps.962052909671-o5ilrh1029cbodkkl4phgfobe0ibs1a5";
+				GOOGLE_SERVER_CLIENT_ID = "962052909671-3m6t5ifo07gurgh8ris841hsvc68dr79.apps.googleusercontent.com";
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -418,11 +399,27 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		A1B2C3D4E5F60708090A0B10 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 7.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		4D22ABE82AF431CB00220026 /* CapApp-SPM */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */;
 			productName = "CapApp-SPM";
+		};
+		A1B2C3D4E5F60708090A0B0F /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D4E5F60708090A0B10 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
