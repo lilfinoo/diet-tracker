@@ -366,7 +366,12 @@ def get_exercise_media(catalog_key):
         gif_path = get_cached_gif(catalog_key, media["provider_id"])
     except WorkoutXServiceError as error:
         current_app.logger.warning("WorkoutX GIF unavailable for %s: %s", catalog_key, error)
-        abort(503, description="A animação do exercício não está disponível agora.")
+        response = jsonify({"error": "A animação do exercício não está disponível agora."})
+        response.status_code = 503
+        response.headers["Cache-Control"] = "private, max-age=60"
+        if error.retry_after:
+            response.headers["Retry-After"] = str(error.retry_after)
+        return response
     return send_file(gif_path, mimetype="image/gif", conditional=True, max_age=31_536_000)
 
 

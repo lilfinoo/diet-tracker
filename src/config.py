@@ -81,6 +81,12 @@ class Config:
     # WorkoutX limits authenticated GIF requests. A short global interval lets the
     # first uncached images arrive without turning a page render into a burst.
     WORKOUTX_GIF_REQUEST_INTERVAL = float(os.getenv("WORKOUTX_GIF_REQUEST_INTERVAL", "3"))
+    WORKOUTX_GIF_RATE_LIMIT_COOLDOWN = int(
+        os.getenv("WORKOUTX_GIF_RATE_LIMIT_COOLDOWN", "60")
+    )
+    WORKOUTX_STORAGE_ERROR_COOLDOWN = int(
+        os.getenv("WORKOUTX_STORAGE_ERROR_COOLDOWN", "60")
+    )
     WORKOUTX_MAX_RESPONSE_BYTES = int(
         os.getenv("WORKOUTX_MAX_RESPONSE_BYTES", str(15 * 1024 * 1024))
     )

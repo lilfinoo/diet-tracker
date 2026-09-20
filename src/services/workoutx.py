@@ -21,6 +21,8 @@ BASE_URL = "https://api.workoutxapp.com/v1"
 SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 GIF_DOWNLOAD_LOCK = threading.Lock()
 LAST_GIF_DOWNLOAD_AT = 0.0
+GIF_DOWNLOAD_BLOCKED_UNTIL = 0.0
+PERSISTENT_CACHE_BLOCKED_UNTIL = 0.0
 
 REVIEW_QUEUE = (
     "puxada_com_elastico", "flexao_joelhos_deslizante", "flexao_nordica",
@@ -99,6 +101,10 @@ LOW_PRIORITY_MARKERS = (
 class WorkoutXServiceError(Exception):
     """Raised when WorkoutX cannot provide a usable exercise GIF."""
 
+    def __init__(self, message, retry_after=None):
+        super().__init__(message)
+        self.retry_after = retry_after
+
 
 def media_mapping():
     path = Path(current_app.config["WORKOUTX_MEDIA_MAPPING_PATH"])
@@ -172,7 +178,16 @@ def _request(url, max_bytes=None):
                 raise WorkoutXServiceError("WorkoutX response is too large")
             return body
     except HTTPError as error:
-        raise WorkoutXServiceError(f"WorkoutX request failed with status {error.code}") from error
+        retry_after = None
+        if error.code == 429:
+            try:
+                retry_after = max(int(error.headers.get("Retry-After", "")), 1)
+            except (AttributeError, TypeError, ValueError):
+                retry_after = current_app.config["WORKOUTX_GIF_RATE_LIMIT_COOLDOWN"]
+        raise WorkoutXServiceError(
+            f"WorkoutX request failed with status {error.code}",
+            retry_after=retry_after,
+        ) from error
     except (URLError, TimeoutError, OSError) as error:
         raise WorkoutXServiceError("WorkoutX is unavailable") from error
 
@@ -642,7 +657,7 @@ def get_cached_gif(catalog_key, provider_id):
     if stored is not None:
         return _write_gif_to_local_cache(cache_path, provider_id, stored.content)
 
-    global LAST_GIF_DOWNLOAD_AT
+    global GIF_DOWNLOAD_BLOCKED_UNTIL, LAST_GIF_DOWNLOAD_AT, PERSISTENT_CACHE_BLOCKED_UNTIL
     # A single process may receive several image requests while the player is
     # rendered. Serialize only uncached provider calls, then recheck all caches.
     with GIF_DOWNLOAD_LOCK:
@@ -653,14 +668,22 @@ def get_cached_gif(catalog_key, provider_id):
             return _write_gif_to_local_cache(cache_path, provider_id, stored.content)
 
         gif = None
-        if persistent_media_configured():
+        now = time.monotonic()
+        if persistent_media_configured() and now >= PERSISTENT_CACHE_BLOCKED_UNTIL:
             try:
                 gif = get_exercise_gif(provider_id)
             except MediaStorageError:
-                current_app.logger.warning("Persistent WorkoutX GIF cache unavailable", exc_info=True)
+                PERSISTENT_CACHE_BLOCKED_UNTIL = now + current_app.config["WORKOUTX_STORAGE_ERROR_COOLDOWN"]
+                current_app.logger.warning("Persistent WorkoutX GIF cache unavailable; temporarily bypassing it")
 
         downloaded = gif is None
         if downloaded:
+            now = time.monotonic()
+            if now < GIF_DOWNLOAD_BLOCKED_UNTIL:
+                raise WorkoutXServiceError(
+                    "WorkoutX GIF downloads are temporarily rate limited",
+                    retry_after=max(int(GIF_DOWNLOAD_BLOCKED_UNTIL - now), 1),
+                )
             interval = max(float(current_app.config["WORKOUTX_GIF_REQUEST_INTERVAL"]), 0.0)
             remaining = interval - (time.monotonic() - LAST_GIF_DOWNLOAD_AT)
             if remaining > 0:
@@ -670,6 +693,10 @@ def get_cached_gif(catalog_key, provider_id):
                     f"{BASE_URL}/gifs/{provider_id}",
                     max_bytes=current_app.config["WORKOUTX_MAX_RESPONSE_BYTES"],
                 )
+            except WorkoutXServiceError as error:
+                if error.retry_after:
+                    GIF_DOWNLOAD_BLOCKED_UNTIL = time.monotonic() + error.retry_after
+                raise
             finally:
                 LAST_GIF_DOWNLOAD_AT = time.monotonic()
         if not gif.startswith((b"GIF87a", b"GIF89a")):

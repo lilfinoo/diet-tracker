@@ -1,5 +1,6 @@
 from src.services import workoutx
 from io import BytesIO
+from urllib.error import HTTPError
 
 from src.models.user import ExerciseMediaReview, User, WorkoutXExercise, WorkoutXGif, db
 from tests.helpers import registration_payload
@@ -75,6 +76,28 @@ def test_workoutx_persists_a_gif_in_the_database_cache(app, tmp_path, monkeypatc
     assert first == second
     assert second.read_bytes() == b"GIF89adatabase-cache"
     assert calls == ["https://api.workoutxapp.com/v1/gifs/0289"]
+
+
+def test_workoutx_429_starts_a_fast_failure_cooldown(app, tmp_path, monkeypatch):
+    calls = []
+
+    def rate_limited(request, **_kwargs):
+        calls.append(request.full_url)
+        raise HTTPError(request.full_url, 429, "rate limited", {"Retry-After": "30"}, None)
+
+    monkeypatch.setattr(workoutx, "urlopen", rate_limited)
+    monkeypatch.setattr(workoutx, "GIF_DOWNLOAD_BLOCKED_UNTIL", 0.0)
+    with app.app_context():
+        app.config.update(WORKOUTX_API_KEY="wx_test", WORKOUTX_CACHE_DIR=tmp_path)
+        for provider_id in ("0201", "0202"):
+            try:
+                workoutx.get_cached_gif(f"workoutx:{provider_id}", provider_id)
+            except workoutx.WorkoutXServiceError as error:
+                assert error.retry_after > 0
+            else:
+                raise AssertionError("rate-limited GIF unexpectedly loaded")
+
+    assert calls == ["https://api.workoutxapp.com/v1/gifs/0201"]
 
 
 def test_workoutx_search_discards_unsafe_provider_ids(app, monkeypatch):
@@ -203,6 +226,25 @@ def test_authenticated_user_can_serve_a_direct_workoutx_gif(app, client, tmp_pat
     response = client.get("/api/exercise-media/workoutx:0289")
     assert response.status_code == 200
     assert response.data == b"GIF89adirect"
+
+
+def test_exercise_media_exposes_rate_limit_cooldown(app, client, monkeypatch):
+    assert client.post("/api/register", json=registration_payload("rate-limited-athlete")).status_code == 201
+    monkeypatch.setattr(
+        "src.routes.profile_routes.get_cached_gif",
+        lambda *_args: (_ for _ in ()).throw(workoutx.WorkoutXServiceError("limited", retry_after=30)),
+    )
+    with app.app_context():
+        db.session.add(WorkoutXExercise(provider_id="0289", data={
+            "id": "0289", "name": "Dumbbell Bench Press",
+            "equipment": "Dumbbell", "gifUrl": "https://example.test/0289.gif",
+        }))
+        db.session.commit()
+
+    response = client.get("/api/exercise-media/workoutx:0289")
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "30"
+    assert response.headers["Cache-Control"] == "private, max-age=60"
 
 
 def test_admin_can_import_a_workoutx_gif_directly_into_database(app, client):
