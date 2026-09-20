@@ -140,10 +140,6 @@ class ProductionConfig(Config):
                 ("PUBLIC_BASE_URL", get("PUBLIC_BASE_URL")),
                 ("REDIS_URL", get("REDIS_URL")),
                 ("METRICS_TOKEN", get("METRICS_TOKEN")),
-                ("MEDIA_R2_ENDPOINT_URL", get("MEDIA_R2_ENDPOINT_URL")),
-                ("MEDIA_R2_ACCESS_KEY_ID", get("MEDIA_R2_ACCESS_KEY_ID")),
-                ("MEDIA_R2_SECRET_ACCESS_KEY", get("MEDIA_R2_SECRET_ACCESS_KEY")),
-                ("MEDIA_R2_BUCKET", get("MEDIA_R2_BUCKET")),
             )
             if not value
         ]
