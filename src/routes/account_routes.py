@@ -6,8 +6,6 @@ from sqlalchemy import or_
 
 from src.legal import (
     AI_CONSENT_VERSION,
-    PRIVACY_VERSION,
-    TERMS_VERSION,
     legal_versions_payload,
     record_consent,
 )
@@ -35,16 +33,6 @@ account_bp = Blueprint("account", __name__)
 def _consent_payload(user):
     return {
         "versions": legal_versions_payload(),
-        "terms": {
-            "accepted": user.terms_version == TERMS_VERSION and bool(user.terms_accepted_at),
-            "version": user.terms_version,
-            "accepted_at": user.terms_accepted_at.isoformat() if user.terms_accepted_at else None,
-        },
-        "privacy": {
-            "accepted": user.privacy_version == PRIVACY_VERSION and bool(user.privacy_accepted_at),
-            "version": user.privacy_version,
-            "accepted_at": user.privacy_accepted_at.isoformat() if user.privacy_accepted_at else None,
-        },
         "ai": {
             "accepted": user.has_current_ai_consent(),
             "version": user.ai_consent_version,
@@ -63,16 +51,6 @@ def get_consents():
 @login_required
 def update_consents():
     data = json_body()
-    if data.get("terms_accepted") is True and g.user.terms_version != TERMS_VERSION:
-        record_consent(g.user, "terms", TERMS_VERSION, True, "account_settings")
-    elif data.get("terms_accepted") is False:
-        return jsonify({"error": "Os Termos vigentes são necessários para manter a conta."}), 400
-
-    if data.get("privacy_accepted") is True and g.user.privacy_version != PRIVACY_VERSION:
-        record_consent(g.user, "privacy", PRIVACY_VERSION, True, "account_settings")
-    elif data.get("privacy_accepted") is False:
-        return jsonify({"error": "A Política de Privacidade vigente é necessária para manter a conta."}), 400
-
     if "ai_consent" in data:
         if not isinstance(data["ai_consent"], bool):
             return jsonify({"error": "Consentimento de IA inválido."}), 400

@@ -1,7 +1,7 @@
 import base64
 from datetime import datetime, timedelta
 
-from src.legal import AI_CONSENT_VERSION, PRIVACY_VERSION, TERMS_VERSION
+from src.legal import AI_CONSENT_VERSION
 from src.models.user import (
     AdminActionAudit,
     AnalyticsEvent,
@@ -20,19 +20,13 @@ from main import create_app
 from src.config import TestConfig
 
 
-def test_registration_requires_current_legal_acceptance_and_records_choices(app, client):
+def test_registration_requires_an_ai_choice_and_records_it(app, client):
     missing = client.post("/api/register", json={
         "username": "missing-consent",
         "password": "strong-password",
     })
     assert missing.status_code == 400
-    assert missing.get_json()["code"] == "terms_acceptance_required"
-
-    stale = registration_payload("stale-consent")
-    stale["privacy_version"] = "old"
-    response = client.post("/api/register", json=stale)
-    assert response.status_code == 400
-    assert response.get_json()["code"] == "privacy_acceptance_required"
+    assert missing.get_json()["error"] == "Informe sua escolha sobre o processamento por IA."
 
     created = client.post(
         "/api/register", json=registration_payload("legal-user", ai_consent=False)
@@ -40,15 +34,9 @@ def test_registration_requires_current_legal_acceptance_and_records_choices(app,
     assert created.status_code == 201
     with app.app_context():
         user = User.query.filter_by(username="legal-user").one()
-        assert user.terms_version == TERMS_VERSION
-        assert user.privacy_version == PRIVACY_VERSION
         assert user.ai_consent_at is None
         records = ConsentRecord.query.filter_by(user_id=user.id).order_by(ConsentRecord.id).all()
-        assert [(item.document_type, item.granted) for item in records] == [
-            ("terms", True),
-            ("privacy", True),
-            ("ai", False),
-        ]
+        assert [(item.document_type, item.granted) for item in records] == [("ai", False)]
 
 
 def test_existing_user_can_inspect_grant_and_revoke_ai_consent(app, client, monkeypatch):
@@ -62,8 +50,6 @@ def test_existing_user_can_inspect_grant_and_revoke_ai_consent(app, client, monk
     assert blocked.get_json()["code"] == "ai_consent_required"
 
     current = client.get("/api/account/consents").get_json()
-    assert current["terms"]["accepted"] is True
-    assert current["privacy"]["accepted"] is True
     assert current["ai"]["accepted"] is False
 
     granted = client.put("/api/account/consents", json={"ai_consent": True})

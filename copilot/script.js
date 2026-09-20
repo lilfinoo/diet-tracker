@@ -1099,8 +1099,8 @@ async function finishGoogleSignup(event) {
     if (authRequestInFlight || nativeGoogleInFlight || sessionConfirmationInFlight) return;
     const username = getElement('googleUsername')?.value.trim();
     if (!googleSignupToken || !username) return;
-    if (!getElement('googleTerms')?.checked || !getElement('googlePrivacy')?.checked || !legalVersions) {
-        showAuthMessage('Aceite os Termos e a Política de Privacidade vigentes.', 'error');
+    if (!legalVersions) {
+        showAuthMessage('Não foi possível preparar o cadastro. Tente novamente.', 'error');
         return;
     }
     setGoogleAuthPending(true, 'Concluindo cadastro...');
@@ -1113,10 +1113,6 @@ async function finishGoogleSignup(event) {
             body: JSON.stringify({
                 signup_token: googleSignupToken,
                 username,
-                terms_accepted: true,
-                terms_version: legalVersions.terms.version,
-                privacy_accepted: true,
-                privacy_version: legalVersions.privacy.version,
                 ai_consent: Boolean(getElement('googleAiConsent')?.checked),
                 ai_consent_version: legalVersions.ai.version,
                 analytics: window.analytics?.context()
@@ -2018,8 +2014,8 @@ async function handleRegister(e) {
         showAuthMessage("A senha deve ter pelo menos 8 caracteres", "error");
         return;
     }
-    if (!getElement('registerTerms')?.checked || !getElement('registerPrivacy')?.checked || !legalVersions) {
-        showAuthMessage('Aceite os Termos e a Política de Privacidade vigentes.', 'error');
+    if (!legalVersions) {
+        showAuthMessage('Não foi possível preparar o cadastro. Tente novamente.', 'error');
         return;
     }
 
@@ -2034,10 +2030,6 @@ async function handleRegister(e) {
             body: JSON.stringify({
                 username,
                 password,
-                terms_accepted: true,
-                terms_version: legalVersions.terms.version,
-                privacy_accepted: true,
-                privacy_version: legalVersions.privacy.version,
                 ai_consent: Boolean(getElement('registerAiConsent')?.checked),
                 ai_consent_version: legalVersions.ai.version,
                 analytics: window.analytics?.context()
@@ -2066,10 +2058,8 @@ async function openPrivacySettings() {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Não foi possível carregar os consentimentos.');
         legalVersions = data.versions;
-        getElement('accountTerms').checked = Boolean(data.terms.accepted);
-        getElement('accountPrivacy').checked = Boolean(data.privacy.accepted);
         getElement('accountAiConsent').checked = Boolean(data.ai.accepted);
-        getElement('consentStatus').textContent = `Termos: ${data.terms.version || 'pendente'} | Privacidade: ${data.privacy.version || 'pendente'} | IA: ${data.ai.accepted ? data.ai.version : 'não autorizada'}`;
+        getElement('consentStatus').textContent = `IA: ${data.ai.accepted ? data.ai.version : 'não autorizada'}`;
         openAppModal(getElement('privacySettingsModal'));
     } catch (error) {
         showToast(error.message, 'error');
@@ -2084,8 +2074,6 @@ async function savePrivacySettings() {
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             body: JSON.stringify({
-                terms_accepted: Boolean(getElement('accountTerms')?.checked),
-                privacy_accepted: Boolean(getElement('accountPrivacy')?.checked),
                 ai_consent: Boolean(getElement('accountAiConsent')?.checked),
             }),
         });

@@ -32,8 +32,6 @@ def record_consent(user, document_type, version, granted, source):
 
 def legal_versions_payload():
     return {
-        "terms": {"version": TERMS_VERSION, "url": "/terms.html"},
-        "privacy": {"version": PRIVACY_VERSION, "url": "/privacy.html"},
         "ai": {"version": AI_CONSENT_VERSION},
         "professional_sharing": {"version": PROFESSIONAL_SHARING_VERSION},
     }

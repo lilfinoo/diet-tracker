@@ -7,7 +7,7 @@ from itsdangerous import BadSignature, SignatureExpired
 from sqlalchemy.exc import IntegrityError
 
 from src.models.user import OAuthIdentity, User, db
-from src.legal import AI_CONSENT_VERSION, PRIVACY_VERSION, TERMS_VERSION, legal_versions_payload, record_consent
+from src.legal import AI_CONSENT_VERSION, legal_versions_payload, record_consent
 from src.routes.common import _csrf_token, _google_identity_claims, _google_signup_serializer, _start_session, json_body, login_required
 from src.services.badges import grant_signup_badges
 from src.services.analytics import analytics_context, record_event
@@ -55,10 +55,6 @@ def auth_config():
 
 
 def _validate_signup_consents(data):
-    if data.get("terms_accepted") is not True or data.get("terms_version") != TERMS_VERSION:
-        return jsonify({"error": "Aceite os Termos de Uso vigentes para criar a conta.", "code": "terms_acceptance_required"}), 400
-    if data.get("privacy_accepted") is not True or data.get("privacy_version") != PRIVACY_VERSION:
-        return jsonify({"error": "Aceite a Política de Privacidade vigente para criar a conta.", "code": "privacy_acceptance_required"}), 400
     if not isinstance(data.get("ai_consent"), bool):
         return jsonify({"error": "Informe sua escolha sobre o processamento por IA."}), 400
     if data.get("ai_consent") is True and data.get("ai_consent_version") != AI_CONSENT_VERSION:
@@ -67,8 +63,6 @@ def _validate_signup_consents(data):
 
 
 def _record_signup_consents(user, data):
-    record_consent(user, "terms", TERMS_VERSION, True, "registration")
-    record_consent(user, "privacy", PRIVACY_VERSION, True, "registration")
     record_consent(user, "ai", AI_CONSENT_VERSION, data["ai_consent"], "registration")
 
 

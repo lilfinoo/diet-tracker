@@ -2489,7 +2489,10 @@
 
     async function preloadWorkoutAssets(day) {
         const exercises = asArray(day?.exercises);
-        await Promise.all(exercises.map((original) => {
+        const activeIndex = exercises.findIndex((exercise) => String(exercise.id) === String(workoutView.activeExerciseId));
+        const start = workoutView.session ? Math.max(activeIndex, 0) : 0;
+        const preload = exercises.slice(start, start + 2);
+        await Promise.all(preload.map((original) => {
             const exercise = displayedExercise(original).exercise;
             const src = exerciseImage(exercise);
             if (!src) return Promise.resolve();

@@ -114,9 +114,7 @@
                                 <button type="button" class="field-reveal" data-reveal-target="confirmPassword" aria-label="Mostrar confirmação de senha"><i class="fas fa-eye"></i></button>
                             </div>
                         </div>
-                        <label class="legal-check"><input type="checkbox" id="registerTerms" required><span>Li e aceito os <a href="/terms.html" target="_blank" rel="noopener">Termos de Uso</a>.</span></label>
-                        <label class="legal-check"><input type="checkbox" id="registerPrivacy" required><span>Li e aceito a <a href="/privacy.html" target="_blank" rel="noopener">Política de Privacidade</a>.</span></label>
-                        <label class="legal-check"><input type="checkbox" id="registerAiConsent"><span>Autorizo, opcionalmente, o envio dos dados que eu fornecer a recursos de IA para gerar análises e planos. Posso revogar depois.</span></label>
+                        <label class="legal-check"><input type="checkbox" id="registerAiConsent"><span>Concordo com o envio dos dados que eu fornecer a recursos de IA para gerar análises e planos. Posso revogar depois.</span></label>
                         <button type="submit" class="btn-primary btn-primary--block">
                             <i class="fas fa-user-plus"></i>
                             Criar Conta
@@ -131,9 +129,7 @@
                             <p>Escolha o nome que será mostrado na sua conta.</p>
                             <label for="googleUsername">Nome de usuário</label>
                             <input type="text" id="googleUsername" autocomplete="username" maxlength="80" required placeholder="Como você quer ser chamado?">
-                            <label class="legal-check"><input type="checkbox" id="googleTerms" required><span>Aceito os <a href="/terms.html" target="_blank" rel="noopener">Termos de Uso</a>.</span></label>
-                            <label class="legal-check"><input type="checkbox" id="googlePrivacy" required><span>Aceito a <a href="/privacy.html" target="_blank" rel="noopener">Política de Privacidade</a>.</span></label>
-                            <label class="legal-check"><input type="checkbox" id="googleAiConsent"><span>Autorizo, opcionalmente, o processamento dos dados que eu fornecer por recursos de IA.</span></label>
+                            <label class="legal-check"><input type="checkbox" id="googleAiConsent"><span>Concordo com o envio dos dados que eu fornecer a recursos de IA. Posso revogar depois.</span></label>
                             <button type="submit" id="googleSignupSubmit" class="btn-primary btn-primary--block">Concluir cadastro</button>
                         </form>
                     </div>
@@ -570,11 +566,9 @@
 
         <div id="privacySettingsModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="privacySettingsTitle">
             <div class="modal-content account-sheet">
-                <div class="modal-header"><div><span class="content-kicker">Sua conta</span><h3 id="privacySettingsTitle">Privacidade e IA</h3><p>Consulte os documentos aceitos e altere a autorização opcional de IA.</p></div><button type="button" class="btn-close" onclick="closeAppModal(document.getElementById('privacySettingsModal'))" aria-label="Fechar">&times;</button></div>
+                <div class="modal-header"><div><span class="content-kicker">Sua conta</span><h3 id="privacySettingsTitle">Privacidade e IA</h3><p>Gerencie a autorização para usar recursos de IA.</p></div><button type="button" class="btn-close" onclick="closeAppModal(document.getElementById('privacySettingsModal'))" aria-label="Fechar">&times;</button></div>
                 <div id="consentStatus" class="account-consent-status"></div>
-                <label class="legal-check"><input type="checkbox" id="accountTerms"><span>Aceito os <a href="/terms.html" target="_blank" rel="noopener">Termos de Uso vigentes</a>.</span></label>
-                <label class="legal-check"><input type="checkbox" id="accountPrivacy"><span>Aceito a <a href="/privacy.html" target="_blank" rel="noopener">Política de Privacidade vigente</a>.</span></label>
-                <label class="legal-check"><input type="checkbox" id="accountAiConsent"><span>Autorizo o envio a provedores de IA dos textos, dados de perfil e fotos usados nesses recursos. A revogação bloqueia novas solicitações à IA.</span></label>
+                <label class="legal-check"><input type="checkbox" id="accountAiConsent"><span>Concordo com o envio a provedores de IA dos textos, dados de perfil e fotos usados nesses recursos. A revogação bloqueia novas solicitações à IA.</span></label>
                 <div class="modal-actions"><button type="button" class="btn-primary" onclick="savePrivacySettings()">Salvar escolhas</button></div>
             </div>
         </div>
@@ -1009,7 +1003,7 @@
     <script defer src="/js/image-input.js?v=20260920-direct-camera"></script>
     <script defer src="/js/analytics.js?v=20260829-funnel"></script>
     <script defer src="/js/body-evolution.js?v=20260909"></script>
-    <script defer src="/script.js?v=20260920-workoutx-only"></script>
+    <script defer src="/script.js?v=20260920-ai-consent"></script>
     <script defer src="/js/diet-entry.js?v=20260920-direct-camera"></script>
     <script defer src="/js/workout-share.js?v=20260914-ios-fluid"></script>
     <script defer src="/js/plans.js?v=20260920-workoutx-only"></script>
