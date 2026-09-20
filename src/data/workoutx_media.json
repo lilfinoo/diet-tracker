@@ -4,6 +4,11 @@
     "provider_id": "2297",
     "provider_name": "Stability Ball Crunch (full Range Hands Behind Head)"
   },
+  "abdominal_na_polia": {
+    "provider_equipment": "Cable",
+    "provider_id": "0175",
+    "provider_name": "Cable Kneeling Crunch"
+  },
   "abdominal_reverso": {
     "provider_equipment": "Body Weight",
     "provider_id": "0872",
@@ -73,6 +78,11 @@
     "provider_equipment": "Dumbbell",
     "provider_id": "0334",
     "provider_name": "Dumbbell Lateral Raise"
+  },
+  "elevacao_lateral_cabo": {
+    "provider_equipment": "Cable",
+    "provider_id": "0178",
+    "provider_name": "Cable Lateral Raise"
   },
   "elevacao_pelvica_barra": {
     "provider_equipment": "Barbell",
@@ -158,6 +168,11 @@
     "provider_equipment": "Barbell",
     "provider_id": "0031",
     "provider_name": "Barbell Curl"
+  },
+  "rosca_martelo": {
+    "provider_equipment": "Dumbbell",
+    "provider_id": "0313",
+    "provider_name": "Dumbbell Hammer Curl"
   },
   "stiff_com_halteres": {
     "provider_equipment": "Dumbbell",

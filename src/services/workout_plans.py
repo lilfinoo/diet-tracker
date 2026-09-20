@@ -1093,15 +1093,14 @@ def replacement_options(exercise, unavailable_equipment=None, available_equipmen
             continue
         if candidate["substitution_group"] != source["substitution_group"]:
             continue
-        if candidate["primary_muscle"] != source["primary_muscle"]:
-            continue
         if candidate["equipment"] in blocked:
             continue
         if not full_gym and candidate["equipment"] not in available and candidate["equipment"] != "bodyweight":
             continue
         difficulty_distance = abs(difficulty_order[candidate["difficulty"]] - difficulty_order[source["difficulty"]])
         overlap = len(set(candidate["secondary_muscles"]) & set(source["secondary_muscles"]))
-        candidates.append((difficulty_distance, -overlap, candidate["name"], candidate))
+        primary_muscle_distance = candidate["primary_muscle"] != source["primary_muscle"]
+        candidates.append((primary_muscle_distance, difficulty_distance, -overlap, candidate["name"], candidate))
     candidates.sort(key=lambda item: item[:3])
     return [
         {
@@ -1120,5 +1119,5 @@ def replacement_options(exercise, unavailable_equipment=None, available_equipmen
             "notes": "Ajuste a carga e mantenha a execução controlada.",
             "rationale": f"Mantém o padrão {candidate['movement_pattern']} para {candidate['primary_muscle']}.",
         }
-        for _, _, _, candidate in candidates[:limit]
+        for _, _, _, _, candidate in candidates[:limit]
     ]

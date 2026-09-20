@@ -600,7 +600,7 @@ def get_exercise(provider_id):
 def get_cached_gif(catalog_key, provider_id):
     provider_id = _provider_id(provider_id)
     cache_dir = Path(current_app.config["WORKOUTX_CACHE_DIR"])
-    cache_path = cache_dir / f"{catalog_key}-{provider_id}.gif"
+    cache_path = cache_dir / f"workoutx-{provider_id}.gif"
     if cache_path.is_file() and cache_path.stat().st_size:
         return cache_path
 
@@ -633,7 +633,7 @@ def get_cached_gif(catalog_key, provider_id):
         cache_dir.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
             dir=cache_dir,
-            prefix=f".{catalog_key}-{provider_id}-",
+            prefix=f".workoutx-{provider_id}-",
             suffix=".tmp",
         )
         temporary_path = Path(temporary_name)

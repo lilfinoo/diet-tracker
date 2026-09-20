@@ -2489,14 +2489,11 @@
 
     async function preloadWorkoutAssets(day) {
         const exercises = asArray(day?.exercises);
-        const activeIndex = exercises.findIndex((exercise) => String(exercise.id) === String(workoutView.activeExerciseId));
-        const preload = workoutView.session
-            ? exercises.slice(Math.max(activeIndex, 0), Math.max(activeIndex, 0) + 2)
-            : exercises.slice(0, 1);
-        await Promise.all(preload.flatMap((original) => {
+        await Promise.all(exercises.map((original) => {
             const exercise = displayedExercise(original).exercise;
-            const paths = [exerciseImage(exercise), typeof exerciseFallbackImagePath === "function" ? exerciseFallbackImagePath(exercise?.catalog_key) : ""];
-            return paths.filter(Boolean).map((src) => new Promise((resolve) => {
+            const src = exerciseImage(exercise);
+            if (!src) return Promise.resolve();
+            return new Promise((resolve) => {
                 const image = new Image();
                 image.onload = () => {
                     if (!image.decode) return resolve();
@@ -2504,7 +2501,7 @@
                 };
                 image.onerror = resolve;
                 image.src = src;
-            }));
+            });
         }));
     }
 
@@ -2525,12 +2522,8 @@
 
     function exerciseImageMarkup(exercise, eager = false) {
         const imagePath = exerciseImage(exercise);
-        const fallbackPath = typeof exerciseFallbackImagePath === "function"
-            ? exerciseFallbackImagePath(exercise?.catalog_key)
-            : "";
         if (imagePath) {
-            const fallback = fallbackPath && fallbackPath !== imagePath ? ` data-fallback-src="${esc(fallbackPath)}"` : "";
-            return `<img class="exercise-demonstration-image" src="${esc(imagePath)}"${fallback} alt="Demonstração de ${esc(exercise?.name || "exercício")}" loading="${eager ? "eager" : "lazy"}" decoding="async" width="768" height="1024">`;
+            return `<img class="exercise-demonstration-image" src="${esc(imagePath)}" alt="Demonstração de ${esc(exercise?.name || "exercício")}" loading="${eager ? "eager" : "lazy"}" decoding="async" width="768" height="1024">`;
         }
         return '<span class="exercise-image-placeholder" role="img" aria-label="Imagem não disponível"><i class="fas fa-dumbbell" aria-hidden="true"></i></span>';
     }
@@ -3584,9 +3577,9 @@
             workoutView.selectedDay = Math.max(0, workoutView.days.findIndex(day => String(day.id) === String(target)));
             workoutView.session = session;
             workoutView.sessionLoading = false;
+            preloadWorkoutAssets(workoutView.days[workoutView.selectedDay]).catch(() => {});
             if (session) {
                 hydrateWorkoutDrafts(session);
-                preloadWorkoutAssets(workoutView.days[workoutView.selectedDay]).catch(() => {});
             }
             activeWorkoutSummary = active;
             renderActiveWorkoutDock();

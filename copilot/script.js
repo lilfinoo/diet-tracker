@@ -2958,17 +2958,10 @@ function exerciseImagePath(_exerciseName, catalogKey) {
     return key ? `${API_BASE}/exercise-media/${encodeURIComponent(key)}` : "";
 }
 
-function exerciseFallbackImagePath(catalogKey) {
-    const path = window.EXERCISE_MEDIA?.[String(catalogKey || "")]?.image || "";
-    return path && !path.startsWith("/") ? `/${path}` : path;
-}
-
 function exerciseImageMarkup(exercise, escapedName) {
     const imagePath = exerciseImagePath(exercise.name, exercise.catalog_key);
-    const fallbackPath = exerciseFallbackImagePath(exercise.catalog_key);
     if (imagePath) {
-        const fallback = fallbackPath && fallbackPath !== imagePath ? ` data-fallback-src="${escapeHtml(fallbackPath)}"` : "";
-        return `<img class="exercise-demonstration-image" src="${escapeHtml(imagePath)}"${fallback} alt="Demonstração de ${escapedName}" loading="lazy">`;
+        return `<img class="exercise-demonstration-image" src="${escapeHtml(imagePath)}" alt="Demonstração de ${escapedName}" loading="lazy">`;
     }
     return '<span class="exercise-image-placeholder" role="img" aria-label="Imagem não disponível"><i class="fas fa-dumbbell" aria-hidden="true"></i></span>';
 }
@@ -2976,12 +2969,6 @@ function exerciseImageMarkup(exercise, escapedName) {
 document.addEventListener('error', event => {
     const image = event.target;
     if (!(image instanceof HTMLImageElement) || !image.classList.contains('exercise-demonstration-image')) return;
-    const fallbackPath = image.dataset.fallbackSrc;
-    if (fallbackPath) {
-        delete image.dataset.fallbackSrc;
-        image.src = fallbackPath;
-        return;
-    }
     const placeholder = document.createElement('span');
     placeholder.className = 'exercise-image-placeholder';
     placeholder.setAttribute('role', 'img');

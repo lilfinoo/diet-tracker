@@ -31,11 +31,18 @@ def test_workoutx_downloads_a_gif_once(app, tmp_path, monkeypatch):
             WORKOUTX_CACHE_DIR=tmp_path,
         )
         first = workoutx.get_cached_gif("agachamento_livre", "0201")
-        second = workoutx.get_cached_gif("agachamento_livre", "0201")
+        second = workoutx.get_cached_gif("workoutx:0201", "0201")
 
     assert first == second
     assert first.read_bytes() == b"GIF89aexercise-animation"
     assert calls == ["https://api.workoutxapp.com/v1/gifs/0201"]
+
+
+def test_examples_use_only_workoutx_gifs(app):
+    with app.app_context():
+        assert workoutx.approved_media("elevacao_lateral_cabo")["provider_id"] == "0178"
+        assert workoutx.approved_media("abdominal_na_polia")["provider_id"] == "0175"
+        assert workoutx.approved_media("rosca_martelo")["provider_id"] == "0313"
 
 
 def test_workoutx_restores_a_gif_from_persistent_cache(app, tmp_path, monkeypatch):

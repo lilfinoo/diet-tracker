@@ -138,3 +138,13 @@ def test_active_catalog_prefers_leg_press_and_rejects_distant_core_matches(app):
 
     assert [item["catalog_key"] for item in leg_press_options] == ["workoutx:2"]
     assert [item["catalog_key"] for item in crunch_options] == ["workoutx:5"]
+
+
+def test_legacy_replacement_keeps_the_movement_when_primary_muscle_labels_differ(app):
+    source = workout_exercise("legacy", "Rosca martelo", "rosca_martelo")
+
+    with app.app_context():
+        options = replacement_options(source, unavailable_equipment=[], available_equipment=[])
+
+    assert options
+    assert all(option["movement_pattern"] == "biceps" for option in options)
