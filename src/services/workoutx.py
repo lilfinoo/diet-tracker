@@ -635,13 +635,26 @@ def _write_gif_to_local_cache(cache_path, provider_id, gif):
     return cache_path
 
 
-def get_cached_gif(catalog_key, provider_id):
-    del catalog_key  # Provider ID is the stable cache key across local exercise aliases.
+def get_stored_gif(provider_id):
+    """Return a GIF already stored locally or in the database, without an API request."""
     provider_id = _provider_id(provider_id)
     cache_dir = Path(current_app.config["WORKOUTX_CACHE_DIR"])
     cache_path = cache_dir / f"workoutx-{provider_id}.gif"
     if cache_path.is_file() and cache_path.stat().st_size:
         return cache_path
+
+    from src.models.user import WorkoutXGif, db
+
+    stored = db.session.get(WorkoutXGif, provider_id)
+    return _write_gif_to_local_cache(cache_path, provider_id, stored.content) if stored else None
+
+
+def get_cached_gif(catalog_key, provider_id):
+    del catalog_key  # Provider ID is the stable cache key across local exercise aliases.
+    provider_id = _provider_id(provider_id)
+    cached = get_stored_gif(provider_id)
+    if cached:
+        return cached
 
     from src.services.media_storage import (
         MediaStorageError,
@@ -651,21 +664,13 @@ def get_cached_gif(catalog_key, provider_id):
     )
     from src.models.user import WorkoutXGif, db
 
-    # Render's filesystem is ephemeral. The database cache survives a deploy and
-    # does not require a separate paid object-storage account.
-    stored = db.session.get(WorkoutXGif, provider_id)
-    if stored is not None:
-        return _write_gif_to_local_cache(cache_path, provider_id, stored.content)
-
     global GIF_DOWNLOAD_BLOCKED_UNTIL, LAST_GIF_DOWNLOAD_AT, PERSISTENT_CACHE_BLOCKED_UNTIL
     # A single process may receive several image requests while the player is
     # rendered. Serialize only uncached provider calls, then recheck all caches.
     with GIF_DOWNLOAD_LOCK:
-        if cache_path.is_file() and cache_path.stat().st_size:
-            return cache_path
-        stored = db.session.get(WorkoutXGif, provider_id)
-        if stored is not None:
-            return _write_gif_to_local_cache(cache_path, provider_id, stored.content)
+        cached = get_stored_gif(provider_id)
+        if cached:
+            return cached
 
         gif = None
         now = time.monotonic()
@@ -709,4 +714,23 @@ def get_cached_gif(catalog_key, provider_id):
         if downloaded:
             db.session.merge(WorkoutXGif(provider_id=provider_id, content=gif))
             db.session.commit()
-        return _write_gif_to_local_cache(cache_path, provider_id, gif)
+        return _write_gif_to_local_cache(
+            Path(current_app.config["WORKOUTX_CACHE_DIR"]) / f"workoutx-{provider_id}.gif",
+            provider_id,
+            gif,
+        )
+
+
+def prefetch_gifs():
+    """Download every selected WorkoutX GIF before users open a workout."""
+    from src.models.user import WorkoutXExercise
+
+    downloaded = 0
+    skipped = 0
+    for exercise in WorkoutXExercise.query.order_by(WorkoutXExercise.provider_id):
+        if get_stored_gif(exercise.provider_id):
+            skipped += 1
+            continue
+        get_cached_gif(f"workoutx:{exercise.provider_id}", exercise.provider_id)
+        downloaded += 1
+    return {"downloaded": downloaded, "already_cached": skipped}

@@ -11,7 +11,7 @@ from src.services.ai import AIQuotaExceededError, AIResponseError, AIServiceErro
 from src.services.analytics import record_event
 from src.services.ai_queue import enqueue_ai_request
 from src.services.rate_limit import rate_limit
-from src.services.workoutx import WorkoutXServiceError, approved_media, get_cached_gif
+from src.services.workoutx import approved_media, get_stored_gif
 from src.services.workout_progress import backfill_session_weeks, user_timezone, validate_timezone
 
 
@@ -362,16 +362,9 @@ def get_exercise_media(catalog_key):
     media = approved_media(catalog_key)
     if media is None:
         abort(404)
-    try:
-        gif_path = get_cached_gif(catalog_key, media["provider_id"])
-    except WorkoutXServiceError as error:
-        current_app.logger.warning("WorkoutX GIF unavailable for %s: %s", catalog_key, error)
-        response = jsonify({"error": "A animação do exercício não está disponível agora."})
-        response.status_code = 503
-        response.headers["Cache-Control"] = "private, max-age=60"
-        if error.retry_after:
-            response.headers["Retry-After"] = str(error.retry_after)
-        return response
+    gif_path = get_stored_gif(media["provider_id"])
+    if gif_path is None:
+        abort(404)
     return send_file(gif_path, mimetype="image/gif", conditional=True, max_age=31_536_000)
 
 

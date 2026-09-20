@@ -42,6 +42,7 @@ from src.services.workoutx import (
     apply_preview_catalog,
     collect_preview_exercises,
     import_exercises,
+    prefetch_gifs,
     preview_catalog_comparison,
 )
 
@@ -225,6 +226,12 @@ def create_app(config_class=None):
         """Import the full WorkoutX exercise catalog into the database."""
         count = import_exercises()
         click.echo(f"WorkoutX exercises imported: {count}")
+
+    @app.cli.command("prefetch-workoutx-gifs")
+    def prefetch_workoutx_gifs():
+        """Download the selected WorkoutX GIFs before they are requested by users."""
+        result = prefetch_gifs()
+        click.echo(", ".join(f"{key}={value}" for key, value in result.items()))
 
     @app.cli.command("collect-workoutx-preview")
     def collect_workoutx_preview():
