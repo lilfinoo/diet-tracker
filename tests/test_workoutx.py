@@ -38,8 +38,14 @@ def test_workoutx_downloads_a_gif_once(app, tmp_path, monkeypatch):
     assert calls == ["https://api.workoutxapp.com/v1/gifs/0201"]
 
 
-def test_workoutx_review_queue_has_twelve_exercises():
-    assert len(workoutx.REVIEW_QUEUE) == 12
+def test_workoutx_restores_a_gif_from_persistent_cache(app, tmp_path, monkeypatch):
+    monkeypatch.setattr("src.services.media_storage.get_exercise_gif", lambda provider_id: b"GIF89apersistent")
+    monkeypatch.setattr(workoutx, "_request", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("API called")))
+    with app.app_context():
+        app.config["WORKOUTX_CACHE_DIR"] = tmp_path
+        path = workoutx.get_cached_gif("workoutx:0289", "0289")
+
+    assert path.read_bytes() == b"GIF89apersistent"
 
 
 def test_workoutx_search_discards_unsafe_provider_ids(app, monkeypatch):
@@ -138,6 +144,60 @@ def test_exercise_media_requires_login(client):
     assert client.get("/api/exercise-media/agachamento_livre").status_code == 401
 
 
+def test_workoutx_catalog_key_uses_its_own_gif_without_manual_review(app):
+    with app.app_context():
+        db.session.add(WorkoutXExercise(provider_id="0289", data={
+            "id": "0289", "name": "Dumbbell Bench Press",
+            "equipment": "Dumbbell", "gifUrl": "https://example.test/0289.gif",
+        }))
+        db.session.commit()
+
+        assert workoutx.approved_media("workoutx:0289") == {
+            "provider_id": "0289",
+            "provider_name": "Dumbbell Bench Press",
+            "provider_equipment": "Dumbbell",
+        }
+
+
+def test_authenticated_user_can_serve_a_direct_workoutx_gif(app, client, tmp_path, monkeypatch):
+    assert client.post("/api/register", json=registration_payload("athlete")).status_code == 201
+    media_path = tmp_path / "0289.gif"
+    media_path.write_bytes(b"GIF89adirect")
+    monkeypatch.setattr("src.routes.profile_routes.get_cached_gif", lambda *args: media_path)
+    with app.app_context():
+        db.session.add(WorkoutXExercise(provider_id="0289", data={
+            "id": "0289", "name": "Dumbbell Bench Press",
+            "equipment": "Dumbbell", "gifUrl": "https://example.test/0289.gif",
+        }))
+        db.session.commit()
+
+    response = client.get("/api/exercise-media/workoutx:0289")
+    assert response.status_code == 200
+    assert response.data == b"GIF89adirect"
+
+
+def test_exact_legacy_alias_is_automatic_but_equipment_mismatch_is_doubt(app):
+    exercise = {
+        "name": "Supino reto com halteres",
+        "aliases": ["dumbbell bench press"],
+        "equipment": "dumbbell",
+    }
+    with app.app_context():
+        db.session.add(WorkoutXExercise(provider_id="0289", data={
+            "id": "0289", "name": "Dumbbell Bench Press",
+            "equipment": "Dumbbell", "gifUrl": "https://example.test/0289.gif",
+        }))
+        db.session.commit()
+
+        assert workoutx.automatic_legacy_media(exercise)["provider_id"] == "0289"
+        assert not workoutx.review_mapping_is_doubt(exercise, {
+            "name": "Dumbbell Bench Press", "equipment": "Dumbbell",
+        })
+        assert workoutx.review_mapping_is_doubt(exercise, {
+            "name": "Barbell Bench Press", "equipment": "Barbell",
+        })
+
+
 def test_admin_can_approve_and_serve_exercise_media(app, client, tmp_path, monkeypatch):
     app.config["WORKOUTX_MEDIA_MAPPING_PATH"] = tmp_path / "media.json"
     assert client.post("/api/register", json=registration_payload("admin")).status_code == 201
@@ -152,6 +212,13 @@ def test_admin_can_approve_and_serve_exercise_media(app, client, tmp_path, monke
     })
     monkeypatch.setattr("src.routes.admin_routes.get_cached_gif", lambda *args: media_path)
     monkeypatch.setattr("src.routes.profile_routes.get_cached_gif", lambda *args: media_path)
+
+    with app.app_context():
+        db.session.add(WorkoutXExercise(provider_id="0201", data={
+            "id": "0201", "name": "Barbell Squat", "equipment": "Barbell",
+            "gifUrl": "https://example.test/gif",
+        }))
+        db.session.commit()
 
     response = client.put("/api/admin/exercise-media/agachamento_livre", json={"provider_id": "0201"})
     assert response.status_code == 200

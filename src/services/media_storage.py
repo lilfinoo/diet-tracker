@@ -84,3 +84,44 @@ def delete_avatar(key):
     except (BotoCoreError, ClientError):
         current_app.logger.exception("Avatar deletion failed")
         raise MediaStorageError("Não foi possível remover a foto agora.") from None
+
+
+def get_exercise_gif(provider_id):
+    """Return a persistently cached WorkoutX GIF, or None when it is not cached."""
+    if not configured():
+        return None
+    try:
+        response = _client().get_object(
+            Bucket=current_app.config["MEDIA_R2_BUCKET"],
+            Key=f"exercise-gifs/workoutx/{provider_id}.gif",
+        )
+        limit = current_app.config["WORKOUTX_MAX_RESPONSE_BYTES"]
+        content = response["Body"].read(limit + 1)
+        if len(content) > limit:
+            raise MediaStorageError("GIF excede o tamanho permitido.")
+    except ClientError as error:
+        code = str(error.response.get("Error", {}).get("Code", ""))
+        if code in {"NoSuchKey", "404", "NotFound"}:
+            return None
+        raise MediaStorageError("GIF não encontrado.") from None
+    except BotoCoreError:
+        raise MediaStorageError("GIF não encontrado.") from None
+    return content if content.startswith((b"GIF87a", b"GIF89a")) else None
+
+
+def upload_exercise_gif(provider_id, content):
+    """Persist one approved WorkoutX GIF with immutable browser/CDN caching."""
+    if not configured():
+        return False
+    try:
+        _client().put_object(
+            Bucket=current_app.config["MEDIA_R2_BUCKET"],
+            Key=f"exercise-gifs/workoutx/{provider_id}.gif",
+            Body=content,
+            ContentType="image/gif",
+            CacheControl="public, max-age=31536000, immutable",
+        )
+    except (BotoCoreError, ClientError):
+        current_app.logger.exception("Exercise GIF upload failed")
+        raise MediaStorageError("Não foi possível salvar o GIF agora.") from None
+    return True

@@ -2489,7 +2489,11 @@
 
     async function preloadWorkoutAssets(day) {
         const exercises = asArray(day?.exercises);
-        await Promise.all(exercises.flatMap((original) => {
+        const activeIndex = exercises.findIndex((exercise) => String(exercise.id) === String(workoutView.activeExerciseId));
+        const preload = workoutView.session
+            ? exercises.slice(Math.max(activeIndex, 0), Math.max(activeIndex, 0) + 2)
+            : exercises.slice(0, 1);
+        await Promise.all(preload.flatMap((original) => {
             const exercise = displayedExercise(original).exercise;
             const paths = [exerciseImage(exercise), typeof exerciseFallbackImagePath === "function" ? exerciseFallbackImagePath(exercise?.catalog_key) : ""];
             return paths.filter(Boolean).map((src) => new Promise((resolve) => {
@@ -4284,6 +4288,12 @@
         g.stage.style.setProperty("--player-preview-offset", swipeLeft ? "100%" : "-100%");
         g.stage.style.setProperty("--player-swipe-x", swipeLeft ? "-110%" : "110%");
         const finish = () => {
+            if (direction > 0) {
+                // Advancing is the user's lightweight confirmation that this exercise is done.
+                // Completion renders optimistically before its request resolves, so the swipe stays fluid.
+                completeWorkoutExercise(g.exerciseId);
+                return;
+            }
             navigateSessionExercise(direction);
         };
         const frame = callback => {

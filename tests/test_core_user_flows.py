@@ -15,6 +15,9 @@ def register(client, username):
 
 def test_login_logout_and_check_session(client):
     register(client, "alice")
+    session = client.get("/api/check_session")
+    assert session.get_json()["user"]["onboarding_status"] == "new"
+    assert session.get_json()["user"]["profile_complete"] is False
     assert client.post("/api/logout").status_code == 200
     assert client.get("/api/check_session").get_json() == {"logged_in": False}
 
@@ -34,10 +37,43 @@ def test_login_logout_and_check_session(client):
     assert session.status_code == 200
     assert session.get_json()["logged_in"] is True
     assert session.get_json()["user"]["username"] == "alice"
+    assert session.get_json()["user"]["onboarding_status"] == "new"
 
     assert client.post("/api/logout").status_code == 200
     assert client.get("/api/check_session").get_json() == {"logged_in": False}
     assert client.get("/api/diet").status_code == 401
+
+
+def test_profile_onboarding_state_transitions(client):
+    register(client, "onboarding")
+    initial = client.get("/api/profile")
+    assert initial.status_code == 200
+    assert initial.get_json()["onboarding_status"] == "new"
+    assert set(initial.get_json()["profile_missing_fields"]) == {
+        "goal", "activity_level", "age", "gender", "weight", "height",
+    }
+
+    partial = client.post("/api/profile", json={"goal": "perder peso", "height": "1,80"})
+    assert partial.status_code == 200
+    partial_data = partial.get_json()
+    assert partial_data["profile"]["height"] == 180
+    assert partial_data["onboarding_status"] == "incomplete"
+    assert partial_data["profile_complete"] is False
+
+    complete = client.post("/api/profile", json={
+        "goal": "perder peso",
+        "activity_level": "moderado",
+        "age": 30,
+        "gender": "masculino",
+        "weight": 82,
+        "height": "1.80",
+        "timezone": "America/Sao_Paulo",
+    })
+    assert complete.status_code == 200
+    assert complete.get_json()["onboarding_status"] == "complete"
+    assert complete.get_json()["profile_complete"] is True
+    assert complete.get_json()["profile_missing_fields"] == []
+    assert client.get("/api/check_session").get_json()["user"]["profile_complete"] is True
 
 
 def test_diet_crud_and_user_isolation(app, client):
@@ -126,6 +162,21 @@ def test_measurement_crud_and_user_isolation(app, client):
         f"/api/measurements/{alice_measurement_id}"
     ).status_code == 200
     assert client.get("/api/measurements").get_json() == []
+
+
+def test_height_normalization_for_profile_and_measurements(client):
+    register(client, "height-user")
+    for raw, expected in (("190", 190), ("1.90", 190), ("1,90", 190), ("1.80", 180), ("1,80", 180)):
+        response = client.post("/api/profile", json={"height": raw})
+        assert response.status_code == 200
+        assert response.get_json()["profile"]["height"] == expected
+
+    measurement = client.post("/api/measurements", json={"date": "2026-08-10", "height": "1,80"})
+    assert measurement.status_code == 201
+    assert measurement.get_json()["measurement"]["height"] == 180
+
+    invalid = client.post("/api/profile", json={"height": "abc"})
+    assert invalid.status_code == 400
 
 
 def test_stats_reports_latest_measurement_and_diet_counts(client):

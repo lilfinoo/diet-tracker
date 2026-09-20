@@ -209,7 +209,6 @@ def get_exercise_replacement_options(session_id, exercise_id):
 
 @session_bp.route("/workout_sessions/<int:session_id>/exercises/<int:exercise_id>/replace", methods=["POST"])
 @login_required
-@idempotent_mutation
 def replace_exercise_for_session(session_id, exercise_id):
     session_record = _owned_active_session(session_id)
     exercise = _session_exercise(session_record, exercise_id) if session_record else None

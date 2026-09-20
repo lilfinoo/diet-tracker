@@ -93,10 +93,18 @@ test('cancel, lost capture, second finger, ambiguity and pending state never sav
     s.pendingAction='complete-100'; swipe(api,surface,-90,0);
     await tick(); assert.equal(calls.length,0); assert.equal(api.gesture(),null);
 });
-test('a left horizontal gesture advances to the next exercise without completing the current one',()=>{
-    const {api,s,calls}=harness();
+test('a left horizontal gesture completes the current exercise and advances without waiting for the server', async()=>{
+    const {api,s,c,calls}=harness();
+    s.setDrafts.set('100',[{load_kg:'42,5',repetitions:'8',completed:true}]);
+    c.respond=async()=>({session:{...s.session,completed_exercise_ids:[100]}});
     swipe(api,stage(),-90,0);
-    assert.equal(calls.length,0); assert.equal(s.activeExerciseId,'101');
+    await tick(); await tick();
+    assert.equal(calls.length,1); assert.ok(calls[0].url.endsWith('/complete'));
+    assert.equal(calls[0].options.body.sets.length,1);
+    assert.equal(calls[0].options.body.sets[0].load_kg,42.5);
+    assert.equal(calls[0].options.body.sets[0].repetitions,8);
+    assert.equal(calls[0].options.body.sets[0].is_warmup,false);
+    assert.equal(s.activeExerciseId,'101'); assert.ok(s.session.completed_exercise_ids.includes('100'));
 });
 test('a right horizontal gesture navigates back without completing the current exercise',()=>{
     const {api,s,calls}=harness(); s.activeExerciseId='101';
@@ -105,10 +113,13 @@ test('a right horizontal gesture navigates back without completing the current e
     assert.deepEqual(s.session.completed_exercise_ids,[]);
     assert.equal(calls.length,0);
 });
-test('a left horizontal gesture after the last exercise opens the finish card without finishing the session',()=>{
-    const {api,s,calls}=harness(); s.days[0].exercises=s.days[0].exercises.slice(0,1);
+test('a left horizontal gesture after the last exercise completes it and opens the finish card', async()=>{
+    const {api,s,c,calls}=harness(); s.days[0].exercises=s.days[0].exercises.slice(0,1);
+    c.respond=async()=>({session:{...s.session,completed_exercise_ids:[100]}});
     swipe(api,stage(),-90,0);
-    assert.equal(calls.length,0); assert.equal(s.playerScreen,'finish'); assert.equal(s.activeExerciseId,'100'); assert.ok(s.session);
+    await tick(); await tick();
+    assert.equal(calls.length,1); assert.ok(calls[0].url.endsWith('/complete'));
+    assert.equal(s.playerScreen,'finish'); assert.equal(s.activeExerciseId,'100'); assert.ok(s.session);
     swipe(api,stage(),90,0);
     assert.equal(s.playerScreen,'exercise'); assert.equal(s.activeExerciseId,'100');
 });

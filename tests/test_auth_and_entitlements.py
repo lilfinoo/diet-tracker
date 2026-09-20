@@ -50,6 +50,8 @@ def test_google_first_access_creation_and_relogin(app, client, monkeypatch):
     )
     assert created.status_code == 201
     assert created.get_json()["user"]["username"] == "google-user"
+    assert created.get_json()["user"]["onboarding_status"] == "new"
+    assert created.get_json()["user"]["profile_complete"] is False
     with app.app_context():
         user = User.query.filter_by(username="google-user").one()
         identity = OAuthIdentity.query.one()
@@ -61,6 +63,7 @@ def test_google_first_access_creation_and_relogin(app, client, monkeypatch):
     relogin = client.post("/api/auth/google", json={"credential": "new-google-token"})
     assert relogin.status_code == 200
     assert relogin.get_json()["user"]["username"] == "google-user"
+    assert relogin.get_json()["user"]["onboarding_status"] == "new"
 
 
 def test_google_signup_rejects_username_collision(client, monkeypatch):

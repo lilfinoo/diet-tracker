@@ -726,6 +726,7 @@
           <div class="meta">${escapeHtml(item.equipment)} · ${escapeHtml(item.primary_muscle)}</div>
           <div class="meta">${escapeHtml(item.movement_pattern)}</div>
           <div class="meta">Consulta: ${escapeHtml(item.search_query)}</div>
+          <div class="meta">Dúvida: ${escapeHtml(item.reason || 'revisão necessária')}</div>
           ${item.review ? `<div class="meta">Atual: ${escapeHtml(item.review.provider_name || item.review.provider_id)} · ${escapeHtml(item.review.status)}</div>` : ''}
           <div class="media-review-search">
             <input type="search" placeholder="Buscar candidato" data-media-search="${escapeHtml(item.catalog_key)}">

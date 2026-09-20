@@ -569,10 +569,23 @@ def test_guided_workout_creation_and_temporary_replacement(app, client, monkeypa
             "unavailable_equipment": ["machine"],
             "available_equipment": ["full_gym"],
         },
+        headers={"Idempotency-Key": "temporary-replacement"},
     )
     assert replace_response.status_code == 200
     assert replace_response.get_json()["override"]["name"] == options[0]["name"]
     assert replace_response.get_json()["override"]["equipment"] == options[0]["equipment"]
+
+    repeated_replace = client.post(
+        f"/api/workout_sessions/{session_id}/exercises/{exercise['id']}/replace",
+        json={
+            "catalog_key": options[0]["catalog_key"],
+            "unavailable_equipment": ["machine"],
+            "available_equipment": ["full_gym"],
+        },
+        headers={"Idempotency-Key": "temporary-replacement"},
+    )
+    assert repeated_replace.status_code == 200
+    assert repeated_replace.get_json()["override"]["id"] == replace_response.get_json()["override"]["id"]
 
     other_client = app.test_client()
     other_client.post("/api/register", json=registration_payload("other"))

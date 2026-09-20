@@ -253,7 +253,7 @@ def create_app(config_class=None):
     @app.route("/api/version")
     def version():
         return {
-            "version": os.getenv("APP_VERSION", "v1.1.1"),
+            "version": os.getenv("APP_VERSION", "v1.1.2"),
             "commit": os.getenv("RENDER_GIT_COMMIT", "local")[:12],
         }
 

@@ -3,6 +3,8 @@ import os
 import ssl
 import tempfile
 import time
+import re
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -110,9 +112,33 @@ def approved_media(catalog_key):
     # Runtime approvals live in the database because Render's filesystem is ephemeral.
     from src.models.user import ExerciseMediaReview
 
+    if str(catalog_key or "").startswith("workoutx:"):
+        from src.models.user import WorkoutXExercise, db
+
+        provider_id = _provider_id(str(catalog_key).split(":", 1)[1])
+        exercise = db.session.get(WorkoutXExercise, provider_id)
+        if exercise is None or not exercise.data.get("gifUrl"):
+            return None
+        return {
+            "provider_id": provider_id,
+            "provider_name": str(exercise.data.get("name", "")),
+            "provider_equipment": str(exercise.data.get("equipment", "")),
+        }
+
+    from src.models.user import WorkoutXExercise, db
+    from src.services.workout_plans import catalog_by_key
+
     review = ExerciseMediaReview.query.filter_by(catalog_key=catalog_key).first()
     if review is not None:
         if review.status != "approved" or not review.provider_id:
+            return None
+        provider_row = db.session.get(WorkoutXExercise, review.provider_id)
+        provider = provider_row.data if provider_row else {
+            "name": review.provider_name,
+            "equipment": review.provider_equipment,
+        }
+        exercise = catalog_by_key().get(catalog_key)
+        if exercise and review_mapping_is_doubt(exercise, provider):
             return None
         return {
             "provider_id": review.provider_id,
@@ -120,7 +146,10 @@ def approved_media(catalog_key):
             "provider_equipment": review.provider_equipment or "",
         }
     entry = media_mapping().get(catalog_key)
-    return entry if isinstance(entry, dict) and entry.get("provider_id") else None
+    if isinstance(entry, dict) and entry.get("provider_id"):
+        return entry
+    exercise = catalog_by_key().get(catalog_key)
+    return automatic_legacy_media(exercise) if exercise else None
 
 
 def _request(url, max_bytes=None):
@@ -175,6 +204,92 @@ def search_exercises(query):
             "equipment": str(item.get("equipment", ""))[:100],
         })
     return results
+
+
+def _normalized(value):
+    value = unicodedata.normalize("NFKD", str(value or ""))
+    return re.sub(r"[^a-z0-9]+", " ", "".join(
+        char for char in value if not unicodedata.combining(char)
+    ).lower()).strip()
+
+
+def search_cached_exercises(query, limit=8):
+    """Search the imported WorkoutX catalog without spending an API request."""
+    from src.models.user import WorkoutXExercise
+
+    words = set(_normalized(query).split())
+    if not words:
+        return []
+    ranked = []
+    for row in WorkoutXExercise.query.all():
+        exercise = row.data
+        name = _normalized(exercise.get("name"))
+        name_words = set(name.split())
+        if not words <= name_words and _normalized(query) not in name:
+            continue
+        score = (100 if name == _normalized(query) else 0) + 10 * len(words & name_words)
+        ranked.append((score, name, {
+            "id": str(row.provider_id),
+            "name": str(exercise.get("name", ""))[:200],
+            "equipment": str(exercise.get("equipment", ""))[:100],
+        }))
+    ranked.sort(key=lambda item: (-item[0], item[1], item[2]["id"]))
+    return [item[2] for item in ranked[:limit]]
+
+
+def _equipment_key(value):
+    value = _normalized(value)
+    aliases = {
+        "bodyweight": "body weight", "pullup bar": "body weight",
+        "ez bar": "barbell", "ez barbell": "barbell", "sled machine": "machine",
+        "leverage machine": "machine", "smith machine": "machine",
+        "stationary bike": "bike", "stability ball": "ball",
+        "resistance band": "band", "jump rope": "rope",
+    }
+    value = aliases.get(value, value)
+    if "machine" in value:
+        return "machine"
+    return value
+
+
+def review_mapping_is_doubt(exercise, provider):
+    """Flag legacy approvals whose equipment contradicts the local exercise."""
+    if not provider:
+        return True
+    local_equipment = _equipment_key(exercise.get("equipment"))
+    remote_equipment = _equipment_key(provider.get("equipment"))
+    auxiliary_bodyweight = {"bench", "pullup bar", "sliders"}
+    compatible = (
+        local_equipment == remote_equipment
+        or {local_equipment, remote_equipment} <= ({"body weight"} | auxiliary_bodyweight)
+    )
+    return bool(local_equipment and remote_equipment and not compatible)
+
+
+def automatic_legacy_media(exercise):
+    """Return a unique exact-alias/equipment match; leave every ambiguity to review."""
+    from src.models.user import WorkoutXExercise
+
+    aliases = {_normalized(exercise.get("name"))}
+    aliases.update(_normalized(alias) for alias in exercise.get("aliases", []))
+    local_equipment = _equipment_key(exercise.get("equipment"))
+    matches = []
+    for row in WorkoutXExercise.query.all():
+        candidate = row.data
+        if _normalized(candidate.get("name")) not in aliases:
+            continue
+        if local_equipment != _equipment_key(candidate.get("equipment")):
+            continue
+        if candidate.get("gifUrl"):
+            matches.append(candidate)
+    if len(matches) != 1:
+        return None
+    candidate = matches[0]
+    return {
+        "provider_id": str(candidate["id"]),
+        "provider_name": str(candidate.get("name", "")),
+        "provider_equipment": str(candidate.get("equipment", "")),
+    }
 
 
 def _selection_group(exercise):
@@ -489,12 +604,31 @@ def get_cached_gif(catalog_key, provider_id):
     if cache_path.is_file() and cache_path.stat().st_size:
         return cache_path
 
-    gif = _request(
-        f"{BASE_URL}/gifs/{provider_id}",
-        max_bytes=current_app.config["WORKOUTX_MAX_RESPONSE_BYTES"],
+    from src.services.media_storage import (
+        MediaStorageError,
+        get_exercise_gif,
+        upload_exercise_gif,
     )
+
+    try:
+        gif = get_exercise_gif(provider_id)
+    except MediaStorageError:
+        current_app.logger.warning("Persistent WorkoutX GIF cache unavailable", exc_info=True)
+        gif = None
+
+    downloaded = gif is None
+    if downloaded:
+        gif = _request(
+            f"{BASE_URL}/gifs/{provider_id}",
+            max_bytes=current_app.config["WORKOUTX_MAX_RESPONSE_BYTES"],
+        )
     if not gif.startswith((b"GIF87a", b"GIF89a")):
         raise WorkoutXServiceError("WorkoutX did not return a GIF")
+    if downloaded:
+        try:
+            upload_exercise_gif(provider_id, gif)
+        except MediaStorageError:
+            current_app.logger.warning("Could not persist WorkoutX GIF in R2", exc_info=True)
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(

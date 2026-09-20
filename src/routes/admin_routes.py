@@ -13,11 +13,12 @@ from src.models.user import (
     ProfessionalStudentRelationship,
     Subscription,
     User,
+    WorkoutXExercise,
     db,
 )
 from src.routes.common import admin_required, json_body, page_query
 from src.services.workout_plans import catalog_by_key
-from src.services.workoutx import REVIEW_QUEUE, REVIEW_SEARCH_QUERIES, WorkoutXServiceError, approved_media, get_cached_gif, get_exercise, search_exercises
+from src.services.workoutx import WorkoutXServiceError, automatic_legacy_media, get_cached_gif, get_exercise, review_mapping_is_doubt, search_cached_exercises
 
 
 admin_bp = Blueprint("admin", __name__)
@@ -126,21 +127,31 @@ def list_users():
 def exercise_media_review_queue():
     catalog = catalog_by_key()
     reviews = {item.catalog_key: item for item in ExerciseMediaReview.query.all()}
+    workoutx_exercises = {item.provider_id: item.data for item in WorkoutXExercise.query.all()}
     items = []
-    for key in REVIEW_QUEUE:
-        if approved_media(key):
-            continue
-        exercise = catalog.get(key)
-        if not exercise:
-            continue
+    for key, exercise in catalog.items():
         review = reviews.get(key)
+        provider = (
+            workoutx_exercises.get(review.provider_id) or {
+                "name": review.provider_name,
+                "equipment": review.provider_equipment,
+            }
+            if review else None
+        )
+        is_doubt = (
+            review_mapping_is_doubt(exercise, provider)
+            if review else automatic_legacy_media(exercise) is None
+        )
+        if not is_doubt:
+            continue
         items.append({
             "catalog_key": key,
             "name": exercise["name"],
             "equipment": exercise["equipment"],
             "movement_pattern": exercise["movement_pattern"],
             "primary_muscle": exercise["primary_muscle"],
-            "search_query": REVIEW_SEARCH_QUERIES[key],
+            "search_query": next((alias for alias in exercise.get("aliases", []) if alias.isascii()), exercise["name"]),
+            "reason": "Equipamento incompatível com a aprovação atual." if review else "Ainda não relacionado.",
             "review": {
                 "provider_id": review.provider_id,
                 "provider_name": review.provider_name,
@@ -158,7 +169,7 @@ def search_exercise_media():
     if not 2 <= len(query) <= 80:
         return jsonify({"error": "Informe uma busca entre 2 e 80 caracteres."}), 400
     try:
-        return jsonify({"items": search_exercises(query)}), 200
+        return jsonify({"items": search_cached_exercises(query)}), 200
     except WorkoutXServiceError as error:
         current_app.logger.warning("WorkoutX review search failed: %s", error)
         return jsonify({"error": "Não foi possível buscar candidatos agora."}), 503
