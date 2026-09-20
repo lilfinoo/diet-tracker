@@ -14,6 +14,7 @@ from src.models.user import (
     Subscription,
     User,
     WorkoutXExercise,
+    WorkoutXGif,
     db,
 )
 from src.routes.common import admin_required, json_body, page_query
@@ -183,6 +184,34 @@ def exercise_media_candidate(provider_id):
     except WorkoutXServiceError:
         abort(404)
     return send_file(gif_path, mimetype="image/gif", conditional=True, max_age=86_400)
+
+
+@admin_bp.route("/admin/exercise-media/cache/<provider_id>", methods=["POST"])
+@admin_required
+def upload_exercise_media_cache(provider_id):
+    provider_id = str(provider_id or "")
+    if not provider_id.isdigit() or len(provider_id) > 32:
+        return jsonify({"error": "ID da WorkoutX inválido."}), 400
+    if db.session.get(WorkoutXExercise, provider_id) is None:
+        return jsonify({"error": "Exercício não cadastrado no catálogo WorkoutX."}), 404
+    upload = request.files.get("gif")
+    if upload is None:
+        return jsonify({"error": "Envie um arquivo GIF."}), 400
+    limit = current_app.config["WORKOUTX_MAX_RESPONSE_BYTES"]
+    content = upload.stream.read(limit + 1)
+    if len(content) > limit:
+        return jsonify({"error": "GIF excede o tamanho permitido."}), 413
+    if not content.startswith((b"GIF87a", b"GIF89a")):
+        return jsonify({"error": "Arquivo GIF inválido."}), 400
+    db.session.merge(WorkoutXGif(provider_id=provider_id, content=content))
+    _audit_admin(
+        "exercise_media.cached",
+        resource_type="exercise_media",
+        resource_id=provider_id,
+        details={"bytes": len(content)},
+    )
+    db.session.commit()
+    return jsonify({"provider_id": provider_id, "bytes": len(content)}), 201
 
 
 @admin_bp.route("/admin/exercise-media/<catalog_key>", methods=["PUT"])

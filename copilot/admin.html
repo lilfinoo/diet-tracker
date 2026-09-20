@@ -305,6 +305,15 @@
               <p>Fila de GIFs para aprovação.</p>
             </div>
           </div>
+          <div class="item" style="margin-bottom:14px; align-items:flex-start;">
+            <div>
+              <strong>Cache rápido da WorkoutX</strong>
+              <div class="meta">Importe a pasta local uma única vez. Os GIFs vão direto para o banco e não são publicados no GitHub.</div>
+              <div class="meta" id="mediaCacheImportStatus">Nenhuma importação em andamento.</div>
+            </div>
+            <button type="button" class="action primary small" id="mediaCacheImportBtn">Selecionar pasta</button>
+            <input id="mediaCacheImportInput" type="file" accept="image/gif" multiple webkitdirectory hidden>
+          </div>
           <div class="reviews-grid" id="mediaQueue"></div>
         </article>
       </div>
@@ -449,6 +458,9 @@
       applicationStatusFilter: document.getElementById('applicationStatusFilter'),
       applicationsList: document.getElementById('applicationsList'),
       mediaQueue: document.getElementById('mediaQueue'),
+      mediaCacheImportBtn: document.getElementById('mediaCacheImportBtn'),
+      mediaCacheImportInput: document.getElementById('mediaCacheImportInput'),
+      mediaCacheImportStatus: document.getElementById('mediaCacheImportStatus'),
       reportStats: document.getElementById('reportStats'),
       toast: document.getElementById('toast'),
       premiumModal: document.getElementById('premiumModal'),
@@ -758,6 +770,41 @@
       renderMediaQueue();
     }
 
+    function workoutXProviderIdFromFilename(name) {
+      const match = String(name || '').match(/^review-(\d{4,32})-\1\.gif$/i);
+      return match ? match[1] : '';
+    }
+
+    async function importWorkoutXGifCache(files) {
+      const selected = new Map();
+      [...files].forEach(file => {
+        const providerId = workoutXProviderIdFromFilename(file.name);
+        if (providerId) selected.set(providerId, file);
+      });
+      if (!selected.size) {
+        showToast('Essa pasta não contém os GIFs WorkoutX esperados');
+        return;
+      }
+      els.mediaCacheImportBtn.disabled = true;
+      let imported = 0;
+      let failed = 0;
+      for (const [providerId, file] of selected) {
+        els.mediaCacheImportStatus.textContent = `Enviando ${imported + failed + 1} de ${selected.size} · ${file.name}`;
+        const body = new FormData();
+        body.append('gif', file, file.name);
+        try {
+          await api(`/admin/exercise-media/cache/${encodeURIComponent(providerId)}`, { method: 'POST', body });
+          imported += 1;
+        } catch (_error) {
+          failed += 1;
+        }
+      }
+      els.mediaCacheImportInput.value = '';
+      els.mediaCacheImportBtn.disabled = false;
+      els.mediaCacheImportStatus.textContent = `${imported} GIFs salvos${failed ? ` · ${failed} não enviados` : ''}.`;
+      showToast(failed ? 'Importação concluída com algumas falhas' : 'Cache da WorkoutX importado');
+    }
+
     async function loadAnalytics() {
       const { from, to } = currentRange();
       const bucket = currentBucket();
@@ -906,6 +953,8 @@
       els.userSearch.addEventListener('input', renderUsers);
       els.userRoleFilter.addEventListener('change', renderUsers);
       els.applicationStatusFilter.addEventListener('change', loadApplications);
+      els.mediaCacheImportBtn.addEventListener('click', () => els.mediaCacheImportInput.click());
+      els.mediaCacheImportInput.addEventListener('change', () => importWorkoutXGifCache(els.mediaCacheImportInput.files));
       document.body.addEventListener('click', async (event) => {
         const btn = event.target.closest('[data-user]');
         if (btn) {

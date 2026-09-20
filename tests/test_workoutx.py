@@ -1,5 +1,7 @@
 from src.services import workoutx
-from src.models.user import ExerciseMediaReview, User, WorkoutXExercise, db
+from io import BytesIO
+
+from src.models.user import ExerciseMediaReview, User, WorkoutXExercise, WorkoutXGif, db
 from tests.helpers import registration_payload
 
 
@@ -201,6 +203,28 @@ def test_authenticated_user_can_serve_a_direct_workoutx_gif(app, client, tmp_pat
     response = client.get("/api/exercise-media/workoutx:0289")
     assert response.status_code == 200
     assert response.data == b"GIF89adirect"
+
+
+def test_admin_can_import_a_workoutx_gif_directly_into_database(app, client):
+    assert client.post("/api/register", json=registration_payload("gif-admin")).status_code == 201
+    with app.app_context():
+        user = User.query.filter_by(username="gif-admin").one()
+        user.is_admin = True
+        db.session.add(WorkoutXExercise(provider_id="0289", data={
+            "id": "0289", "name": "Dumbbell Bench Press",
+            "equipment": "Dumbbell", "gifUrl": "https://example.test/0289.gif",
+        }))
+        db.session.commit()
+
+    response = client.post(
+        "/api/admin/exercise-media/cache/0289",
+        data={"gif": (BytesIO(b"GIF89aimported"), "review-0289-0289.gif")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 201
+    with app.app_context():
+        assert db.session.get(WorkoutXGif, "0289").content == b"GIF89aimported"
 
 
 def test_exact_legacy_alias_is_automatic_but_equipment_mismatch_is_doubt(app):
