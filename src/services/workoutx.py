@@ -4,6 +4,7 @@ import ssl
 import tempfile
 import time
 import re
+import threading
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,8 @@ from src.services.workoutx_classification import movement_pattern
 
 BASE_URL = "https://api.workoutxapp.com/v1"
 SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+GIF_DOWNLOAD_LOCK = threading.Lock()
+LAST_GIF_DOWNLOAD_AT = 0.0
 
 REVIEW_QUEUE = (
     "puxada_com_elastico", "flexao_joelhos_deslizante", "flexao_nordica",
@@ -597,42 +600,11 @@ def get_exercise(provider_id):
     return data
 
 
-def get_cached_gif(catalog_key, provider_id):
-    provider_id = _provider_id(provider_id)
-    cache_dir = Path(current_app.config["WORKOUTX_CACHE_DIR"])
-    cache_path = cache_dir / f"workoutx-{provider_id}.gif"
-    if cache_path.is_file() and cache_path.stat().st_size:
-        return cache_path
-
-    from src.services.media_storage import (
-        MediaStorageError,
-        get_exercise_gif,
-        upload_exercise_gif,
-    )
-
+def _write_gif_to_local_cache(cache_path, provider_id, gif):
     try:
-        gif = get_exercise_gif(provider_id)
-    except MediaStorageError:
-        current_app.logger.warning("Persistent WorkoutX GIF cache unavailable", exc_info=True)
-        gif = None
-
-    downloaded = gif is None
-    if downloaded:
-        gif = _request(
-            f"{BASE_URL}/gifs/{provider_id}",
-            max_bytes=current_app.config["WORKOUTX_MAX_RESPONSE_BYTES"],
-        )
-    if not gif.startswith((b"GIF87a", b"GIF89a")):
-        raise WorkoutXServiceError("WorkoutX did not return a GIF")
-    if downloaded:
-        try:
-            upload_exercise_gif(provider_id, gif)
-        except MediaStorageError:
-            current_app.logger.warning("Could not persist WorkoutX GIF in R2", exc_info=True)
-    try:
-        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
-            dir=cache_dir,
+            dir=cache_path.parent,
             prefix=f".workoutx-{provider_id}-",
             suffix=".tmp",
         )
@@ -646,3 +618,68 @@ def get_cached_gif(catalog_key, provider_id):
     except OSError as error:
         raise WorkoutXServiceError("WorkoutX GIF could not be cached") from error
     return cache_path
+
+
+def get_cached_gif(catalog_key, provider_id):
+    del catalog_key  # Provider ID is the stable cache key across local exercise aliases.
+    provider_id = _provider_id(provider_id)
+    cache_dir = Path(current_app.config["WORKOUTX_CACHE_DIR"])
+    cache_path = cache_dir / f"workoutx-{provider_id}.gif"
+    if cache_path.is_file() and cache_path.stat().st_size:
+        return cache_path
+
+    from src.services.media_storage import (
+        MediaStorageError,
+        configured as persistent_media_configured,
+        get_exercise_gif,
+        upload_exercise_gif,
+    )
+    from src.models.user import WorkoutXGif, db
+
+    # Render's filesystem is ephemeral. The database cache survives a deploy and
+    # does not require a separate paid object-storage account.
+    stored = db.session.get(WorkoutXGif, provider_id)
+    if stored is not None:
+        return _write_gif_to_local_cache(cache_path, provider_id, stored.content)
+
+    global LAST_GIF_DOWNLOAD_AT
+    # A single process may receive several image requests while the player is
+    # rendered. Serialize only uncached provider calls, then recheck all caches.
+    with GIF_DOWNLOAD_LOCK:
+        if cache_path.is_file() and cache_path.stat().st_size:
+            return cache_path
+        stored = db.session.get(WorkoutXGif, provider_id)
+        if stored is not None:
+            return _write_gif_to_local_cache(cache_path, provider_id, stored.content)
+
+        gif = None
+        if persistent_media_configured():
+            try:
+                gif = get_exercise_gif(provider_id)
+            except MediaStorageError:
+                current_app.logger.warning("Persistent WorkoutX GIF cache unavailable", exc_info=True)
+
+        downloaded = gif is None
+        if downloaded:
+            interval = max(float(current_app.config["WORKOUTX_GIF_REQUEST_INTERVAL"]), 0.0)
+            remaining = interval - (time.monotonic() - LAST_GIF_DOWNLOAD_AT)
+            if remaining > 0:
+                time.sleep(remaining)
+            try:
+                gif = _request(
+                    f"{BASE_URL}/gifs/{provider_id}",
+                    max_bytes=current_app.config["WORKOUTX_MAX_RESPONSE_BYTES"],
+                )
+            finally:
+                LAST_GIF_DOWNLOAD_AT = time.monotonic()
+        if not gif.startswith((b"GIF87a", b"GIF89a")):
+            raise WorkoutXServiceError("WorkoutX did not return a GIF")
+        if downloaded and persistent_media_configured():
+            try:
+                upload_exercise_gif(provider_id, gif)
+            except MediaStorageError:
+                current_app.logger.warning("Could not persist WorkoutX GIF in R2", exc_info=True)
+        if downloaded:
+            db.session.merge(WorkoutXGif(provider_id=provider_id, content=gif))
+            db.session.commit()
+        return _write_gif_to_local_cache(cache_path, provider_id, gif)

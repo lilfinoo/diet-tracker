@@ -3054,8 +3054,8 @@
             <section class="active-workout-shell active-workout-shell--immersive">
                 <article class="current-exercise-stage current-exercise-stage--player${exerciseDone ? " is-completed-view" : exerciseSkipped ? " is-skipped-view" : ""}${workoutView.setEntryMode === 'quick' ? " has-quick-set" : ""}" data-workout-player-card data-workout-card-kind="exercise" data-workout-exercise-card data-exercise-id="${esc(currentOriginal.id)}">
                     <figure class="current-exercise-media">${exerciseImageMarkup(exercise, true)}</figure>
-                    ${previousExercise ? `<figure class="current-exercise-preview current-exercise-preview--previous" aria-hidden="true">${exerciseImageMarkup(previousExercise, true)}</figure>` : ""}
-                    ${nextExercise ? `<figure class="current-exercise-preview current-exercise-preview--next" aria-hidden="true">${exerciseImageMarkup(nextExercise, true)}</figure>` : ""}
+                    ${previousExercise ? '<figure class="current-exercise-preview current-exercise-preview--previous" aria-hidden="true"></figure>' : ""}
+                    ${nextExercise ? '<figure class="current-exercise-preview current-exercise-preview--next" aria-hidden="true"></figure>' : ""}
                     ${!nextExercise ? `<div class="current-exercise-preview current-exercise-preview--next workout-finish-preview" aria-hidden="true">${workoutFinishPreviewMarkup(finishState, progressState)}</div>` : ""}
                     ${toolbar}
                     ${navigation}

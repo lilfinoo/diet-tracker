@@ -78,6 +78,9 @@ class Config:
     MEDIA_R2_BUCKET = os.getenv("MEDIA_R2_BUCKET")
     WORKOUTX_API_KEY = os.getenv("WORKOUTX_API_KEY")
     WORKOUTX_TIMEOUT = int(os.getenv("WORKOUTX_TIMEOUT", "15"))
+    # WorkoutX limits authenticated GIF requests. A short global interval lets the
+    # first uncached images arrive without turning a page render into a burst.
+    WORKOUTX_GIF_REQUEST_INTERVAL = float(os.getenv("WORKOUTX_GIF_REQUEST_INTERVAL", "3"))
     WORKOUTX_MAX_RESPONSE_BYTES = int(
         os.getenv("WORKOUTX_MAX_RESPONSE_BYTES", str(15 * 1024 * 1024))
     )

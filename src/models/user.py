@@ -1261,6 +1261,16 @@ class WorkoutXExercise(db.Model):
     imported_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
+class WorkoutXGif(db.Model):
+    """Durable, provider-sourced GIF cache keyed by WorkoutX exercise ID."""
+
+    __tablename__ = "workoutx_gif"
+
+    provider_id = db.Column(db.String(32), primary_key=True)
+    content = db.Column(db.LargeBinary, nullable=False)
+    cached_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
 class DietPlan(db.Model):
     __table_args__ = (
         db.CheckConstraint("status IN ('draft', 'published', 'archived')", name="ck_diet_plan_status"),

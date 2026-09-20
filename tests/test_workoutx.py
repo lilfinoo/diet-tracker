@@ -47,12 +47,32 @@ def test_examples_use_only_workoutx_gifs(app):
 
 def test_workoutx_restores_a_gif_from_persistent_cache(app, tmp_path, monkeypatch):
     monkeypatch.setattr("src.services.media_storage.get_exercise_gif", lambda provider_id: b"GIF89apersistent")
+    monkeypatch.setattr("src.services.media_storage.configured", lambda: True)
     monkeypatch.setattr(workoutx, "_request", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("API called")))
     with app.app_context():
         app.config["WORKOUTX_CACHE_DIR"] = tmp_path
         path = workoutx.get_cached_gif("workoutx:0289", "0289")
 
     assert path.read_bytes() == b"GIF89apersistent"
+
+
+def test_workoutx_persists_a_gif_in_the_database_cache(app, tmp_path, monkeypatch):
+    calls = []
+
+    def fake_request(url, **_kwargs):
+        calls.append(url)
+        return b"GIF89adatabase-cache"
+
+    monkeypatch.setattr(workoutx, "_request", fake_request)
+    with app.app_context():
+        app.config["WORKOUTX_CACHE_DIR"] = tmp_path
+        first = workoutx.get_cached_gif("workoutx:0289", "0289")
+        first.unlink()
+        second = workoutx.get_cached_gif("workoutx:0289", "0289")
+
+    assert first == second
+    assert second.read_bytes() == b"GIF89adatabase-cache"
+    assert calls == ["https://api.workoutxapp.com/v1/gifs/0289"]
 
 
 def test_workoutx_search_discards_unsafe_provider_ids(app, monkeypatch):
