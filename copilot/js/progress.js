@@ -310,7 +310,7 @@
         container.innerHTML = `<section class="evolution-section"><h3>Seu ritmo</h3><div class="rhythm-grid">${renderWeekly(result.weekly)}${renderFoodRhythm(result.consistency, current)}</div>${renderWeeklyEditor(result.weekly)}</section><section class="evolution-section"><h3>Suas mudanças</h3>${renderBodyPreview(result.body)}${renderRecentPerformance(result.performance?.recent)}</section><section class="evolution-section progress-next"><h3>Próximo passo</h3><p>${!current.target ? 'Defina um ritmo que funcione para você.' : current.fulfilled ? 'Meta cumprida. Organize seu próximo treino.' : `Falta${current.target - current.completed === 1 ? '' : 'm'} ${Math.max(0, current.target - current.completed)} treino${current.target - current.completed === 1 ? '' : 's'} nesta semana.`}</p><button type="button" class="progress-primary-action" data-progress-action="${current.target ? 'go-training' : 'edit-weekly'}"${current.target ? '' : ' aria-expanded="false" aria-controls="weeklyGoalEditor"'}>${progressIcon(current.target ? 'dumbbell' : 'target')}${current.target ? 'Ver meu treino' : 'Definir meta'}${progressIcon('chevron-right')}</button><button type="button" class="progress-text-action" data-progress-action="go-diet">${progressIcon('utensils')}Acompanhar alimentação</button></section>${goal ? `<details class="progress-goal-detail"><summary>${progressIcon('target')}Meta de exercício · ${esc(goal.exercise_name)}</summary><p>Melhor carga: ${goal.current_max_load == null ? 'não registrada' : `${number(goal.current_max_load)} kg`} · meta ${number(goal.target_load_kg)} kg</p><details class="goal-cancel"><summary>Cancelar meta</summary><p>Seu histórico será preservado.</p><button type="button" data-cancel-goal="${esc(goal.id)}">Confirmar cancelamento</button><p data-cancel-error role="alert"></p></details></details>` : ''}<details class="evolution-consistency"><summary>${progressIcon('calendar-days')}Constância por dia e semana</summary><p class="food-legend">✓ Acompanhado · ○ Pendente · — Sem informação · · Futuro. Acompanhamento não é adesão ao plano.</p>${renderConsistencyCalendar(result.consistency)}${renderConsistencyHistory(result.weekly)}</details>`;
     }
 
-    async function loadProgressOverview() {
+    async function loadProgressOverview({ background = false } = {}) {
         const container = byId("workoutProgressOverview");
         if (!container || !currentUser) return;
         const ownerId = String(currentUser.id);
@@ -319,13 +319,13 @@
             renderProgressOverview(overviewCache.data);
             return overviewCache.data;
         }
-        if (!overviewCache || overviewCache.ownerId !== ownerId) {
+        if (overviewPromise) return overviewPromise;
+        if (!background && (!overviewCache || overviewCache.ownerId !== ownerId)) {
             container.innerHTML = '<div class="plans-loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Calculando progresso...</span></div>';
-        } else {
+        } else if (!background) {
             container.setAttribute("aria-busy", "true");
             container.insertAdjacentHTML("afterbegin", '<p class="progress-refresh" role="status">Atualizando…</p>');
         }
-        if (overviewPromise) return overviewPromise;
         const token = progressRequestToken;
         const request = ++overviewRequest;
         overviewPromise = (async () => {
@@ -602,6 +602,7 @@
     window.renderProgressRecord = recordLabel;
     window.loadWorkoutActivities = loadActivities;
     window.loadProgressOverview = loadProgressOverview;
+    window.preloadProgressOverview = () => loadProgressOverview({ background: true });
     window.invalidateProgressOverview = () => { overviewCache = null; };
     window.loadPersonalRecords = loadPersonalRecords;
     window.openExerciseProgress = openExerciseProgress;

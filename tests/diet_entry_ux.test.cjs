@@ -3,29 +3,77 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../copilot/js/diet-entry.js'), 'utf8');
+const settle = () => new Promise(resolve => setImmediate(resolve));
 function harness() {
     const nodes = new Map();
     function node(id) {
-        if (!nodes.has(id)) nodes.set(id, { id, value: '', textContent: '', hidden: false, disabled: false, dataset: {}, listeners: {}, classList: { add() {}, remove() {} },
+        if (!nodes.has(id)) nodes.set(id, { id, value: '', textContent: '', hidden: false, disabled: false, dataset: {}, listeners: {}, classList: { add() {}, remove() {}, toggle() {} },
             addEventListener(event, fn) { this.listeners[event] = fn; }, focus() {}, removeAttribute(key) { delete this[key]; },
+            setAttribute(key, value) { this[key] = value; },
             checkValidity: () => true, reportValidity() {}, querySelector: () => ({ scrollTop: 0 }),
             reset() { for (const n of nodes.values()) n.value = ''; } });
         return nodes.get(id);
     }
     const steps = [1, 2, 3, 4].map(n => Object.assign(node('step' + n), { dataset: { dietStep: String(n) } }));
     const methods = ['text', 'photo'].map(n => Object.assign(node(n), { dataset: { dietMethod: n } }));
-    const c = { window: {}, currentUser: { id: 'alice' }, API_BASE: '/api', confirm: () => true, calls: [],
+    const c = { window: {}, currentUser: { id: 'alice' }, API_BASE: '/api', confirm: () => true, calls: [], pickerCalls: [],
         document: { getElementById: node, querySelectorAll: s => s === '[data-diet-step]' ? steps : methods, addEventListener: (_, fn) => { c.ready = fn; } },
-        downscaleImageFile: async () => ({ base64: 'photo', dataUrl: 'data:image/jpeg;base64,photo' }),
+        atob: value => Buffer.from(value, 'base64').toString('binary'),
+        Blob,
+        downscaleImageFile: async () => ({ base64: 'photo', dataUrl: 'data:image/jpeg;base64,cGhvdG8=' }),
         respond: async () => ({ ok: true, json: async () => ({ description: 'Arroz e feijão', calories: 100, protein: 0, carbs: null, fat: 1 }) }),
         fetch: async (url, options) => { c.calls.push({ url, options }); return c.respond(); } };
+    c.window.FitTrackerImagePicker = { open: async options => { c.pickerCalls.push(options); return null; } };
     vm.createContext(c); vm.runInContext(source, c); c.ready(); c.flow = c.window.DietEntryFlow; c.node = node;
     c.closeDietModal = () => { c.closed = c.flow.canClose(); };
     c.click = id => node(id).listeners.click();
     c.input = (id, value) => { node(id).value = value; node('dietForm').listeners.input({ target: node(id) }); };
-    c.upload = () => node('dietPhotoInput').listeners.change({ target: { files: [{ type: 'image/heic' }] } });
+    c.upload = async () => { await settle(); return node('dietPhotoInput').listeners.change({ target: { files: [{ type: 'image/heic' }] } }); };
     c.flow.begin(); return c;
 }
+test('um toque em Usar foto abre a câmera e bloqueia abertura duplicada', async () => {
+    const c = harness(); let finish;
+    c.window.FitTrackerImagePicker.open = options => { c.pickerCalls.push(options); return new Promise(resolve => { finish = resolve; }); };
+    c.click('photo'); c.click('dietPhotoBtn');
+    assert.equal(c.pickerCalls.length, 1); assert.equal(c.pickerCalls[0].source, 'CAMERA');
+    assert.equal(c.node('dietFlowNext').disabled, true);
+    c.pickerCalls[0].onState({ status: 'cancelled', source: 'CAMERA' }); finish(null); await settle();
+    assert.match(c.node('dietPhotoStatus').textContent, /cancelada/); assert.equal(c.node('dietFlowNext').disabled, false);
+});
+test('permissão negada mantém rascunho e oferece nova tentativa e fototeca', async () => {
+    const c = harness(); c.input('dietSourceText', 'Sem açúcar');
+    c.window.FitTrackerImagePicker.open = async options => { c.pickerCalls.push(options); throw Object.assign(new Error('Permita o acesso à câmera nos ajustes do dispositivo.'), { code: 'permission_denied' }); };
+    c.click('photo'); await settle();
+    assert.equal(c.node('dietSourceText').value, 'Sem açúcar'); assert.match(c.node('dietPhotoStatus').textContent, /Permita/);
+    assert.equal(c.node('dietPhotoBtnLabel').textContent, 'Tentar novamente'); assert.equal(c.node('dietPhotoLibraryBtn').hidden, false);
+});
+test('fototeca é uma ação explícita e preserva o fluxo textual', async () => {
+    const c = harness(); c.click('text'); assert.equal(c.pickerCalls.length, 0);
+    c.click('dietFlowBack'); c.click('photo'); await settle(); c.click('dietPhotoLibraryBtn'); await settle();
+    assert.deepEqual(c.pickerCalls.map(call => call.source), ['CAMERA', 'PHOTOS']);
+});
+test('retorno tardio da câmera após troca de conta é ignorado', async () => {
+    const c = harness(); let release;
+    c.window.FitTrackerImagePicker.open = async options => { c.pickerCalls.push(options); await new Promise(resolve => { release = resolve; }); await options.onFile({ type: 'image/jpeg' }); return {}; };
+    c.click('photo'); c.currentUser = { id: 'bob' }; c.flow.reset(); release(); await Promise.resolve(); await Promise.resolve();
+    assert.equal(c.node('dietPhotoPreview').hidden, true); assert.equal(c.node('dietPhotoStatus').textContent, '');
+});
+test('falha ou cancelamento ao substituir preserva a foto confirmada', async () => {
+    const c = harness(); c.click('photo'); await c.upload();
+    const original = c.node('dietPhotoPreviewImg').src;
+    c.downscaleImageFile = async () => { throw new Error('invalid'); };
+    c.window.FitTrackerImagePicker.open = async options => { c.pickerCalls.push(options); await options.onFile({ type: 'image/jpeg' }); return {}; };
+    c.click('dietPhotoBtn'); await settle();
+    assert.equal(c.node('dietPhotoPreviewImg').src, original); assert.equal(c.node('dietPhotoPreview').hidden, false);
+    assert.match(c.node('dietPhotoStatus').textContent, /Não foi possível abrir/);
+});
+test('câmera indisponível oferece fototeca sem apagar texto', async () => {
+    const c = harness(); c.input('dietSourceText', 'Almoço');
+    c.window.FitTrackerImagePicker.open = async () => { throw Object.assign(new Error('unavailable'), { code: 'camera_unavailable' }); };
+    c.click('photo'); await settle();
+    assert.equal(c.node('dietSourceText').value, 'Almoço'); assert.match(c.node('dietPhotoStatus').textContent, /Nenhuma câmera/);
+    assert.equal(c.node('dietPhotoLibraryBtn').disabled, false);
+});
 test('análise preserva texto original, zero e ausência; só revisão fica ativa', async () => {
     const c = harness(); c.click('text'); c.input('dietSourceText', 'Meu almoço'); await c.flow.analyze();
     assert.equal(c.node('dietSourceText').value, 'Meu almoço'); assert.equal(c.node('dietDescription').value, 'Arroz e feijão');
@@ -45,8 +93,8 @@ test('trocar caminho ou remover foto não mantém miniatura antiga na revisão',
 });
 test('digitar complemento durante conversão não descarta foto', async () => {
     const c = harness(); c.click('photo'); let done; c.downscaleImageFile = () => new Promise(r => { done = r; });
-    const pending = c.upload(); c.input('dietSourceText', 'Sem açúcar'); assert.equal(c.node('dietFlowNext').disabled, true);
-    done({ base64: 'photo', dataUrl: 'data:image/jpeg;base64,photo' }); await pending; await c.flow.analyze();
+    const pending = c.upload(); await settle(); c.input('dietSourceText', 'Sem açúcar'); assert.equal(c.node('dietFlowNext').disabled, true);
+    done({ base64: 'photo', dataUrl: 'data:image/jpeg;base64,cGhvdG8=' }); await pending; await c.flow.analyze();
     const body = JSON.parse(c.calls[0].options.body); assert.equal(body.description, 'Sem açúcar'); assert.ok(body.image);
 });
 test('corrigir descrição exige recalcular ou limpar nutrientes', async () => {

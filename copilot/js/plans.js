@@ -170,8 +170,10 @@
         selectedDay: 0,
         editMode: false,
         activeExerciseId: null,
+        playerScreen: "exercise",
         skippedExerciseIds: new Set(),
         completedSetCounts: new Map(),
+        completingExerciseIds: new Set(),
         session: null,
         sessionLoading: false,
         sessionError: "",
@@ -188,6 +190,11 @@
         mutationRevision: 0,
         rest: null,
         sessionSheetExpanded: false,
+        setEntryMode: "closed",
+        activeSetIndex: null,
+        lastConfirmedSet: null,
+        correctionSetIndex: null,
+        setEntryError: "",
         replacementPanels: new Map(),
         exerciseCatalog: [],
         addExerciseOpen: false,
@@ -411,6 +418,7 @@
                 sets,
                 rest: workoutView.rest,
                 activeExerciseId: workoutView.activeExerciseId,
+                playerScreen: workoutView.playerScreen,
                 skippedExerciseIds: Array.from(workoutView.skippedExerciseIds),
                 completedSetCounts: Object.fromEntries(workoutView.completedSetCounts.entries()),
                 updatedAt: new Date().toISOString(),
@@ -438,9 +446,16 @@
         workoutView.setDrafts.clear();
         workoutView.skippedExerciseIds.clear();
         workoutView.completedSetCounts.clear();
+        workoutView.completingExerciseIds.clear();
         workoutView.activeExerciseId = null;
+        workoutView.playerScreen = "exercise";
         workoutView.rest = null;
         workoutView.sessionSheetExpanded = false;
+        workoutView.setEntryMode = "closed";
+        workoutView.activeSetIndex = null;
+        workoutView.lastConfirmedSet = null;
+        workoutView.correctionSetIndex = null;
+        workoutView.setEntryError = "";
     }
 
     function hydrateWorkoutDrafts(session) {
@@ -455,7 +470,16 @@
         workoutView.completedSetCounts = new Map(
             Object.entries(local?.completedSetCounts || {}).map(([exerciseId, count]) => [String(exerciseId), Number(count) || 0])
         );
-        workoutView.activeExerciseId = local?.activeExerciseId == null ? null : String(local.activeExerciseId);
+        const localExerciseId = local?.activeExerciseId == null ? null : String(local.activeExerciseId);
+        const validLocalExercise = asArray(selectedWorkoutDay()?.exercises).some((exercise) => String(exercise.id) === localExerciseId);
+        workoutView.activeExerciseId = validLocalExercise ? localExerciseId : null;
+        workoutView.playerScreen = local?.playerScreen === "finish" && validLocalExercise ? "finish" : "exercise";
+        workoutView.setEntryMode = "closed";
+        workoutView.sessionSheetExpanded = false;
+        workoutView.activeSetIndex = null;
+        workoutView.lastConfirmedSet = null;
+        workoutView.correctionSetIndex = null;
+        workoutView.setEntryError = "";
         Object.entries({ ...serverSets, ...localSets }).forEach(([exerciseId, sets]) => {
             if (!completedIds.has(String(exerciseId)) && Array.isArray(sets)) {
                 workoutView.setDrafts.set(String(exerciseId), sets);
@@ -1858,7 +1882,9 @@
         const operational = ['active', 'scheduled'].includes(state);
         if (operational) {
             const firstExercise = asArray(day?.exercises)[0];
-            const preview = firstExercise ? `<figure class="today-workout-preview">${exerciseImageMarkup(firstExercise, true)}<figcaption>${esc(firstExercise.name)}</figcaption></figure>` : "";
+            const action = state === 'active' ? 'open-plan' : 'start-today';
+            const actionLabel = state === 'active' ? 'Continuar treino' : 'Iniciar treino';
+            const preview = firstExercise ? `<figure class="today-workout-preview" role="button" tabindex="0" data-workout-today-action="${action}" aria-label="${actionLabel}: ${esc(name)}">${exerciseImageMarkup(firstExercise, true)}<figcaption>${esc(firstExercise.name)}</figcaption></figure>` : "";
             container.innerHTML = `<div class="today-workout">${preview}<div class="today-workout__head"><span class="today-workout__icon"><i data-lucide="dumbbell" aria-hidden="true"></i></span><div><span class="today-muted">${state === 'active' ? 'Treino em andamento' : 'Treino de hoje'}</span><h2>${esc(name)}</h2></div></div><button type="button" class="btn-primary" data-workout-today-action="${state === 'active' ? 'open-plan' : 'start-today'}">${state === 'active' ? 'Continuar treino' : 'Iniciar treino'} <i data-lucide="arrow-right" aria-hidden="true"></i></button></div>`;
         } else {
             const label = { completed: 'Treino concluído', partial: 'Treino finalizado parcialmente', rest: 'Hoje é descanso', unconfigured: 'Seu treino ainda não está configurado. Acesse Treino.' }[state] || 'Treino indisponível';
@@ -1941,13 +1967,17 @@
             <section class="workout-hub-library-link" aria-label="Planejamento de treino"><div><span class="content-kicker">Planejamento</span><h3>Meus planos</h3><p>Consulte sua biblioteca, troque o plano principal ou crie outro.</p></div><button type="button" class="btn-secondary" onclick="toggleWorkoutPlansLibrary(true)">Abrir biblioteca</button></section>`;
     }
 
-    async function loadWorkoutTodayCard(forceFetch = false) {
+    async function loadWorkoutTodayCard(forceFetch = false, options = {}) {
+        const reported = (data, refreshed = false) => options.reportResult
+            ? { ok: !workoutTodayError, data, error: workoutTodayError || null, refreshed,
+                offline: navigator.onLine === false || document.body.dataset.offline === "true" }
+            : data;
         const container = byId("workoutTodayCard");
-        if (!container) return null;
+        if (!container) return options.reportResult ? { ok: false, skipped: true, reason: "missing-surface" } : null;
         if (!window.currentUser) {
             workoutTodayState = null;
             renderWorkoutTodayCard();
-            return null;
+            return options.reportResult ? { ok: false, skipped: true, reason: "guest" } : null;
         }
         const owner = `${workoutAccount()}:${new Date().toLocaleDateString("en-CA")}:${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
         if (workoutTodayOwner !== owner) {
@@ -1958,9 +1988,9 @@
         }
         if (workoutTodayState && !forceFetch && Date.now() - workoutTodayAt < 30000) {
             renderWorkoutTodayCard();
-            return workoutTodayState;
+            return reported(workoutTodayState, false);
         }
-        if (workoutTodayPromise) return workoutTodayPromise;
+        if (workoutTodayPromise) return reported(await workoutTodayPromise, true);
         if (!workoutTodayState) renderWorkoutTodayCard();
         const revision = workoutView.mutationRevision;
         const promise = (async () => {
@@ -1984,7 +2014,7 @@
             return workoutTodayState;
         })();
         workoutTodayPromise = promise;
-        try { return await promise; }
+        try { return reported(await promise, true); }
         finally { if (workoutTodayPromise === promise) workoutTodayPromise = null; }
     }
 
@@ -2598,6 +2628,144 @@
         return `<div class="workout-set-row${completed ? " is-complete" : ""}${current ? " is-current" : ""}" data-workout-set-completed="${completed}" data-workout-set-index="${order - 1}"><strong><small>Série</small>${esc(order)}</strong><label><span>Carga (kg)</span><input type="text" inputmode="decimal" value="${esc(values.load_kg || "")}" data-workout-set-load aria-label="Carga total da série ${esc(order)} em kg"></label><label><span>Repetições</span><input type="text" inputmode="numeric" value="${esc(values.repetitions || "")}" data-workout-set-repetitions aria-label="Repetições da série ${esc(order)}"></label><label class="workout-set-warmup"><input type="checkbox" data-workout-set-warmup${values.is_warmup ? " checked" : ""}><span>Aquecimento</span></label><button type="button" class="workout-set-complete" data-workout-action="toggle-set-complete" aria-pressed="${completed}" aria-label="${completed ? "Reabrir" : "Concluir"} série ${esc(order)}"><i class="fas ${completed ? "fa-check" : "fa-circle"}" aria-hidden="true"></i><span>${completed ? "Feita" : "Marcar"}</span></button>${!completed ? `<button type="button" class="workout-set-remove" data-workout-action="remove-set" aria-label="Remover série ${esc(order)}"><i class="fas fa-minus" aria-hidden="true"></i></button>` : ""}</div>`;
     }
 
+    function workoutSetDraftAt(exerciseId, index, minimumCount = index + 1) {
+        const key = String(exerciseId);
+        const drafts = asArray(workoutView.setDrafts.get(key)).map(item => ({ ...item }));
+        while (drafts.length < minimumCount) {
+            drafts.push({ load_kg: "", repetitions: "", is_warmup: false, completed: false });
+        }
+        workoutView.setDrafts.set(key, drafts);
+        return drafts[index];
+    }
+
+    function firstPendingWorkoutSetIndex(exerciseId, count) {
+        const drafts = asArray(workoutView.setDrafts.get(String(exerciseId)));
+        return Array.from({ length: count }, (_, index) => index).find(index => !drafts[index]?.completed);
+    }
+
+    function setWorkoutEntryMode(mode, options = {}) {
+        if (!['closed', 'quick', 'review'].includes(mode) || workoutView.pendingAction) return;
+        const exercise = findSelectedExercise(workoutView.activeExerciseId);
+        if (!exercise) return;
+        const count = Math.max(workoutPlannedSetCount(exercise), asArray(workoutView.setDrafts.get(String(exercise.id))).length);
+        workoutView.setEntryMode = mode;
+        workoutView.sessionSheetExpanded = mode === 'review';
+        workoutView.setEntryError = "";
+        if (mode === 'quick') {
+            const requested = Number(options.index);
+            const pending = firstPendingWorkoutSetIndex(exercise.id, count);
+            workoutView.activeSetIndex = Number.isInteger(requested) && requested >= 0 && requested < count
+                ? requested
+                : (pending == null ? count : pending);
+            workoutView.correctionSetIndex = options.correction ? workoutView.activeSetIndex : null;
+        } else {
+            workoutView.correctionSetIndex = null;
+        }
+        persistWorkoutDraftLocally(workoutView.session?.id);
+        const focusSelector = mode === 'quick'
+            ? (displayedExercise(exercise).exercise.weight ? '[data-workout-quick-load]' : '[data-workout-quick-repetitions]')
+            : mode === 'review' ? '#workoutSetEntryTitle' : '.workout-sheet-handle';
+        renderWorkoutDetail({ preserveScroll: true, focusSelector });
+    }
+
+    function updateWorkoutQuickSetDraft(field, value, exerciseId, index) {
+        if (!exerciseId || !Number.isInteger(index) || index < 0) return;
+        const exercise = findSelectedExercise(exerciseId);
+        const count = Math.max(workoutPlannedSetCount(exercise), index + 1);
+        const draft = workoutSetDraftAt(exerciseId, index, count);
+        draft[field] = value;
+        workoutView.setEntryError = "";
+        const reviewRow = document.querySelector(`.workout-set-row[data-workout-set-index="${index}"]`);
+        const reviewField = field === 'load_kg'
+            ? reviewRow?.querySelector('[data-workout-set-load]')
+            : reviewRow?.querySelector('[data-workout-set-repetitions]');
+        if (reviewField) reviewField.value = value;
+        scheduleWorkoutDraftSave(exerciseId);
+    }
+
+    function renderWorkoutQuickSetEntry(originalExercise, exercise, setCount) {
+        if (workoutView.setEntryMode !== 'quick') return "";
+        const exerciseId = String(originalExercise.id);
+        const drafts = asArray(workoutView.setDrafts.get(exerciseId));
+        const requestedIndex = workoutView.correctionSetIndex ?? workoutView.activeSetIndex;
+        const index = Number.isInteger(requestedIndex) ? requestedIndex : (firstPendingWorkoutSetIndex(exerciseId, setCount) ?? setCount);
+        const correcting = workoutView.correctionSetIndex != null && index < setCount;
+        const last = workoutView.lastConfirmedSet?.exerciseId === exerciseId ? workoutView.lastConfirmedSet : null;
+        const rest = workoutView.rest?.endsAt > Date.now()
+            ? `<div class="workout-quick-rest" role="timer"><span><i class="fas fa-hourglass-half" aria-hidden="true"></i> Descanso</span><strong data-workout-rest-compact>${formatRestRemaining((workoutView.rest.endsAt - Date.now()) / 1000)}</strong><div><button type="button" data-workout-action="adjust-rest" data-rest-seconds="30">+30s</button><button type="button" data-workout-action="skip-rest">Pular</button></div></div>`
+            : "";
+        if (index >= setCount) {
+            const completed = drafts.filter(item => item?.completed).length;
+            return `<section class="workout-quick-set-layer is-open is-checkpoint" aria-labelledby="workoutQuickSetTitle" data-workout-set-index="${setCount}">
+                <header><div><small>Séries previstas concluídas</small><h3 id="workoutQuickSetTitle" tabindex="-1">${esc(completed)} de ${esc(setCount)} séries confirmadas</h3></div><button type="button" data-workout-action="close-set-entry" aria-label="Fechar registro de séries"><i class="fas fa-chevron-down" aria-hidden="true"></i></button></header>
+                ${rest}
+                <div class="workout-quick-checkpoint"><i class="fas fa-check-double" aria-hidden="true"></i><p>Revise os registros ou avance quando estiver pronto.</p></div>
+                <div class="workout-quick-secondary">${last ? `<button type="button" data-workout-action="correct-last-set"><i class="fas fa-pen" aria-hidden="true"></i> Corrigir série ${last.index + 1}</button>` : ""}<button type="button" data-workout-action="add-quick-set"><i class="fas fa-plus" aria-hidden="true"></i> Adicionar série</button><button type="button" data-workout-action="review-sets"><i class="fas fa-list" aria-hidden="true"></i> Revisar todas</button></div>
+                <button type="button" class="workout-quick-primary" data-workout-action="complete-exercise" data-exercise-id="${esc(originalExercise.id)}"><i class="fas fa-arrow-right" aria-hidden="true"></i> Concluir exercício e avançar</button>
+            </section>`;
+        }
+        const values = drafts[index] || {};
+        const error = workoutView.setEntryError
+            ? `<div class="workout-quick-error" role="alert">${esc(workoutView.setEntryError)}${values.load_kg && !values.repetitions ? '<button type="button" data-workout-action="confirm-empty-set">Continuar sem registrar valores</button>' : ""}</div>`
+            : "";
+        return `<section class="workout-quick-set-layer is-open${correcting ? " is-correcting" : ""}" aria-labelledby="workoutQuickSetTitle" data-workout-set-index="${index}">
+            <header><div><small>${correcting ? "Corrigir registro" : `Série ${index + 1} de ${setCount}`}</small><h3 id="workoutQuickSetTitle" tabindex="-1">${correcting ? `Série ${index + 1}` : `Registrar Série ${index + 1}`}</h3></div><button type="button" data-workout-action="close-set-entry" aria-label="Fechar registro de séries"><i class="fas fa-chevron-down" aria-hidden="true"></i></button></header>
+            <div class="workout-quick-goals" aria-label="Metas da série"><span><small>Meta de carga</small><strong>${esc(exercise.weight || "Sem carga definida")}</strong></span><span><small>Meta de repetições</small><strong>${esc(exercise.reps || "Sem meta definida")}</strong></span><span><small>Descanso</small><strong>${esc(exercise.rest_seconds ? `${exercise.rest_seconds}s` : "Sem descanso")}</strong></span></div>
+            ${rest}
+            <div class="workout-quick-fields"><label><span>Carga <small>kg</small></span><input type="text" inputmode="decimal" autocomplete="off" enterkeyhint="next" value="${esc(values.load_kg || "")}" data-workout-quick-load aria-label="Carga da série ${index + 1} em kg"></label><label><span>Repetições</span><input type="text" inputmode="numeric" autocomplete="off" enterkeyhint="done" value="${esc(values.repetitions || "")}" data-workout-quick-repetitions aria-label="Repetições da série ${index + 1}"></label></div>
+            ${error}
+            <p class="workout-quick-optional">O registro é opcional. Você pode confirmar a série com os campos vazios.</p>
+            <div class="workout-quick-secondary">${last && (!correcting || last.index !== index) ? `<button type="button" data-workout-action="correct-last-set"><i class="fas fa-pen" aria-hidden="true"></i> Corrigir série ${last.index + 1}</button>` : ""}<button type="button" data-workout-action="review-sets"><i class="fas fa-list" aria-hidden="true"></i> Revisar todas</button></div>
+            <button type="button" class="workout-quick-primary" data-workout-action="confirm-quick-set" data-exercise-id="${esc(originalExercise.id)}">${correcting ? '<i class="fas fa-check" aria-hidden="true"></i> Salvar correção' : `<i class="fas fa-check" aria-hidden="true"></i> Confirmar série ${index + 1}`}</button>
+        </section>`;
+    }
+
+    function confirmWorkoutQuickSet(exerciseId, options = {}) {
+        const exercise = findSelectedExercise(exerciseId);
+        if (!exercise || workoutView.setEntryMode !== 'quick') return false;
+        const setCount = Math.max(workoutPlannedSetCount(exercise), asArray(workoutView.setDrafts.get(String(exerciseId))).length);
+        const index = workoutView.correctionSetIndex ?? workoutView.activeSetIndex;
+        if (!Number.isInteger(index) || index < 0 || index >= setCount) return false;
+        const draft = workoutSetDraftAt(exerciseId, index, setCount);
+        if (options.discardPartial) {
+            draft.load_kg = "";
+            draft.repetitions = "";
+        }
+        const repetitions = String(draft.repetitions || "").trim();
+        const load = String(draft.load_kg || "").trim();
+        if (load && !repetitions) {
+            workoutView.setEntryError = "Informe as repetições ou continue sem registrar valores.";
+            renderWorkoutDetail({ preserveScroll: true, focusSelector: '[data-workout-quick-repetitions]' });
+            return false;
+        }
+        if (repetitions && (!Number.isInteger(Number(repetitions)) || Number(repetitions) < 1 || Number(repetitions) > 1000)) {
+            workoutView.setEntryError = "Informe repetições entre 1 e 1000.";
+            renderWorkoutDetail({ preserveScroll: true, focusSelector: '[data-workout-quick-repetitions]' });
+            return false;
+        }
+        const normalizedLoad = load.replace(',', '.');
+        if (load && (!Number.isFinite(Number(normalizedLoad)) || Number(normalizedLoad) < 0 || Number(normalizedLoad) > 100000)) {
+            workoutView.setEntryError = "Informe uma carga válida.";
+            renderWorkoutDetail({ preserveScroll: true, focusSelector: '[data-workout-quick-load]' });
+            return false;
+        }
+        const correcting = workoutView.correctionSetIndex != null;
+        draft.completed = true;
+        workoutView.setEntryError = "";
+        if (!correcting) workoutView.lastConfirmedSet = { exerciseId: String(exerciseId), index };
+        workoutView.correctionSetIndex = null;
+        const next = firstPendingWorkoutSetIndex(exerciseId, setCount);
+        workoutView.activeSetIndex = next == null ? setCount : next;
+        scheduleWorkoutDraftSave(exerciseId);
+        if (!correcting) {
+            const seconds = Math.min(600, Math.max(0, Number(displayedExercise(exercise).exercise.rest_seconds) || 0));
+            workoutView.rest = seconds ? { duration: seconds, endsAt: Date.now() + seconds * 1000, exerciseId: String(exerciseId) } : null;
+        }
+        persistWorkoutDraftLocally(workoutView.session?.id);
+        renderWorkoutDetail({ preserveScroll: true, focusSelector: workoutView.activeSetIndex < setCount ? '[data-workout-quick-load], [data-workout-quick-repetitions]' : '#workoutQuickSetTitle' });
+        return true;
+    }
+
     function captureWorkoutSetDraft(exerciseId) {
         const rows = Array.from(document.querySelectorAll(".workout-set-row"));
         if (!exerciseId || !rows.length) return;
@@ -2631,16 +2799,7 @@
 
     function setWorkoutSheetExpanded(expanded) {
         if (workoutView.pendingAction) return;
-        workoutView.sessionSheetExpanded = expanded;
-        if (expanded && !workoutView.rest?.endsAt) {
-            const exercise = findSelectedExercise(workoutView.activeExerciseId);
-            if (exercise) {
-                const seconds = Math.min(600, Math.max(0, Number(displayedExercise(exercise).exercise.rest_seconds) || 0));
-                if (seconds) workoutView.rest = { duration: seconds, endsAt: Date.now() + seconds * 1000, exerciseId: String(exercise.id) };
-            }
-        }
-        persistWorkoutDraftLocally(workoutView.session?.id);
-        renderWorkoutDetail({ preserveScroll: true });
+        setWorkoutEntryMode(expanded ? 'quick' : 'closed');
     }
 
     function workoutPlayerFeedbackMarkup() {
@@ -2683,7 +2842,7 @@
     }
 
     function performedSetsFromView(exerciseId) {
-        captureWorkoutSetDraft(exerciseId);
+        if (workoutView.setEntryMode === 'review') captureWorkoutSetDraft(exerciseId);
         return asArray(workoutView.setDrafts.get(String(exerciseId))).flatMap((item, index) => {
             const loadValue = item.load_kg;
             const repetitionsValue = item.repetitions;
@@ -2728,6 +2887,57 @@
         ));
     }
 
+    function workoutFinishState(exercises, completedIds = completedWorkoutExerciseIds()) {
+        const completedExercises = exercises.filter((exercise) => completedIds.has(String(exercise.id)));
+        const skippedExercises = exercises.filter((exercise) => workoutView.skippedExerciseIds.has(String(exercise.id)));
+        const unresolvedExercises = exercises.filter((exercise) => (
+            !completedIds.has(String(exercise.id))
+            && !workoutView.skippedExerciseIds.has(String(exercise.id))
+        ));
+        return {
+            completedExercises,
+            skippedExercises,
+            unresolvedExercises,
+            completionState: exercises.length && completedExercises.length === exercises.length ? "complete" : "partial",
+        };
+    }
+
+    function workoutFinishPreviewMarkup(finishState, progressState) {
+        const partial = finishState.completionState === "partial";
+        return `<div class="workout-finish-preview__content"><span><i class="fas ${partial ? "fa-flag" : "fa-check"}" aria-hidden="true"></i></span><small>${partial ? "Treino parcial" : "Treino completo"}</small><strong>Revisar e finalizar</strong><p>${finishState.completedExercises.length} concluído(s) · ${progressState.completedSets} série(s)</p></div>`;
+    }
+
+    function workoutCompletionSnapshot(day, exercises, progressState, finishState) {
+        const completedIds = completedWorkoutExerciseIds();
+        return {
+            id: workoutView.session?.id,
+            session_id: workoutView.session?.id,
+            workout_name: day?.title || workoutView.plan?.title || "Treino",
+            plan_name: workoutView.plan?.title || "Treino",
+            started_at: workoutView.session?.started_at,
+            completed_at: new Date().toISOString(),
+            duration_seconds: workoutElapsedSeconds(workoutView.session?.started_at),
+            exercises_performed: finishState.completedExercises.length,
+            total_exercises: exercises.length,
+            sets_performed: progressState.completedSets,
+            volume_total_kg: null,
+            completion_state: finishState.completionState,
+            personal_records: [],
+            exercises: exercises.filter((exercise) => completedIds.has(String(exercise.id))).map((exercise) => {
+                const shown = displayedExercise(exercise).exercise;
+                return {
+                    exercise_id: exercise.id,
+                    name: shown.name,
+                    catalog_key: shown.catalog_key,
+                    sets_performed: workoutView.completedSetCounts.get(String(exercise.id)) || 0,
+                    sets: [],
+                    best_set: null,
+                    personal_records: [],
+                };
+            }),
+        };
+    }
+
     function renderActiveWorkout(day) {
         const exercises = asArray(day.exercises);
         const completedIds = completedWorkoutExerciseIds();
@@ -2736,10 +2946,12 @@
         const readyToFinish = Boolean(exercises.length) && resolvedCount === exercises.length;
         const defaultExercise = firstPendingWorkoutExercise(exercises, completedIds);
         const selectedExercise = exercises.find((item) => String(item.id) === String(workoutView.activeExerciseId));
-        const currentOriginal = readyToFinish ? null : selectedExercise || defaultExercise || exercises[0];
+        const currentOriginal = selectedExercise || (readyToFinish ? exercises[exercises.length - 1] : defaultExercise || exercises[0]);
         if (currentOriginal && String(workoutView.activeExerciseId || "") !== String(currentOriginal.id)) {
             workoutView.activeExerciseId = String(currentOriginal.id);
         }
+        const showFinishCard = workoutView.playerScreen === "finish";
+        const finishState = workoutFinishState(exercises, completedIds);
         const exerciseProgress = exercises.length ? Math.round((resolvedCount / exercises.length) * 100) : 0;
         const timer = formatWorkoutElapsed(workoutElapsedSeconds(workoutView.session?.started_at));
         const toolbar = `
@@ -2757,17 +2969,36 @@
             const shown = displayedExercise(item).exercise;
             return `<li class="${done ? "is-complete" : skipped ? "is-skipped" : active ? "is-current" : ""}"><button type="button" data-workout-action="select-session-exercise" data-exercise-id="${esc(item.id)}"${active ? ' aria-current="step"' : ""}><span>${done ? '<i class="fas fa-check" aria-hidden="true"></i>' : skipped ? '<i class="fas fa-forward" aria-hidden="true"></i>' : index + 1}</span><strong>${esc(shown.name)}</strong><small>${done ? "Concluído" : skipped ? "Pulado" : active ? "Agora" : "Próximo"}</small></button></li>`;
         }).join("");
-        if (readyToFinish || !currentOriginal) {
+        if (showFinishCard || !currentOriginal) {
+            const previousExercise = currentOriginal ? displayedExercise(currentOriginal).exercise : null;
+            const partial = finishState.completionState === "partial";
+            const pendingCopy = finishState.unresolvedExercises.length
+                ? `${finishState.unresolvedExercises.length} ainda não concluído(s)`
+                : finishState.skippedExercises.length
+                    ? `${finishState.skippedExercises.length} pulado(s)`
+                    : "Todos os exercícios concluídos";
             return `
-                <section class="active-workout-shell active-workout-shell--complete">
-                    ${toolbar}
-                    <div class="workout-complete-state" data-workout-ready>
-                        <span><i class="fas fa-trophy" aria-hidden="true"></i></span>
-                        <div><small>Pronta para finalizar</small><h4 id="workoutCompleteTitle" tabindex="-1">Revise e finalize sua sessão</h4><p>${progressState.completedExercises} exercícios concluídos · ${progressState.completedSets} séries realizadas${progressState.skippedExercises ? ` · ${progressState.skippedExercises} pulado(s)` : ""}.</p></div>
-                        <button type="button" class="finish-workout-button active-workout-finish" data-workout-action="finish-session"${workoutView.pendingAction === "finish" ? " disabled" : ""}>${workoutView.pendingAction === "finish" ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i>' : '<i class="fas fa-flag-checkered" aria-hidden="true"></i>'} Finalizar treino</button>
-                    </div>
-                    ${workoutPlayerFeedbackMarkup()}
-                    <details class="active-workout-queue"><summary><span>Revisar sequência</span><strong>${resolvedCount}/${exercises.length}</strong></summary><ol>${queue}</ol></details>
+                <section class="active-workout-shell active-workout-shell--immersive">
+                    <article class="current-exercise-stage current-exercise-stage--player workout-finish-card" data-workout-player-card data-workout-card-kind="finish">
+                        ${previousExercise ? `<figure class="current-exercise-preview current-exercise-preview--previous" aria-hidden="true">${exerciseImageMarkup(previousExercise, true)}</figure>` : ""}
+                        ${toolbar}
+                        <div class="current-exercise-content--overlay workout-finish-card__surface">
+                            <span class="workout-finish-card__icon"><i class="fas ${partial ? "fa-flag" : "fa-trophy"}" aria-hidden="true"></i></span>
+                            <div class="workout-finish-card__heading"><small>${partial ? "Treino parcial" : "Treino completo"}</small><h3 id="workoutFinishCardTitle" tabindex="-1">Revise e finalize sua sessão</h3><p>${esc(pendingCopy)}. Cargas e repetições são opcionais.</p></div>
+                            <div class="workout-finish-card__metrics" aria-label="${finishState.completedExercises.length} exercícios concluídos, ${finishState.skippedExercises.length} pulados, ${finishState.unresolvedExercises.length} não concluídos e ${progressState.completedSets} séries registradas">
+                                <span><strong>${finishState.completedExercises.length}</strong><small>Concluídos</small></span>
+                                <span><strong>${finishState.skippedExercises.length}</strong><small>Pulados</small></span>
+                                <span><strong>${finishState.unresolvedExercises.length}</strong><small>Pendentes</small></span>
+                                <span><strong>${progressState.completedSets}</strong><small>Séries</small></span>
+                            </div>
+                            <div class="workout-finish-card__actions">
+                                <button type="button" class="finish-workout-button active-workout-finish" data-workout-action="confirm-finish-session"${workoutView.pendingAction === "finish" ? " disabled" : ""}>${workoutView.pendingAction === "finish" ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Finalizando...' : '<i class="fas fa-flag-checkered" aria-hidden="true"></i> Confirmar finalização'}</button>
+                                <button type="button" class="workout-finish-back" data-workout-action="return-from-finish"><i class="fas fa-arrow-left" aria-hidden="true"></i> Voltar ao último exercício</button>
+                            </div>
+                            <details class="active-workout-queue"><summary><span>Revisar sequência</span><strong>${resolvedCount}/${exercises.length}</strong></summary><ol>${queue}</ol></details>
+                        </div>
+                        ${workoutPlayerFeedbackMarkup()}
+                    </article>
                 </section>`;
         }
 
@@ -2775,7 +3006,9 @@
         const { exercise, override } = displayedExercise(currentOriginal);
         const panel = workoutView.replacementPanels.get(currentId);
         const currentIndex = exercises.indexOf(currentOriginal);
+        const previousOriginal = exercises[currentIndex - 1];
         const nextOriginal = exercises[currentIndex + 1];
+        const previousExercise = previousOriginal ? displayedExercise(previousOriginal).exercise : null;
         const nextExercise = nextOriginal ? displayedExercise(nextOriginal).exercise : null;
         const exerciseDone = completedIds.has(currentId);
         const exerciseSkipped = workoutView.skippedExerciseIds.has(currentId);
@@ -2787,7 +3020,7 @@
         const plannedSets = workoutPlannedSetCount(currentOriginal);
         const setDraft = asArray(workoutView.setDrafts.get(currentId));
         const setCount = Math.max(plannedSets, setDraft.length);
-        const currentSetIndex = Array.from({ length: setCount }, (_, index) => index).find((index) => !setDraft[index]?.completed);
+        const currentSetIndex = firstPendingWorkoutSetIndex(currentId, setCount);
         const setRows = Array.from(
             { length: setCount },
             (_, index) => workoutSetRowMarkup(index + 1, setDraft[index], index === currentSetIndex)
@@ -2795,8 +3028,10 @@
         const nextStep = currentSetIndex == null
             ? "Próximo exercício"
             : `Próxima: ${exercise.name} · série ${currentSetIndex + 1} de ${setCount}`;
-        const navigation = `<nav class="current-exercise-navigation" aria-label="Navegação entre exercícios"><button type="button" data-workout-action="previous-session-exercise"${currentIndex <= 0 ? " disabled" : ""}><i class="fas fa-arrow-left" aria-hidden="true"></i> Anterior</button><span>${currentIndex + 1} de ${exercises.length}</span><button type="button" data-workout-action="next-session-exercise"${currentIndex >= exercises.length - 1 ? " disabled" : ""}>Próximo <i class="fas fa-arrow-right" aria-hidden="true"></i></button></nav>`;
-        const sheetExpanded = Boolean(workoutView.sessionSheetExpanded);
+        const nextAction = nextOriginal ? "next-session-exercise" : "open-finish-card";
+        const nextLabel = nextOriginal ? "Próximo exercício" : "Revisar e finalizar treino";
+        const navigation = `<nav class="current-exercise-navigation" aria-label="Navegação entre exercícios"><button type="button" data-workout-action="previous-session-exercise" aria-label="Exercício anterior"${currentIndex <= 0 ? " disabled" : ""}><i class="fas fa-arrow-left" aria-hidden="true"></i> Anterior</button><span>${currentIndex + 1} de ${exercises.length}</span><button type="button" data-workout-action="${nextAction}" aria-label="${nextLabel}">${nextOriginal ? "Próximo" : "Revisar"} <i class="fas fa-arrow-right" aria-hidden="true"></i></button></nav>`;
+        const sheetExpanded = workoutView.setEntryMode === 'review';
         const currentSeriesLabel = currentSetIndex == null ? `${setCount} de ${setCount}` : `${currentSetIndex + 1} de ${setCount}`;
         const plannedLoad = exercise.weight || "Conforme orientação";
         const completeSetLabel = currentSetIndex == null
@@ -2817,9 +3052,11 @@
                 </section>`;
         return `
             <section class="active-workout-shell active-workout-shell--immersive">
-                <article class="current-exercise-stage current-exercise-stage--player${exerciseDone ? " is-completed-view" : exerciseSkipped ? " is-skipped-view" : ""}" data-workout-exercise-card data-exercise-id="${esc(currentOriginal.id)}">
+                <article class="current-exercise-stage current-exercise-stage--player${exerciseDone ? " is-completed-view" : exerciseSkipped ? " is-skipped-view" : ""}${workoutView.setEntryMode === 'quick' ? " has-quick-set" : ""}" data-workout-player-card data-workout-card-kind="exercise" data-workout-exercise-card data-exercise-id="${esc(currentOriginal.id)}">
                     <figure class="current-exercise-media">${exerciseImageMarkup(exercise, true)}</figure>
-                    ${nextExercise ? `<figure class="current-exercise-next-preview" aria-hidden="true">${exerciseImageMarkup(nextExercise, true)}</figure>` : ""}
+                    ${previousExercise ? `<figure class="current-exercise-preview current-exercise-preview--previous" aria-hidden="true">${exerciseImageMarkup(previousExercise, true)}</figure>` : ""}
+                    ${nextExercise ? `<figure class="current-exercise-preview current-exercise-preview--next" aria-hidden="true">${exerciseImageMarkup(nextExercise, true)}</figure>` : ""}
+                    ${!nextExercise ? `<div class="current-exercise-preview current-exercise-preview--next workout-finish-preview" aria-hidden="true">${workoutFinishPreviewMarkup(finishState, progressState)}</div>` : ""}
                     ${toolbar}
                     ${navigation}
                     <div class="current-exercise-content current-exercise-content--overlay">
@@ -2837,8 +3074,9 @@
                         <div class="workout-player-progress"><span>${progressState.completedExercises} de ${exercises.length} exercícios</span><i aria-hidden="true"><b style="width:${exerciseProgress}%"></b></i></div>
                     </div>
                     <div class="workout-player-rest"${workoutView.rest ? "" : " hidden"}><span><i class="fas fa-hourglass-half" aria-hidden="true"></i> Descanso</span><strong data-workout-rest-compact>${workoutView.rest ? formatRestRemaining((workoutView.rest.endsAt - Date.now()) / 1000) : ""}</strong></div>
+                    ${!exerciseDone && !exerciseSkipped ? renderWorkoutQuickSetEntry(currentOriginal, exercise, setCount) : ""}
                     <section class="workout-session-sheet${sheetExpanded ? " is-expanded" : " is-collapsed"}" data-workout-sheet aria-label="Controles da sessão">
-                        <button type="button" class="workout-sheet-handle" data-workout-action="toggle-session-sheet" aria-expanded="${sheetExpanded}" aria-controls="workoutSessionSheetContent"><span aria-hidden="true"></span><b>${sheetExpanded ? "Recolher painel" : "Arraste para registrar séries"}</b><i class="fas fa-chevron-${sheetExpanded ? "down" : "up"}" aria-hidden="true"></i></button>
+                        <button type="button" class="workout-sheet-handle" data-workout-action="toggle-session-sheet" aria-expanded="${workoutView.setEntryMode !== 'closed'}" aria-controls="workoutSessionSheetContent"><span aria-hidden="true"></span><b>${sheetExpanded ? "Recolher revisão" : "Arraste para registrar série"}</b><i class="fas fa-chevron-${sheetExpanded ? "down" : "up"}" aria-hidden="true"></i></button>
                         <div id="workoutSessionSheetContent" class="workout-session-sheet__scroll"${sheetExpanded ? "" : " inert"}>
                             ${stateContent}
                             ${renderWorkoutRest(nextStep)}
@@ -2847,7 +3085,7 @@
                             ${exercise.notes ? `<p class="current-exercise-instruction"><i class="fas fa-circle-info" aria-hidden="true"></i>${esc(exercise.notes)}</p>` : ""}
                             ${!exerciseDone && !exerciseSkipped ? `<details class="current-exercise-secondary"><summary>Mais ações</summary><div><button type="button" class="skip-current-exercise-button" data-workout-action="skip-exercise" data-exercise-id="${esc(currentOriginal.id)}"><i class="fas fa-forward" aria-hidden="true"></i> Pular exercício</button>${override ? `<button type="button" class="restore-exercise-button" data-workout-action="restore-exercise" data-exercise-id="${esc(currentOriginal.id)}"${workoutView.pendingAction === `restore-${currentOriginal.id}` ? " disabled" : ""}><i class="fas fa-rotate-left" aria-hidden="true"></i> Restaurar original</button>` : ""}</div></details>` : ""}
                             <details class="active-workout-queue"><summary><span>Sequência do treino</span><strong>${progressState.completedExercises} concluídos${progressState.skippedExercises ? ` · ${progressState.skippedExercises} pulado(s)` : ""}</strong></summary><ol>${queue}</ol></details>
-                            <div class="workout-sheet-session-actions"><button type="button" class="finish-workout-link" data-workout-action="finish-session"><i class="fas fa-stop-circle" aria-hidden="true"></i> Finalizar treino</button></div>
+                            <div class="workout-sheet-session-actions"><button type="button" class="finish-workout-link" data-workout-action="open-finish-card"><i class="fas fa-stop-circle" aria-hidden="true"></i> Revisar e finalizar treino</button></div>
                             <div class="workout-sheet-danger"><span>Encerrar sem salvar o treino</span><button type="button" class="cancel-workout-button" data-workout-action="cancel-session"><i class="fas fa-trash-can" aria-hidden="true"></i> Cancelar e apagar sessão</button></div>
                         </div>
                         ${!exerciseDone && !exerciseSkipped ? `<div class="workout-sheet-save-action"${sheetExpanded ? "" : " inert"}><button type="button" class="complete-exercise-button workout-exercise-primary" data-workout-action="complete-exercise" data-exercise-id="${esc(currentOriginal.id)}"${workoutView.pendingAction ? " disabled" : ""}>${completeExerciseLabel}</button></div>` : ""}
@@ -2885,6 +3123,7 @@
 
         return `<section class="completed-workout-summary">
             <header><span><i class="fas ${summary.completion_state === "partial" ? "fa-flag" : "fa-check"}" aria-hidden="true"></i></span><div><small>${summary.completion_state === "partial" ? "Treino finalizado parcialmente" : "Treino concluído"}</small><h3>${esc(summary.workout_name)}</h3><p>${summary.exercises_performed === summary.total_exercises ? "Sessão completa" : `${esc(summary.exercises_performed)} de ${esc(summary.total_exercises)} exercícios concluídos${summary.skipped_count ? ` · ${esc(summary.skipped_count)} pulado(s)` : ""}`}</p></div></header>
+            ${summary.sync_pending ? '<p class="completed-workout-sync" role="status"><i class="fas fa-cloud-arrow-up" aria-hidden="true"></i> Finalização salva neste dispositivo. O histórico será sincronizado quando a conexão voltar.</p>' : ""}
             <div class="completed-workout-metrics">
                 <article><i class="fas fa-stopwatch" aria-hidden="true"></i><strong>${esc(formatWorkoutElapsed(summary.duration_seconds))}</strong><span>duração</span></article>
                 <article><i class="fas fa-dumbbell" aria-hidden="true"></i><strong>${esc(summary.exercises_performed)}</strong><span>exercícios</span></article>
@@ -3133,7 +3372,7 @@
             const keyboard = Boolean(isInput && window.innerHeight - viewport.height > 100);
             modal.classList.toggle("has-workout-keyboard", keyboard);
             if (keyboard) {
-                const scroll = focused.closest(".workout-session-sheet__scroll");
+                const scroll = focused.closest(".workout-session-sheet__scroll, .workout-quick-set-layer");
                 if (!scroll) return;
                 const field = focused.getBoundingClientRect();
                 const bounds = scroll.getBoundingClientRect();
@@ -3149,7 +3388,7 @@
         byId("viewWorkoutPlanModal")?.classList.toggle("workout-execution-mode", Boolean(workoutView.session && !workoutView.completedSummary));
         const previousScroll = options.preserveScroll ? details.scrollTop : 0;
         const previousSheetScroll = details.querySelector(".workout-session-sheet__scroll")?.scrollTop || 0;
-        const previousExercise = details.querySelector("[data-workout-exercise-card]")?.dataset.exerciseId;
+        const previousPlayerCard = details.querySelector("[data-workout-player-card]");
         const focused = details.contains(document.activeElement) ? document.activeElement : null;
         if (workoutView.completedSummary) {
             const title = byId("viewWorkoutPlanTitle");
@@ -3230,18 +3469,20 @@
             </section>`;
         const title = byId("viewWorkoutPlanTitle");
         if (title) title.textContent = session ? "Treino em andamento" : editing ? "Editar plano" : plan.title || "Plano de Treino";
-        const sameExercise = session && previousExercise && String(workoutView.activeExerciseId) === String(previousExercise)
-            && !details.querySelector("[data-workout-ready]") && !panel.includes("data-workout-ready");
-        if (sameExercise) {
-            const template = document.createElement("template");
-            template.innerHTML = panel.trim();
+        const template = document.createElement("template");
+        if (session) template.innerHTML = panel.trim();
+        const nextPlayerCard = template.content.querySelector?.("[data-workout-player-card]");
+        const samePlayerCard = Boolean(session && previousPlayerCard && nextPlayerCard
+            && previousPlayerCard.dataset.workoutCardKind === nextPlayerCard.dataset.workoutCardKind
+            && String(previousPlayerCard.dataset.exerciseId || "") === String(nextPlayerCard.dataset.exerciseId || ""));
+        if (samePlayerCard) {
             patchWorkoutNode(details.querySelector(".active-workout-shell"), template.content.firstElementChild);
         } else {
             details.innerHTML = `${session ? "" : summary}${tabs}${panel}`;
         }
         byId("viewWorkoutPlanModal")?.classList.toggle("workout-execution-mode", Boolean(session));
         details.scrollTop = previousScroll;
-        if (sameExercise || options.preserveScroll) {
+        if (samePlayerCard || options.preserveScroll) {
             const scroll = details.querySelector(".workout-session-sheet__scroll");
             if (scroll) scroll.scrollTop = previousSheetScroll;
         }
@@ -3249,7 +3490,7 @@
         updateWorkoutTimer();
         updateWorkoutVisualViewport();
         if (options.focusSelector) requestAnimationFrame(() => details.querySelector(options.focusSelector)?.focus({ preventScroll: true }));
-        if (session && !sameExercise) {
+        if (session && !samePlayerCard && workoutView.playerScreen === "exercise") {
             const exercises = asArray(day.exercises);
             const next = exercises[exercises.findIndex((exercise) => String(exercise.id) === String(workoutView.activeExerciseId)) + 1];
             if (next) { const image = new Image(); image.src = exerciseImage(displayedExercise(next).exercise); }
@@ -3276,7 +3517,7 @@
             if (workoutView.session) {
                 workoutView.editMode = false;
                 hydrateWorkoutDrafts(workoutView.session);
-                await preloadWorkoutAssets(day);
+                preloadWorkoutAssets(day).catch(() => {});
                 activeWorkoutSummary = {
                     session: workoutView.session,
                     plan: { id: workoutView.plan.id, title: workoutView.plan.title },
@@ -3341,7 +3582,7 @@
             workoutView.sessionLoading = false;
             if (session) {
                 hydrateWorkoutDrafts(session);
-                await preloadWorkoutAssets(workoutView.days[workoutView.selectedDay]);
+                preloadWorkoutAssets(workoutView.days[workoutView.selectedDay]).catch(() => {});
             }
             activeWorkoutSummary = active;
             renderActiveWorkoutDock();
@@ -3433,7 +3674,7 @@
             endSessionMutation(lock, action, account, version);
             if (workoutContextCurrent(account, version)) {
                 renderWorkoutDetail({preserveScroll: !succeeded});
-                if (succeeded && action.startsWith("complete-")) requestAnimationFrame(() => (byId("currentExerciseTitle") || byId("workoutCompleteTitle"))?.focus({preventScroll: true}));
+                if (succeeded && action.startsWith("complete-")) requestAnimationFrame(() => (byId("currentExerciseTitle") || byId("workoutFinishCardTitle"))?.focus({preventScroll: true}));
             }
         }
         return succeeded;
@@ -3665,44 +3906,93 @@
         const exercises = asArray(selectedWorkoutDay()?.exercises);
         if (!exercises.some((exercise) => String(exercise.id) === String(exerciseId))) return;
         const currentId = document.querySelector("[data-workout-exercise-card]")?.dataset.exerciseId;
-        if (currentId && !completedWorkoutExerciseIds().has(String(currentId))) captureWorkoutSetDraft(currentId);
+        if (currentId && workoutView.setEntryMode === "review" && !completedWorkoutExerciseIds().has(String(currentId))) captureWorkoutSetDraft(currentId);
         workoutView.activeExerciseId = String(exerciseId);
+        workoutView.playerScreen = "exercise";
         workoutView.sessionSheetExpanded = false;
+        workoutView.setEntryMode = "closed";
+        workoutView.activeSetIndex = null;
+        workoutView.correctionSetIndex = null;
+        workoutView.setEntryError = "";
         persistWorkoutDraftLocally(workoutView.session?.id);
         renderWorkoutDetail({ focusSelector: "#currentExerciseTitle" });
     }
 
+    function openWorkoutFinishCard() {
+        const exercises = asArray(selectedWorkoutDay()?.exercises);
+        if (!workoutView.session || !exercises.length || workoutView.pendingAction || workoutView.uncertainMutation) return false;
+        const currentId = document.querySelector("[data-workout-exercise-card]")?.dataset.exerciseId;
+        if (currentId && workoutView.setEntryMode === "review" && !completedWorkoutExerciseIds().has(String(currentId))) captureWorkoutSetDraft(currentId);
+        if (!exercises.some((exercise) => String(exercise.id) === String(workoutView.activeExerciseId))) {
+            workoutView.activeExerciseId = String(exercises[exercises.length - 1].id);
+        }
+        workoutView.playerScreen = "finish";
+        workoutView.sessionSheetExpanded = false;
+        workoutView.setEntryMode = "closed";
+        persistWorkoutDraftLocally(workoutView.session.id);
+        renderWorkoutDetail({ focusSelector: "#workoutFinishCardTitle" });
+        return true;
+    }
+
+    function returnFromWorkoutFinishCard() {
+        const exercises = asArray(selectedWorkoutDay()?.exercises);
+        if (!workoutView.session || !exercises.length || workoutView.pendingAction || workoutView.uncertainMutation) return false;
+        if (!exercises.some((exercise) => String(exercise.id) === String(workoutView.activeExerciseId))) {
+            workoutView.activeExerciseId = String(exercises[exercises.length - 1].id);
+        }
+        workoutView.playerScreen = "exercise";
+        workoutView.sessionSheetExpanded = false;
+        workoutView.setEntryMode = "closed";
+        persistWorkoutDraftLocally(workoutView.session.id);
+        renderWorkoutDetail({ focusSelector: "#currentExerciseTitle" });
+        return true;
+    }
+
     function navigateSessionExercise(direction) {
         const exercises = asArray(selectedWorkoutDay()?.exercises);
+        if (workoutView.playerScreen === "finish") return direction < 0 ? returnFromWorkoutFinishCard() : false;
         const currentIndex = exercises.findIndex((exercise) => String(exercise.id) === String(workoutView.activeExerciseId));
         const target = exercises[currentIndex + direction];
-        if (target) selectSessionExercise(target.id);
+        if (!target && direction > 0 && currentIndex === exercises.length - 1) return openWorkoutFinishCard();
+        if (!target) return false;
+        selectSessionExercise(target.id);
+        return true;
     }
 
     function skipSessionExercise(exerciseId) {
         if (!workoutView.session || completedWorkoutExerciseIds().has(String(exerciseId))) return;
-        captureWorkoutSetDraft(exerciseId);
+        if (workoutView.setEntryMode === "review") captureWorkoutSetDraft(exerciseId);
         workoutView.skippedExerciseIds.add(String(exerciseId));
         const nextExercise = firstPendingWorkoutExercise(asArray(selectedWorkoutDay()?.exercises), completedWorkoutExerciseIds());
-        workoutView.activeExerciseId = nextExercise ? String(nextExercise.id) : null;
+        workoutView.activeExerciseId = nextExercise ? String(nextExercise.id) : String(exerciseId);
+        workoutView.playerScreen = nextExercise ? "exercise" : "finish";
         workoutView.sessionSheetExpanded = false;
+        workoutView.setEntryMode = "closed";
+        workoutView.activeSetIndex = null;
+        workoutView.correctionSetIndex = null;
         workoutView.rest = null;
         persistWorkoutDraftLocally(workoutView.session.id);
-        renderWorkoutDetail({ focusSelector: nextExercise ? "#currentExerciseTitle" : "#workoutCompleteTitle" });
+        renderWorkoutDetail({ focusSelector: nextExercise ? "#currentExerciseTitle" : "#workoutFinishCardTitle" });
     }
 
     function resumeSessionExercise(exerciseId) {
         workoutView.skippedExerciseIds.delete(String(exerciseId));
         workoutView.activeExerciseId = String(exerciseId);
+        workoutView.playerScreen = "exercise";
         workoutView.sessionSheetExpanded = false;
+        workoutView.setEntryMode = "closed";
+        workoutView.activeSetIndex = null;
+        workoutView.correctionSetIndex = null;
         persistWorkoutDraftLocally(workoutView.session?.id);
         renderWorkoutDetail({ focusSelector: "#currentExerciseTitle" });
     }
 
     async function setWorkoutSetCompleted(row, exerciseId, completed) {
         if (!row || !exerciseId || workoutView.pendingAction) return;
-        if (completed && !row.querySelector("[data-workout-set-repetitions]")?.value.trim()) {
-            showToast("Informe as repetições antes de concluir a série.", "error");
+        const load = row.querySelector("[data-workout-set-load]")?.value.trim() || "";
+        const repetitions = row.querySelector("[data-workout-set-repetitions]")?.value.trim() || "";
+        if (completed && load && !repetitions) {
+            showToast("Informe as repetições ou deixe carga e repetições vazias.", "error");
             row.querySelector("[data-workout-set-repetitions]")?.focus();
             return;
         }
@@ -3710,6 +4000,7 @@
         row.classList.toggle("is-complete", completed);
         captureWorkoutSetDraft(exerciseId);
         if (completed) {
+            workoutView.lastConfirmedSet = { exerciseId: String(exerciseId), index: Number(row.dataset.workoutSetIndex) };
             startWorkoutRest(displayedExercise(findSelectedExercise(exerciseId)).exercise.rest_seconds, exerciseId);
         } else {
             workoutView.rest = null;
@@ -3731,12 +4022,14 @@
 
     async function completeWorkoutExercise(exerciseId) {
         const exercise = findSelectedExercise(exerciseId), session = workoutView.session;
-        if (!exercise || !session || workoutView.pendingAction || workoutView.uncertainMutation || completedWorkoutExerciseIds().has(String(exerciseId))) return false;
+        const key = String(exerciseId);
+        if (!exercise || !session || workoutView.pendingAction || workoutView.uncertainMutation || workoutView.completingExerciseIds.has(key) || completedWorkoutExerciseIds().has(key)) return false;
         let sets;
         try { sets = performedSetsFromView(exercise.id); }
         catch (error) {
             workoutView.sessionError = error.message;
             workoutView.sessionSheetExpanded = true;
+            workoutView.setEntryMode = "review";
             renderWorkoutDetail({preserveScroll: true});
             const field = document.querySelector(`[data-workout-set-index="${error.index}"] [data-workout-set-${error.field}]`);
             field?.setAttribute("aria-invalid", "true");
@@ -3744,51 +4037,87 @@
             updateWorkoutVisualViewport();
             return false;
         }
-        return performSessionMutation(`complete-${exercise.id}`, `/workout_sessions/${apiSegment(session.id)}/exercises/${apiSegment(exercise.id)}/complete`, {method: "POST", body: {sets}}, result => {
-            const optimisticIds = [...completedWorkoutExerciseIds(), String(exercise.id)];
-            workoutView.session = result.session || {
-                ...session,
-                completed_exercise_ids: optimisticIds,
-            };
-            if (!result.session) {
+        const draftBefore = asArray(workoutView.setDrafts.get(key)).map(set => ({ ...set }));
+        const optimisticIds = new Set(completedWorkoutExerciseIds());
+        optimisticIds.add(key);
+        workoutView.completingExerciseIds.add(key);
+        workoutView.session = { ...session, completed_exercise_ids: [...optimisticIds] };
+        workoutView.completedSetCounts.set(key, sets.length);
+        workoutView.skippedExerciseIds.delete(key);
+        clearWorkoutExerciseDraft(session.id, exercise.id);
+        closeReplacementPanel(exercise.id);
+        const next = firstPendingWorkoutExercise(asArray(selectedWorkoutDay()?.exercises), optimisticIds);
+        workoutView.activeExerciseId = next ? String(next.id) : key;
+        workoutView.playerScreen = next ? "exercise" : "finish";
+        workoutView.sessionSheetExpanded = false;
+        workoutView.setEntryMode = "closed";
+        workoutView.activeSetIndex = null;
+        workoutView.correctionSetIndex = null;
+        workoutView.rest = null;
+        workoutView.draftError = "";
+        persistWorkoutDraftLocally(session.id);
+        renderWorkoutDetail({ preserveScroll: true });
+
+        const account = workoutAccount(), version = workoutView.viewVersion;
+        try {
+            const result = await queueSessionWrite(session.id, () => apiRequest(`/workout_sessions/${apiSegment(session.id)}/exercises/${apiSegment(exercise.id)}/complete`, {method: "POST", body: {sets}}));
+            if (!workoutContextCurrent(account, version, session.id)) return true;
+            if (result.session) {
+                const localIds = completedWorkoutExerciseIds();
+                workoutView.session = {
+                    ...result.session,
+                    completed_exercise_ids: [...new Set([...asArray(result.session.completed_exercise_ids).map(String), ...localIds])]
+                };
+                activeWorkoutSummary = { ...activeWorkoutSummary, session: workoutView.session };
+            } else if (result.queued) {
                 workoutView.sessionError = "Concluído neste dispositivo. Aguardando sincronização.";
             }
-            workoutView.completedSetCounts.set(String(exercise.id), sets.length);
-            workoutView.skippedExerciseIds.delete(String(exercise.id));
-            clearWorkoutExerciseDraft(session.id, exercise.id);
-            closeReplacementPanel(exercise.id);
-            const next = firstPendingWorkoutExercise(asArray(selectedWorkoutDay()?.exercises), completedWorkoutExerciseIds());
-            workoutView.activeExerciseId = next ? String(next.id) : null;
-            workoutView.sessionSheetExpanded = false;
-            workoutView.rest = null;
-            workoutView.draftError = "";
-            activeWorkoutSummary = {...activeWorkoutSummary, session: result.session};
+            invalidateWorkoutReads();
+            return true;
+        } catch (error) {
+            if (!workoutContextCurrent(account, version, session.id)) return false;
+            if (["timeout", "offline"].includes(error.code)) {
+                if (draftBefore.length) workoutView.setDrafts.set(key, draftBefore);
+                workoutView.sessionError = "Concluído neste dispositivo. Aguardando sincronização.";
+                persistWorkoutDraftLocally(session.id);
+                renderWorkoutDetail({ preserveScroll: true });
+                return true;
+            }
+            const restoredIds = completedWorkoutExerciseIds();
+            restoredIds.delete(key);
+            workoutView.session = { ...workoutView.session, completed_exercise_ids: [...restoredIds] };
+            workoutView.completedSetCounts.delete(key);
+            if (draftBefore.length) workoutView.setDrafts.set(key, draftBefore);
+            workoutView.activeExerciseId = key;
+            workoutView.playerScreen = "exercise";
+            workoutView.sessionSheetExpanded = true;
+            workoutView.setEntryMode = "review";
+            workoutView.sessionError = error.message || "Não foi possível concluir este exercício.";
             persistWorkoutDraftLocally(session.id);
-        });
+            renderWorkoutDetail({ preserveScroll: true });
+            return false;
+        } finally {
+            workoutView.completingExerciseIds.delete(key);
+        }
     }
 
     async function finishWorkoutSession() {
         const session = workoutView.session;
-        if (!session || workoutView.pendingAction || workoutView.uncertainMutation) return;
+        if (!session || workoutView.pendingAction || workoutView.uncertainMutation || workoutView.completingExerciseIds.size) return;
         const exercises = asArray(selectedWorkoutDay()?.exercises);
         const completedIds = completedWorkoutExerciseIds();
-        const skippedExercises = exercises.filter((exercise) => workoutView.skippedExerciseIds.has(String(exercise.id)));
-        const unresolvedCount = exercises.filter((exercise) => (
-            !completedIds.has(String(exercise.id))
-            && !workoutView.skippedExerciseIds.has(String(exercise.id))
-        )).length;
-        const incomplete = Boolean(unresolvedCount || skippedExercises.length);
-        const confirmation = incomplete
-            ? "Finalizar treino incompleto? Exercícios e séries pendentes não serão marcados como concluídos."
-            : "Finalizar treino? Revise seus registros antes de confirmar.";
-        if (!window.confirm(confirmation)) return;
+        const progressState = workoutExecutionProgress(exercises, completedIds);
+        const finishState = workoutFinishState(exercises, completedIds);
+        const provisionalSummary = workoutCompletionSnapshot(selectedWorkoutDay(), exercises, progressState, finishState);
         await performSessionMutation("finish", `/workout_sessions/${apiSegment(session.id)}/finish`, {method: "POST"}, result => {
             workoutView.session = null;
             workoutView.completedSummary = {
-                ...result.summary,
-                skipped_exercises: skippedExercises.map((exercise) => ({ id: exercise.id, name: displayedExercise(exercise).exercise.name })),
-                skipped_count: skippedExercises.length,
-                completion_state: incomplete ? "partial" : "complete",
+                ...provisionalSummary,
+                ...(result.summary || {}),
+                skipped_exercises: finishState.skippedExercises.map((exercise) => ({ id: exercise.id, name: displayedExercise(exercise).exercise.name })),
+                skipped_count: finishState.skippedExercises.length,
+                completion_state: result.summary?.completion_state || finishState.completionState,
+                sync_pending: Boolean(result.queued),
                 weekly_progress: result.weekly_progress,
                 exercise_goals_reached: asArray(result.exercise_goals_reached),
                 achievements_unlocked: asArray(result.achievements_unlocked),
@@ -3802,7 +4131,7 @@
             clearActiveWorkoutDock();
             workoutView.replacementPanels.clear();
             window.invalidateProgressOverview?.();
-            showToast("Treino finalizado. Excelente trabalho!", "success");
+            showToast(result.queued ? "Finalização salva. O histórico será sincronizado quando a conexão voltar." : "Treino finalizado. Excelente trabalho!", "success");
         });
     }
 
@@ -3880,16 +4209,26 @@
             && (!gesture || workoutContextCurrent(gesture.account, gesture.version, gesture.sessionId));
     }
 
+    function workoutGestureHasTarget(screen, exerciseId, direction) {
+        const exercises = asArray(selectedWorkoutDay()?.exercises);
+        if (screen === "finish") return direction < 0 && exercises.length > 0;
+        const currentIndex = exercises.findIndex((exercise) => String(exercise.id) === String(exerciseId));
+        if (currentIndex < 0) return false;
+        return Boolean(exercises[currentIndex + direction]) || (direction > 0 && currentIndex === exercises.length - 1);
+    }
+
     function startWorkoutPlayerGesture(event) {
         if (!event.isPrimary) { cancelWorkoutPlayerGesture(); return; }
         if (event.button > 0 || !workoutView.session || !workoutGestureAllowed()) return;
-        const stage = event.target.closest(".current-exercise-stage--player, [data-workout-ready]");
+        const stage = event.target.closest(".current-exercise-stage--player");
         if (!stage) return;
         const handle = event.target.closest(".workout-sheet-handle");
+        if (event.target.closest(".workout-quick-set-layer")) return;
         if (event.target.closest(".workout-session-sheet") && !handle) return;
         if (!handle && event.target.closest("button, input, select, textarea, label, a, summary, details")) return;
         workoutGesture = {pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, deltaX: 0, deltaY: 0,
-            axis: handle ? "vertical" : null, moved: false, handle: Boolean(handle), expanded: workoutView.sessionSheetExpanded,
+            axis: handle ? "vertical" : null, moved: false, handle: Boolean(handle), expanded: workoutView.setEntryMode === "review",
+            screen: workoutView.playerScreen, exerciseId: workoutView.activeExerciseId,
             account: workoutAccount(), version: workoutView.viewVersion, sessionId: workoutView.session.id,
             stage, sheet: stage.querySelector(".workout-session-sheet")};
         stage.setPointerCapture?.(event.pointerId);
@@ -3907,11 +4246,16 @@
         }
         if (!g.axis) return;
         g.moved = Math.max(x,y) >= 12;
+        if (g.screen === "finish" && g.axis === "vertical") return;
         event.preventDefault();
         if (g.axis === "horizontal") {
-            g.stage.style.setProperty("--player-swipe-x", `${Math.max(-110, Math.min(110,g.deltaX*.55))}px`);
+            const direction = g.deltaX < 0 ? 1 : -1;
+            const hasTarget = workoutGestureHasTarget(g.screen, g.exerciseId, direction);
+            g.stage.style.setProperty("--player-preview-offset", g.deltaX >= 0 ? "-100%" : "100%");
+            const translated = hasTarget ? g.deltaX * .55 : g.deltaX * .16;
+            g.stage.style.setProperty("--player-swipe-x", `${Math.max(-110, Math.min(110, translated))}px`);
             g.stage.classList.add("is-player-dragging");
-        } else if (g.sheet) {
+        } else if (g.sheet && g.handle && workoutView.setEntryMode === "review") {
             const peek = parseFloat(getComputedStyle(g.stage).getPropertyValue("--sheet-peek")) || 76;
             const collapsed = Math.max(0,g.sheet.offsetHeight-peek);
             g.sheet.style.transform = `translateY(${Math.max(0,Math.min(collapsed,(g.expanded ? 0 : collapsed)+g.deltaY))}px)`;
@@ -3926,21 +4270,36 @@
         cancelWorkoutPlayerGesture(event);
         if (!allowed || !g.moved) return;
         if (g.handle) { ignoreNextWorkoutSheetClick = true; setTimeout(() => { ignoreNextWorkoutSheetClick = false; },400); }
-        if (g.stage.hasAttribute("data-workout-ready")) {
-            if ((g.axis === "horizontal" && g.deltaX <= -58) || (g.axis === "vertical" && g.deltaY <= -44)) finishWorkoutSession();
+        if (g.screen === "finish" && g.axis === "vertical") return;
+        if (g.axis === "vertical" && Math.abs(g.deltaY) >= 44) {
+            if (g.deltaY < 0) setWorkoutEntryMode(workoutView.setEntryMode === "review" ? "review" : "quick");
+            else setWorkoutEntryMode("closed");
             return;
         }
-        if (g.axis === "vertical" && Math.abs(g.deltaY) >= 44) { setWorkoutSheetExpanded(g.deltaY < 0); return; }
         if (g.axis !== "horizontal" || Math.abs(g.deltaX) < 58 || Math.abs(g.deltaX) < Math.abs(g.deltaY)*1.3) return;
-        if (g.deltaX < 0) completeWorkoutExercise(g.stage.dataset.exerciseId);
-        else navigateSessionExercise(-1);
+        const swipeLeft = g.deltaX < 0;
+        const direction = swipeLeft ? 1 : -1;
+        if (!workoutGestureHasTarget(g.screen, g.exerciseId, direction)) return;
+        g.stage.classList.add(swipeLeft ? "is-player-committing-left" : "is-player-committing-right");
+        g.stage.style.setProperty("--player-preview-offset", swipeLeft ? "100%" : "-100%");
+        g.stage.style.setProperty("--player-swipe-x", swipeLeft ? "-110%" : "110%");
+        const finish = () => {
+            navigateSessionExercise(direction);
+        };
+        const frame = callback => {
+            if (typeof requestAnimationFrame === "function") requestAnimationFrame(callback);
+            else if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(callback);
+            else setTimeout(callback, 0);
+        };
+        frame(() => frame(finish));
     }
 
     function cancelWorkoutPlayerGesture(event) {
         const g = workoutGesture;
         if (!g || (event && g.pointerId !== event.pointerId)) return;
         workoutGesture = null;
-        g.stage.classList.remove("is-player-dragging");
+        g.stage.classList.remove("is-player-dragging", "is-player-committing-left", "is-player-committing-right");
+        g.stage.style.removeProperty("--player-preview-offset");
         g.stage.style.removeProperty("--player-swipe-x");
         g.sheet?.classList.remove("is-dragging");
         if (g.sheet) g.sheet.style.transform = "";
@@ -4101,6 +4460,13 @@
             if (action === "set-current" && type === "diet") setCurrentDietPlan(id);
             if (action === "delete") deletePlan(type, id);
         });
+        document.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            const workoutTodayAction = event.target.closest?.("[data-workout-today-action]");
+            if (!workoutTodayAction || event.target !== workoutTodayAction) return;
+            event.preventDefault();
+            workoutTodayAction.click();
+        });
 
         byId("dietPlansTableBody")?.addEventListener("keydown", async (event) => {
             const card = event.target.closest('.plan-card[data-plan-action="view"]');
@@ -4198,12 +4564,41 @@
                 navigateSessionExercise(-1);
             } else if (action === "next-session-exercise") {
                 navigateSessionExercise(1);
+            } else if (action === "open-finish-card" || action === "finish-session") {
+                openWorkoutFinishCard();
+            } else if (action === "return-from-finish") {
+                returnFromWorkoutFinishCard();
             } else if (action === "toggle-session-sheet") {
                 if (ignoreNextWorkoutSheetClick) {
                     ignoreNextWorkoutSheetClick = false;
                     return;
                 }
-                setWorkoutSheetExpanded(!workoutView.sessionSheetExpanded);
+                setWorkoutSheetExpanded(workoutView.setEntryMode === "closed");
+            } else if (action === "close-set-entry") {
+                setWorkoutEntryMode("closed");
+            } else if (action === "review-sets") {
+                setWorkoutEntryMode("review");
+            } else if (action === "correct-last-set") {
+                const last = workoutView.lastConfirmedSet;
+                if (last && String(last.exerciseId) === String(workoutView.activeExerciseId)) {
+                    setWorkoutEntryMode("quick", { index: last.index, correction: true });
+                }
+            } else if (action === "confirm-quick-set") {
+                confirmWorkoutQuickSet(exerciseId);
+            } else if (action === "confirm-empty-set") {
+                confirmWorkoutQuickSet(workoutView.activeExerciseId, { discardPartial: true });
+            } else if (action === "add-quick-set") {
+                const activeId = String(workoutView.activeExerciseId);
+                const drafts = asArray(workoutView.setDrafts.get(activeId)).map(item => ({ ...item }));
+                const exercise = findSelectedExercise(activeId);
+                while (drafts.length < workoutPlannedSetCount(exercise)) drafts.push({ load_kg: "", repetitions: "", is_warmup: false, completed: false });
+                if (drafts.length >= 20) return;
+                drafts.push({ load_kg: "", repetitions: "", is_warmup: false, completed: false });
+                workoutView.setDrafts.set(activeId, drafts);
+                workoutView.activeSetIndex = drafts.length - 1;
+                workoutView.correctionSetIndex = null;
+                scheduleWorkoutDraftSave(activeId);
+                renderWorkoutDetail({ preserveScroll: true, focusSelector: '[data-workout-quick-load], [data-workout-quick-repetitions]' });
             } else if (action === "replacement-options") {
                 await openReplacementOptions(exerciseId);
             } else if (action === "permanent-replacement-options") {
@@ -4257,7 +4652,7 @@
             } else if (action === "retry-session") {
                 if (workoutView.uncertainMutation) await workoutView.uncertainMutation();
                 else await loadActiveWorkoutSession();
-            } else if (action === "finish-session") {
+            } else if (action === "confirm-finish-session") {
                 await finishWorkoutSession();
             } else if (action === "cancel-session") {
                 await cancelWorkoutSession();
@@ -4371,6 +4766,14 @@
             }
         });
         byId("viewWorkoutPlanDetails")?.addEventListener("input", (event) => {
+            if (event.target.matches("[data-workout-quick-load], [data-workout-quick-repetitions]")) {
+                const layer = event.target.closest("[data-workout-set-index]");
+                const index = Number(layer?.dataset.workoutSetIndex);
+                const field = event.target.hasAttribute("data-workout-quick-load") ? "load_kg" : "repetitions";
+                event.target.removeAttribute("aria-invalid");
+                updateWorkoutQuickSetDraft(field, event.target.value.trim(), workoutView.activeExerciseId, index);
+                return;
+            }
             if (event.target.matches("[data-workout-set-load], [data-workout-set-repetitions], [data-workout-set-warmup]")) {
                 const exerciseId = event.target.closest("[data-workout-exercise-card]")?.dataset.exerciseId;
                 event.target.removeAttribute("aria-invalid");
@@ -4393,6 +4796,11 @@
             syncWorkoutSharePreview();
         });
         byId("viewWorkoutPlanDetails")?.addEventListener("keydown", async (event) => {
+            if (event.key === "Enter" && event.target.matches("[data-workout-quick-repetitions]")) {
+                event.preventDefault();
+                confirmWorkoutQuickSet(workoutView.activeExerciseId);
+                return;
+            }
             const tab = event.target.closest('[data-workout-action="select-day"]');
             if (!tab) return;
             const index = tabIndexFromKey(event, Number(tab.dataset.dayIndex), workoutView.days.length);
@@ -4409,8 +4817,8 @@
         });
         byId("viewWorkoutPlanDetails")?.addEventListener("focusin", event => {
             const field = event.target;
-            if (!field.matches("[data-workout-set-load], [data-workout-set-repetitions]")) return;
-            workoutView.lastField = {exerciseId: String(workoutView.activeExerciseId), index: field.closest("[data-workout-set-index]").dataset.workoutSetIndex, field: field.hasAttribute("data-workout-set-load") ? "load" : "repetitions"};
+            if (!field.matches("[data-workout-set-load], [data-workout-set-repetitions], [data-workout-quick-load], [data-workout-quick-repetitions]")) return;
+            workoutView.lastField = {exerciseId: String(workoutView.activeExerciseId), index: field.closest("[data-workout-set-index]").dataset.workoutSetIndex, field: field.hasAttribute("data-workout-set-load") || field.hasAttribute("data-workout-quick-load") ? "load" : "repetitions"};
         });
         byId("viewWorkoutPlanDetails")?.addEventListener("pointerdown", startWorkoutPlayerGesture);
         byId("viewWorkoutPlanDetails")?.addEventListener("pointermove", moveWorkoutPlayerGesture);

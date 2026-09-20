@@ -386,6 +386,10 @@ if (typeof window !== "undefined" && typeof window.fetch === "function" && !wind
                 throw new DOMException('Request no longer current', 'AbortError');
             }
             logApi(response.status, response.ok ? 'success' : 'http_error');
+            if (response.ok && isApiRequest && navigator.onLine !== false) {
+                document.body.dataset.offline = "false";
+                window.updateOfflineStatus?.();
+            }
             if (response.ok && unsafe && isApiRequest && ownerVersion === AppReadCache.accountVersion &&
                 /^\/api\/(diet(?:\/|$)|diet_plans(?:\/|$)|profile(?:\/|$))/.test(url.pathname)) {
                 AppReadCache.invalidate('diet:');

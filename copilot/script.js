@@ -40,7 +40,7 @@ let audioInitialized = false;
 let billingReturnHandled = false;
 let profileAchievementsState = { selected: [], achievements: [], badges: [], records: [], limit: 3, filter: 'all', savingToken: null };
 let appBootCompleted = false;
-const APP_VERSION = 'v1.1.1';
+const APP_VERSION = 'v1.1.2';
 
 // API Base URL. The native shell is local, so only its API calls use Render.
 const configuredApiOrigin = window.FIT_TRACKER_CONFIG?.apiOrigin || document.querySelector('meta[name="fit-tracker-api-origin"]')?.content || window.location.origin;
@@ -429,6 +429,7 @@ function updateOfflineStatus() {
     if (!status) return;
     const offline = navigator.onLine === false || document.body.dataset.offline === 'true';
     status.hidden = !offline;
+    status.setAttribute('aria-label', offline ? 'Sem conexão. Dados serão sincronizados quando a internet voltar.' : '');
 }
 
 async function bootApp() {
@@ -486,7 +487,10 @@ async function resumeApp() {
         if (authState === 'unknown' || Date.now() - lastAuthCheckAt > 60_000) await checkAuthStatus({ resume: true });
         if (!currentUser) return;
         await window.resumeWorkoutSession?.();
-        if (currentTab === 'diet') await Promise.all([loadTodayCardapio(), window.loadWorkoutTodayCard?.()]);
+        if (currentTab === 'diet') {
+            if (window.HomeRefreshCoordinator) await window.HomeRefreshCoordinator.refresh({ force: false, source: 'resume', visual: false });
+            else await Promise.all([loadTodayCardapio(), window.loadWorkoutTodayCard?.()]);
+        }
     })();
     try { await resumeInFlight; }
     catch (error) { if (error.name !== 'AbortError') console.warn('App resume:', error); }
@@ -499,7 +503,10 @@ window.addEventListener('online', resumeApp);
 window.addEventListener('online', () => { document.body.dataset.offline = 'false'; updateOfflineStatus(); });
 window.addEventListener('offline', updateOfflineStatus);
 window.addEventListener('fittracker:offline-queued', updateOfflineStatus);
-window.addEventListener('fittracker:offline-synced', updateOfflineStatus);
+window.addEventListener('fittracker:offline-synced', () => {
+    if (navigator.onLine !== false) document.body.dataset.offline = 'false';
+    updateOfflineStatus();
+});
 
 function scheduleSecondaryLoads(skipProfile = false) {
     const owner = currentUser?.id || 'guest';
@@ -512,6 +519,7 @@ function scheduleSecondaryLoads(skipProfile = false) {
             if (currentUser) {
                 if (!skipProfile) checkUserProfile();
                 window.loadNetworkInbox?.();
+                window.preloadProgressOverview?.();
                     }
         };
         if (window.requestIdleCallback) window.requestIdleCallback(run, { timeout: 2000 });
@@ -2219,6 +2227,7 @@ function showTab(tabName, options = {}) {
     currentTab = tabName;
     if (PRIMARY_VIEWS.has(tabName)) lastPrimaryTab = tabName;
     document.body.dataset.activeTab = tabName;
+    window.dispatchEvent(new CustomEvent('fittracker:home-refresh-eligibility'));
     const routeStatus = getElement('routeStatus');
     if (routeStatus) routeStatus.textContent = `${VIEW_LABELS[tabName] || 'Seção'} aberta`;
     syncViewPath(tabName, options.history || 'push');
@@ -2230,8 +2239,11 @@ function showTab(tabName, options = {}) {
     }
 
     if (tabName === 'diet') {
-        loadTodayCardapio();
-        window.loadWorkoutTodayCard?.();
+        if (window.HomeRefreshCoordinator) window.HomeRefreshCoordinator.refresh({ force: false, source: 'tab', visual: false });
+        else {
+            loadTodayCardapio();
+            window.loadWorkoutTodayCard?.();
+        }
     } else if (tabName === 'measurements') {
         loadMeasurements();
         loadMeasurementSummary();
@@ -2535,6 +2547,7 @@ function openAppModal(modal) {
     modal.classList.add("show");
     modal.setAttribute("aria-hidden", "false");
     document.body.classList.add("modal-open");
+    window.dispatchEvent(new CustomEvent('fittracker:home-refresh-eligibility'));
     updateModalBackground(modal);
     const focusTarget = getModalFocusable(modal)[0];
     if (focusTarget) requestAnimationFrame(() => focusTarget.focus());
@@ -2603,6 +2616,7 @@ function finalizeModalClose(modal) {
     }
     modal._previousActiveModal = null;
     modal._modalTrigger = null;
+    window.dispatchEvent(new CustomEvent('fittracker:home-refresh-eligibility'));
 }
 
 function closeAppModal(modal) {
@@ -3086,7 +3100,8 @@ function updateDailySummary() {
     const planTargets = cardapioActivePlan?.nutrition_targets || {};
     const targetKeys = { calories: 'targetCalories', protein: 'targetProtein', carbs: 'targetCarbs', fat: 'targetFat' };
     const labels = { calories: 'kcal', protein: 'g', carbs: 'g', fat: 'g' };
-    Object.entries(totals).forEach(([key, value]) => {
+    ['calories', 'carbs', 'protein', 'fat'].forEach(key => {
+        const value = Number(totals?.[key]) || 0;
         const rounded = Math.round(value);
         const target = Number(hasDailyView ? todayDietDay.targets?.[key] : planTargets[targetKeys[key]]);
         const hasTarget = Number.isFinite(target) && target > 0;
@@ -3236,14 +3251,14 @@ function applyTodayDietDay(data) {
 
 async function loadTodayCardapio(options = {}) {
     if (!currentUser) {
-        if (authState === 'unknown') return;
+        if (authState === 'unknown') return { ok: false, cancelled: true, reason: 'auth-pending' };
         cardapioActivePlan = null;
         todayDietDay = null;
         renderTodayCardapio(null, null);
         renderDietCurrentPlanHub(null, null);
-        return;
+        return { ok: false, skipped: true, reason: 'guest' };
     }
-    if (!getElement('todayCardapioSection')) return;
+    if (!getElement('todayCardapioSection')) return { ok: false, skipped: true, reason: 'missing-surface' };
     const today = localDateInputValue();
     const owner = currentUser.id;
     const revision = ++homeRequestVersion;
@@ -3254,18 +3269,21 @@ async function loadTodayCardapio(options = {}) {
     const body = getElement('todayCardapioBody');
     if (!cached && todayDietDay?.date !== today && body) body.innerHTML = '<div class="home-skeleton" aria-hidden="true"></div><p class="sr-only">Carregando alimentação</p>';
     const stale = !cached || Date.now() - cached.at >= 60_000 || options.force;
-    if (!stale) return;
+    if (!stale) return { ok: true, data: cached?.data || todayDietDay, source: 'memory', refreshed: false };
     body?.setAttribute('aria-busy', 'true');
     try {
         const data = await loadDietDay(today, options);
-        if (owner !== currentUser?.id || revision !== homeRequestVersion || today !== localDateInputValue()) return;
+        if (owner !== currentUser?.id || revision !== homeRequestVersion || today !== localDateInputValue()) return { ok: false, cancelled: true, reason: 'stale-context' };
         applyTodayDietDay(data);
+        const offline = navigator.onLine === false || document.body.dataset.offline === 'true';
+        return { ok: true, data, source: offline ? 'snapshot' : 'network', offline, refreshed: true };
     } catch (error) {
-        if (error.name === 'AbortError' || owner !== currentUser?.id || revision !== homeRequestVersion) return;
+        if (error.name === 'AbortError' || owner !== currentUser?.id || revision !== homeRequestVersion) return { ok: false, cancelled: true, reason: 'aborted' };
         if (todayDietDay?.date === today) {
             renderTodayCardapio(todayDietDay, null);
             body?.insertAdjacentHTML('beforeend', '<p class="home-data-note" role="status">Mostrando os últimos dados. <button type="button" class="text-button" onclick="loadTodayCardapio({force:true})">Atualizar</button></p>');
         } else renderTodayCardapio(null, 'Não foi possível carregar sua alimentação. Tente novamente.');
+        return { ok: false, error, stale: todayDietDay?.date === today };
     } finally {
         if (revision === homeRequestVersion) body?.setAttribute('aria-busy', 'false');
     }

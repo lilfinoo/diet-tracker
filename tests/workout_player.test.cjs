@@ -17,7 +17,7 @@ function harness() {
     };
     vm.createContext(c);
     vm.runInContext(fs.readFileSync(path.join(__dirname,'../copilot/js/utils.js'),'utf8'),c);
-    const expose = `window.testPlayer = {state:workoutView, openReplacementOptions, closeReplacementPanel, applyReplacement, restoreExercise, completeWorkoutExercise, finishWorkoutSession, resetWorkoutAccount, hydrateWorkoutDrafts, persistWorkoutDraftLocally, saveWorkoutDraftToServer, scheduleWorkoutDraftSave, queueSessionWrite, setWorkoutSheetExpanded, performedSetsFromView, startWorkoutPlayerGesture, moveWorkoutPlayerGesture, endWorkoutPlayerGesture, cancelWorkoutPlayerGesture, loadWorkoutTodayCard, renderWorkoutTodayCard, displayedExercise, setAPI(fn){apiRequest=fn}, setRenderer(fn){renderWorkoutDetail=fn}, dock(){return activeWorkoutSummary}, gesture(){return workoutGesture}};\n    window.loadWorkoutTodayCard =`;
+    const expose = `window.testPlayer = {state:workoutView, openReplacementOptions, closeReplacementPanel, applyReplacement, restoreExercise, completeWorkoutExercise, finishWorkoutSession, resetWorkoutAccount, hydrateWorkoutDrafts, persistWorkoutDraftLocally, saveWorkoutDraftToServer, scheduleWorkoutDraftSave, queueSessionWrite, setWorkoutSheetExpanded, setWorkoutEntryMode, confirmWorkoutQuickSet, openWorkoutFinishCard, returnFromWorkoutFinishCard, navigateSessionExercise, startWorkoutPlayerGesture, moveWorkoutPlayerGesture, endWorkoutPlayerGesture, cancelWorkoutPlayerGesture, loadWorkoutTodayCard, renderWorkoutTodayCard, displayedExercise, setAPI(fn){apiRequest=fn}, setRenderer(fn){renderWorkoutDetail=fn}, dock(){return activeWorkoutSummary}, gesture(){return workoutGesture}};\n    window.loadWorkoutTodayCard =`;
     vm.runInContext(source.replace('window.loadWorkoutTodayCard =',expose),c);
     const api=window.testPlayer, s=api.state;
     s.plan={id:1,title:'Treino A'}; s.days=[{id:10,title:'Peito',exercises:[{id:100,name:'Supino',sets:3,reps:'8-12',rest_seconds:60,equipment:['barbell'],catalog_key:'original'},{id:101,name:'Flexão',sets:3,rest_seconds:45}]}];
@@ -70,11 +70,16 @@ test('replacement cannot compete with completion; restore uses the same mutation
     const restore=api.restoreExercise(100); await tick(); await api.completeWorkoutExercise(100);
     assert.equal(calls.length,1); resolve({}); await restore;
 });
-test('up opens optional fields and starts rest without sending complete; repeated up keeps timer',()=>{
+test('up opens the quick set entry without saving or starting rest',()=>{
     const {api,s,calls}=harness(); swipe(api,stage(),0,-80);
-    assert.equal(s.sessionSheetExpanded,true); assert.ok(s.rest.endsAt>Date.now()); assert.equal(calls.length,0);
-    const deadline=s.rest.endsAt; api.setWorkoutSheetExpanded(false); swipe(api,stage(),0,-80);
-    assert.equal(s.rest.endsAt,deadline);
+    assert.equal(s.setEntryMode,'quick'); assert.equal(s.sessionSheetExpanded,false); assert.equal(s.rest,null); assert.equal(calls.length,0);
+});
+test('confirming an empty quick set advances and starts the prescribed rest',()=>{
+    const {api,s}=harness(); api.setWorkoutEntryMode('quick');
+    assert.equal(api.confirmWorkoutQuickSet(100),true);
+    assert.equal(s.setDrafts.get('100')[0].completed,true);
+    assert.equal(s.activeSetIndex,1);
+    assert.ok(s.rest.endsAt>Date.now());
 });
 test('cancel, lost capture, second finger, ambiguity and pending state never save',async()=>{
     const {api,s,calls}=harness(); const surface=stage();
@@ -88,32 +93,38 @@ test('cancel, lost capture, second finger, ambiguity and pending state never sav
     s.pendingAction='complete-100'; swipe(api,surface,-90,0);
     await tick(); assert.equal(calls.length,0); assert.equal(api.gesture(),null);
 });
-test('a horizontal gesture completes once with optional empty metrics and no rest',async()=>{
-    const {api,s,c,calls}=harness(); let resolve;
-    c.respond=()=>new Promise(r=>resolve=r);
-    swipe(api,stage(),-90,0); await tick(); swipe(api,stage(),-90,0);
-    assert.equal(calls.length,1); assert.equal(calls[0].options.body.sets.length,0); assert.equal(s.rest,null);
-    resolve({session:{...s.session,completed_exercise_ids:[100]}}); await tick();
-    assert.equal(s.activeExerciseId,'101'); assert.equal(s.pendingAction,'');
+test('a left horizontal gesture advances to the next exercise without completing the current one',()=>{
+    const {api,s,calls}=harness();
+    swipe(api,stage(),-90,0);
+    assert.equal(calls.length,0); assert.equal(s.activeExerciseId,'101');
 });
-test('last exercise waits for confirmation and a new deliberate action before finish',async()=>{
-    const {api,s,c,calls}=harness(); s.days[0].exercises=s.days[0].exercises.slice(0,1);
-    let resolve; c.respond=()=>new Promise(r=>resolve=r);
-    swipe(api,stage(),-90,0); await tick(); swipe(api,stage(true),-90,0);
-    assert.equal(calls.filter(c=>c.url.endsWith('/finish')).length,0);
-    resolve({session:{...s.session,completed_exercise_ids:[100]}}); await tick();
-    assert.equal(calls.length,1); c.respond=async()=>({summary:{session_id:77}});
-    swipe(api,stage(true),-90,0); await tick();
-    assert.equal(calls.filter(c=>c.url.endsWith('/finish')).length,1); assert.equal(s.session,null);
+test('a right horizontal gesture navigates back without completing the current exercise',()=>{
+    const {api,s,calls}=harness(); s.activeExerciseId='101';
+    swipe(api,stage(),90,0);
+    assert.equal(s.activeExerciseId,'100');
+    assert.deepEqual(s.session.completed_exercise_ids,[]);
+    assert.equal(calls.length,0);
+});
+test('a left horizontal gesture after the last exercise opens the finish card without finishing the session',()=>{
+    const {api,s,calls}=harness(); s.days[0].exercises=s.days[0].exercises.slice(0,1);
+    swipe(api,stage(),-90,0);
+    assert.equal(calls.length,0); assert.equal(s.playerScreen,'finish'); assert.equal(s.activeExerciseId,'100'); assert.ok(s.session);
+    swipe(api,stage(),90,0);
+    assert.equal(s.playerScreen,'exercise'); assert.equal(s.activeExerciseId,'100');
+});
+test('returning from the finish card keeps the last exercise visible after all exercises are resolved',()=>{
+    const {api,s}=harness();
+    s.session.completed_exercise_ids=['100','101']; s.activeExerciseId='101';
+    api.openWorkoutFinishCard(); assert.equal(s.playerScreen,'finish');
+    api.returnFromWorkoutFinishCard(); assert.equal(s.playerScreen,'exercise');
 });
 test('network failure preserves exact drafts; reconciliation prevents duplicate confirmed completion',async()=>{
     const {api,s,c,calls}=harness(); s.setDrafts.set('100',[{load_kg:'42,5',repetitions:'8'}]);
     c.respond=async url=>{if(url.endsWith('/complete')) throw Object.assign(new Error('timeout'),{code:'timeout'}); throw new Error('offline');};
     await api.completeWorkoutExercise(100);
-    assert.equal(s.setDrafts.get('100')[0].load_kg,'42,5'); assert.ok(s.uncertainMutation); assert.equal(s.activeExerciseId,'100');
-    c.respond=async()=>({session:{...s.session,completed_exercise_ids:[100]}});
-    await s.uncertainMutation();
-    assert.equal(calls.filter(c=>c.url.endsWith('/complete')).length,1); assert.equal(s.activeExerciseId,'101');
+    assert.equal(s.setDrafts.get('100')[0].load_kg,'42,5'); assert.equal(s.uncertainMutation, undefined); assert.equal(s.activeExerciseId,'101');
+    assert.ok(s.session.completed_exercise_ids.includes('100'));
+    assert.equal(calls.filter(c=>c.url.endsWith('/complete')).length,1);
 });
 test('dirty local drafts survive hydration but confirmed completions remove them',()=>{
     const {api,s}=harness(); s.setDrafts.set('100',[{load_kg:'-',repetitions:'12'}]); api.persistWorkoutDraftLocally(77);
@@ -125,7 +136,7 @@ test('queued autosave cannot follow a confirmed complete and stale draft errors 
     const {api,s,c,calls}=harness(); let resolve;
     s.draftRevisions.set('100',1); c.respond=()=>new Promise(r=>resolve=r);
     const draft=api.saveWorkoutDraftToServer(77,100,[{repetitions:8}]); await tick();
-    const complete=api.completeWorkoutExercise(100); assert.equal(s.pendingAction,'complete-100');
+    const complete=api.completeWorkoutExercise(100); assert.equal(s.pendingAction,'');
     c.respond=async()=>({session:{...s.session,completed_exercise_ids:[100]}});
     resolve({}); await Promise.all([draft,complete]);
     assert.ok(calls[0].url.endsWith('/draft')); assert.ok(calls[1].url.endsWith('/complete'));

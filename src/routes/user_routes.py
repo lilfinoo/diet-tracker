@@ -410,7 +410,7 @@ def _workout_today_payload(user):
         base["completed_session"] = completed_session.to_dict()
         base["completed_sets"] = completed_sets
         base["total_sets"] = total_sets
-        base["state"] = "partial" if completed_sets and completed_sets < total_sets else "completed"
+        base["state"] = "completed" if total_sets and completed_sets == total_sets else "partial"
         return base
 
     base["state"] = "scheduled"
@@ -760,6 +760,7 @@ def _workout_session_summary(session_record):
         "total_exercises": total_exercises,
         "sets_performed": total_sets,
         "volume_total_kg": round(volume_total, 2) if has_performed_sets and all_sets_have_load else None,
+        "completion_state": "complete" if total_exercises and len(exercises) == total_exercises else "partial",
         "workout_plan_id": session_record.workout_plan_id,
         "workout_day_id": session_record.workout_day_id,
         "privacy": "private",

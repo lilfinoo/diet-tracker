@@ -234,7 +234,7 @@
     document.addEventListener("click", async (event) => {
         if (event.target.closest("#networkSearchButton")) search();
         if (event.target.closest("#networkAvatarChoose")) {
-            const pickerRequest = window.FitTrackerImagePicker?.open({ inputId: "networkAvatarInput", onFile: uploadPhoto });
+            const pickerRequest = window.FitTrackerImagePicker?.open({ inputId: "networkAvatarInput", onFile: uploadPhoto, source: 'CAMERA' });
             pickerRequest?.catch(() => showToast("Não foi possível abrir a câmera ou fototeca.", "error"));
         }
         if (event.target.closest("#networkAvatarRemove")) removePhoto();

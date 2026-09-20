@@ -30,6 +30,8 @@
 	<string>O Fit Tracker usa a câmera para registrar sua foto de perfil e refeições.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>O Fit Tracker usa sua fototeca para selecionar fotos de perfil e refeições.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>O Fit Tracker pode salvar fotos escolhidas ou capturadas durante o registro de refeições e perfil.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

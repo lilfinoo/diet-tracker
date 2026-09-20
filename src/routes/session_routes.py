@@ -56,7 +56,7 @@ def _draft_sets_payload(data):
         raw_repetitions = raw_set.get("repetitions", "")
         if isinstance(raw_load, bool) or isinstance(raw_repetitions, bool):
             abort(400, description="Carga ou repetições inválidas")
-        load = str(raw_load or "").strip()
+        load = str(raw_load or "").strip().replace(",", ".")
         repetitions = str(raw_repetitions or "").strip()
         if len(load) > 16 or len(repetitions) > 8:
             abort(400, description="Carga ou repetições inválidas")

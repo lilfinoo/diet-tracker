@@ -5,8 +5,17 @@
     let step = 1, method = 'text', photo = null, dirty = false, busy = false;
     let version = 0, estimateDescription = '', stale = false, editing = false;
     let photoVersion = 0, loadingPhoto = false, identified = false;
+    let acquisitionVersion = 0, acquisitionActive = false, acquisitionSource = 'CAMERA';
+    let acquisitionState = 'idle', acquisitionMessage = '', acquisitionTone = 'info';
     const account = () => currentUser?.id;
     function message(text = '') { el('dietMessage').textContent = text; }
+    function setAcquisitionState(state = 'idle', text = '', tone = 'info') {
+        acquisitionState = state; acquisitionMessage = text; acquisitionTone = tone;
+    }
+    function invalidateAcquisition(resetState = true) {
+        acquisitionVersion++; photoVersion++; acquisitionActive = false; loadingPhoto = false;
+        if (resetState) setAcquisitionState();
+    }
     function clearNutrients() {
         fields.forEach(id => { el(id).value = ''; });
         estimateDescription = '';
@@ -42,7 +51,8 @@
         el('dietFlowActions').hidden = step === 1;
         el('dietFlowNext').hidden = step === 4;
         el('dietSaveBtn').hidden = step !== 4;
-        el('dietFlowNext').disabled = busy || loadingPhoto;
+        const acquiringPhoto = acquisitionActive || loadingPhoto;
+        el('dietFlowNext').disabled = busy || acquiringPhoto;
         el('dietFlowNext').textContent = loadingPhoto ? 'Preparando foto…' : busy ? 'Analisando sua refeição…' : step === 2 ? 'Analisar refeição' : stale ? 'Recalcular' : 'Continuar';
         el('dietFlowManual').hidden = step !== 2 && !(step === 3 && stale);
         el('dietPhotoArea').hidden = method !== 'photo';
@@ -50,6 +60,19 @@
         if (photo) el('dietReviewPhoto').src = el('dietPhotoPreviewImg').src;
         el('dietSourceLabel').textContent = method === 'photo' ? 'Quer complementar a foto?' : 'Descreva sua refeição';
         el('dietSourceText').placeholder = method === 'photo' ? 'Ex.: O café está sem açúcar' : 'Ex.: 2 colheres de arroz, feijão e um filé de frango';
+        el('dietPhotoBtn').disabled = acquiringPhoto;
+        el('dietPhotoLibraryBtn').disabled = acquiringPhoto;
+        el('dietPhotoBtnLabel').textContent = acquisitionActive && acquisitionSource === 'CAMERA'
+            ? 'Abrindo câmera…'
+            : ['cancelled', 'permission_denied', 'unavailable', 'failed'].includes(acquisitionState)
+                ? 'Tentar novamente'
+                : photo ? 'Tirar outra foto' : 'Abrir câmera';
+        const photoStatus = el('dietPhotoStatus');
+        photoStatus.textContent = acquisitionMessage;
+        photoStatus.hidden = !acquisitionMessage;
+        photoStatus.classList.toggle('diet-photo-status--error', acquisitionTone === 'error');
+        photoStatus.setAttribute('role', acquisitionTone === 'error' ? 'alert' : 'status');
+        photoStatus.setAttribute('aria-live', acquisitionTone === 'error' ? 'assertive' : 'polite');
         el('dietFinalDescription').textContent = el('dietDescription').value;
         summary();
         if (focus) {
@@ -64,7 +87,7 @@
         el('dietForm').hidden = false;
         el('dietSaveLoading').classList.add('hidden');
         lockSaving(false);
-        photoVersion++; loadingPhoto = false;
+        invalidateAcquisition();
         editing = isEdit;
         dirty = false;
         method = 'text'; photo = null; stale = false; identified = false;
@@ -141,6 +164,7 @@
         if (el('dietSaveBtn').disabled) return false;
         if (dirty) {
             invalidate();
+            invalidateAcquisition();
             el('dietDiscardPanel').hidden = false;
             el('dietForm').hidden = true;
             el('dietFlowBack').disabled = true;
@@ -151,7 +175,7 @@
         return true;
     }
     function reset() {
-        dirty = false; invalidate(); photo = null;
+        dirty = false; invalidate(); invalidateAcquisition(); photo = null;
         el('dietSaveBtn').disabled = false;
         el('dietForm').reset();
         begin();
@@ -172,10 +196,11 @@
             closeDietModal();
         });
         document.querySelectorAll('[data-diet-method]').forEach(button => button.addEventListener('click', () => {
-            if (method !== button.dataset.dietMethod) { invalidate(); photoVersion++; loadingPhoto = false; photo = null; el('dietPhotoInput').value = ''; el('dietPhotoPreview').hidden = true; clearNutrients(); }
+            if (method !== button.dataset.dietMethod) { invalidate(); invalidateAcquisition(); photo = null; el('dietPhotoInput').value = ''; el('dietPhotoPreview').hidden = true; clearNutrients(); }
             method = button.dataset.dietMethod; step = 2; message(); render(true);
+            if (method === 'photo') openPhotoSource('CAMERA');
         }));
-        el('dietFlowBack').addEventListener('click', () => { invalidate(); step--; message(); render(true); });
+        el('dietFlowBack').addEventListener('click', () => { invalidate(); invalidateAcquisition(); step--; message(); render(true); });
         el('dietReviewAgain').addEventListener('click', () => { step = 3; message(); render(true); });
         el('dietFlowNext').addEventListener('click', () => {
             if (step === 2 || stale) analyze();
@@ -192,34 +217,86 @@
             if (fields.includes(event.target.id) && !stale) estimateDescription = el('dietDescription').value.trim();
             render();
         });
-        const handlePhotoFile = async file => {
-            if (!file) return;
+        const handlePhotoFile = async (file, attempt = {}) => {
+            if (!file) return false;
             invalidate(); const token = ++photoVersion, owner = account();
-            photo = null; dirty = true; clearNutrients(); el('dietPhotoPreview').hidden = true;
-            loadingPhoto = true; message('Preparando a foto…'); render();
+            loadingPhoto = true; setAcquisitionState('processing', 'Preparando a foto…'); render();
             try {
                 const result = await downscaleImageFile(file, 1024);
-                if (token !== photoVersion || owner !== account()) return;
+                if (token !== photoVersion || owner !== account()
+                    || (attempt.acquisitionToken != null && attempt.acquisitionToken !== acquisitionVersion)) return false;
                 const mime = result.dataUrl.match(/^data:([^;]+);/)?.[1];
-                photo = { data: result.base64, mime_type: mime || 'image/jpeg' };
                 const imageBlob = dataUrlBlob(result.dataUrl);
                 await window.AppOffline?.saveMedia('diet-photo-pending', imageBlob, { type: 'diet-photo', date: new Date().toISOString() });
+                if (token !== photoVersion || owner !== account()
+                    || (attempt.acquisitionToken != null && attempt.acquisitionToken !== acquisitionVersion)) return false;
+                photo = { data: result.base64, mime_type: mime || 'image/jpeg' };
+                dirty = true; clearNutrients();
                 el('dietPhotoPreviewImg').src = result.dataUrl; el('dietPhotoPreview').hidden = false; message();
+                setAcquisitionState('ready');
+                return true;
             } catch (error) {
-                if (token === photoVersion && owner === account()) message(error.message === 'Arquivo de imagem inválido'
+                if (token === photoVersion && owner === account()) setAcquisitionState('failed', error.message === 'Arquivo de imagem inválido'
                     ? 'Escolha uma foto válida.'
-                    : 'Não foi possível abrir a foto. Escolha JPG/PNG ou escreva a refeição.');
+                    : 'Não foi possível abrir a foto. Escolha JPG/PNG ou tente outra imagem.', 'error');
+                return false;
             } finally {
                 el('dietPhotoInput').value = '';
                 if (token === photoVersion && owner === account()) { loadingPhoto = false; render(); }
             }
         };
-        el('dietPhotoBtn').addEventListener('click', () => {
-            const pickerRequest = window.FitTrackerImagePicker?.open({ inputId: 'dietPhotoInput', onFile: handlePhotoFile });
-            pickerRequest?.catch(() => message('Não foi possível abrir a câmera ou fototeca.'));
-        });
+        async function openPhotoSource(source) {
+            if (acquisitionActive || loadingPhoto) return;
+            const picker = window.FitTrackerImagePicker;
+            const attempt = ++acquisitionVersion, owner = account();
+            const ownsAttempt = () => attempt === acquisitionVersion && owner === account();
+            acquisitionActive = true; acquisitionSource = source;
+            setAcquisitionState('checking_permission', source === 'CAMERA' ? 'Preparando a câmera…' : 'Preparando a fototeca…');
+            render();
+            try {
+                if (!picker?.open) throw Object.assign(new Error('O recurso de imagem não está disponível.'), { code: 'source_unavailable' });
+                const result = await picker.open({
+                    inputId: 'dietPhotoInput', source,
+                    onFile: file => ownsAttempt() ? handlePhotoFile(file, { acquisitionToken: attempt }) : false,
+                    onState: event => {
+                        if (!ownsAttempt()) return;
+                        const labels = {
+                            checking_permission: source === 'CAMERA' ? 'Verificando acesso à câmera…' : 'Verificando acesso à fototeca…',
+                            requesting_permission: source === 'CAMERA' ? 'Autorize o acesso para abrir a câmera.' : 'Autorize o acesso para abrir a fototeca.',
+                            opening_camera: 'Abrindo a câmera…', opening_photos: 'Abrindo a fototeca…',
+                            processing: 'Preparando a foto…',
+                            cancelled: 'Captura cancelada. Seu preenchimento foi mantido.',
+                        };
+                        setAcquisitionState(event.status, labels[event.status] || '');
+                        render();
+                    },
+                });
+                if (ownsAttempt() && !result && !['cancelled', 'permission_denied', 'unavailable', 'failed'].includes(acquisitionState)) {
+                    setAcquisitionState('idle');
+                }
+            } catch (error) {
+                if (!ownsAttempt()) return;
+                if (error.code === 'permission_denied') {
+                    setAcquisitionState('permission_denied', error.message || 'Permita o acesso nos ajustes do dispositivo e tente novamente.', 'error');
+                } else if (error.code === 'camera_unavailable') {
+                    setAcquisitionState('unavailable', 'Nenhuma câmera está disponível. Você pode escolher uma foto da fototeca.', 'error');
+                } else if (error.code === 'source_unavailable') {
+                    setAcquisitionState('unavailable', source === 'CAMERA'
+                        ? 'A câmera não está disponível. Você pode escolher uma foto da fototeca.'
+                        : 'A fototeca não está disponível neste dispositivo.', 'error');
+                } else {
+                    setAcquisitionState('failed', source === 'CAMERA'
+                        ? 'Não foi possível abrir a câmera. Tente novamente ou escolha uma foto da fototeca.'
+                        : 'Não foi possível abrir a fototeca. Tente novamente.', 'error');
+                }
+            } finally {
+                if (ownsAttempt()) { acquisitionActive = false; render(); }
+            }
+        }
+        el('dietPhotoBtn').addEventListener('click', () => openPhotoSource('CAMERA'));
+        el('dietPhotoLibraryBtn').addEventListener('click', () => openPhotoSource('PHOTOS'));
         el('dietPhotoRemove').addEventListener('click', () => {
-            invalidate(); photoVersion++; loadingPhoto = false; photo = null; dirty = true; clearNutrients();
+            invalidate(); invalidateAcquisition(); photo = null; dirty = true; clearNutrients();
             el('dietPhotoInput').value = ''; el('dietPhotoPreview').hidden = true; el('dietReviewPhoto').hidden = true;
             el('dietPhotoPreviewImg').removeAttribute('src'); render();
         });
