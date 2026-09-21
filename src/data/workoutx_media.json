@@ -1,4 +1,109 @@
 {
+  "flexao_de_bracos": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "0662",
+    "provider_name": "Push-up"
+  },
+  "remada_unilateral_halter": {
+    "provider_equipment": "Dumbbell",
+    "provider_id": "0292",
+    "provider_name": "Dumbbell One Arm Bent-over Row"
+  },
+  "barra_fixa_supinada": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "1326",
+    "provider_name": "Chin-up"
+  },
+  "mesa_flexora": {
+    "provider_equipment": "Leverage Machine",
+    "provider_id": "0586",
+    "provider_name": "Lever Lying Leg Curl"
+  },
+  "cadeira_flexora": {
+    "provider_equipment": "Leverage Machine",
+    "provider_id": "0599",
+    "provider_name": "Lever Seated Leg Curl"
+  },
+  "cadeira_extensora": {
+    "provider_equipment": "Leverage Machine",
+    "provider_id": "0585",
+    "provider_name": "Lever Leg Extension"
+  },
+  "extensao_joelho_elastico": {
+    "provider_equipment": "Resistance Band",
+    "provider_id": "3007",
+    "provider_name": "Resistance Band Leg Extension"
+  },
+  "panturrilha_sentado": {
+    "provider_equipment": "Leverage Machine",
+    "provider_id": "0594",
+    "provider_name": "Lever Seated Calf Raise"
+  },
+  "panturrilha_unilateral": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "1387",
+    "provider_name": "One Leg Floor Calf Raise"
+  },
+  "panturrilha_leg_press": {
+    "provider_equipment": "Sled Machine",
+    "provider_id": "1391",
+    "provider_name": "Sled Calf Press On Leg Press"
+  },
+  "rosca_no_cabo": {
+    "provider_equipment": "Cable",
+    "provider_id": "0868",
+    "provider_name": "Cable Curl"
+  },
+  "triceps_frances_halter": {
+    "provider_equipment": "Dumbbell",
+    "provider_id": "2188",
+    "provider_name": "Dumbbell Seated Triceps Extension"
+  },
+  "elevacao_lateral_maquina": {
+    "provider_equipment": "Leverage Machine",
+    "provider_id": "0584",
+    "provider_name": "Lever Lateral Raise"
+  },
+  "abdominal_curto": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "0274",
+    "provider_name": "Crunch Floor"
+  },
+  "abdominal_declinado": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "0277",
+    "provider_name": "Decline Crunch"
+  },
+  "prancha_frontal": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "5202",
+    "provider_name": "Front Plank"
+  },
+  "dead_bug": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "0276",
+    "provider_name": "Dead Bug"
+  },
+  "press_pallof": {
+    "provider_equipment": "Band",
+    "provider_id": "0979",
+    "provider_name": "Band Horizontal Pallof Press"
+  },
+  "bicicleta_ergometrica": {
+    "provider_equipment": "Stationary Bike",
+    "provider_id": "2138",
+    "provider_name": "Stationary Bike Run V. 3"
+  },
+  "transport_eliptico": {
+    "provider_equipment": "Elliptical Machine",
+    "provider_id": "2141",
+    "provider_name": "Walk Elliptical Cross Trainer"
+  },
+  "pular_corda": {
+    "provider_equipment": "Rope",
+    "provider_id": "2612",
+    "provider_name": "Jump Rope"
+  },
   "abdominal_na_bola": {
     "provider_equipment": "Stability Ball",
     "provider_id": "2297",
