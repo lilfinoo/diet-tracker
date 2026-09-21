@@ -257,6 +257,24 @@ def test_exercise_media_downloads_a_mapped_gif_on_demand(app, client, tmp_path, 
     assert response.data == b"GIF89aon-demand"
 
 
+def test_admin_can_import_legacy_gif_without_provider_catalog(app, client):
+    assert client.post("/api/register", json=registration_payload("legacy-gif-admin")).status_code == 201
+    with app.app_context():
+        User.query.filter_by(username="legacy-gif-admin").one().is_admin = True
+        db.session.commit()
+        assert db.session.get(WorkoutXExercise, "0025") is None
+    response = client.post(
+        "/api/admin/exercise-media/cache/0025",
+        data={"gif": (BytesIO(b"GIF89alegacy"), "review-0025-0025.gif")},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 201
+    response = client.get("/api/exercise-media/supino_reto_barra")
+    assert response.status_code == 200
+    assert response.mimetype == "image/gif"
+    assert response.data == b"GIF89alegacy"
+
+
 def test_admin_can_import_a_workoutx_gif_directly_into_database(app, client):
     assert client.post("/api/register", json=registration_payload("gif-admin")).status_code == 201
     with app.app_context():

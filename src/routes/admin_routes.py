@@ -19,7 +19,7 @@ from src.models.user import (
 )
 from src.routes.common import admin_required, json_body, page_query
 from src.services.workout_plans import catalog_by_key
-from src.services.workoutx import WorkoutXServiceError, automatic_legacy_media, get_cached_gif, get_exercise, review_mapping_is_doubt, search_cached_exercises
+from src.services.workoutx import WorkoutXServiceError, automatic_legacy_media, get_cached_gif, get_exercise, media_mapping, review_mapping_is_doubt, search_cached_exercises
 
 
 admin_bp = Blueprint("admin", __name__)
@@ -192,7 +192,8 @@ def upload_exercise_media_cache(provider_id):
     provider_id = str(provider_id or "")
     if not provider_id.isdigit() or len(provider_id) > 32:
         return jsonify({"error": "ID da WorkoutX inválido."}), 400
-    if db.session.get(WorkoutXExercise, provider_id) is None:
+    mapped = any(entry.get("provider_id") == provider_id for entry in media_mapping().values() if isinstance(entry, dict))
+    if db.session.get(WorkoutXExercise, provider_id) is None and not mapped:
         return jsonify({"error": "Exercício não cadastrado no catálogo WorkoutX."}), 404
     upload = request.files.get("gif")
     if upload is None:
