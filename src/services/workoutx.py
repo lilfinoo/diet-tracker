@@ -695,7 +695,7 @@ def get_cached_gif(catalog_key, provider_id):
                 time.sleep(remaining)
             try:
                 gif = _request(
-                    f"{BASE_URL}/gifs/{provider_id}",
+                    f"{BASE_URL}/gifs/{provider_id}.gif",
                     max_bytes=current_app.config["WORKOUTX_MAX_RESPONSE_BYTES"],
                 )
             except WorkoutXServiceError as error:

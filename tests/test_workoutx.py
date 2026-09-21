@@ -38,7 +38,7 @@ def test_workoutx_downloads_a_gif_once(app, tmp_path, monkeypatch):
 
     assert first == second
     assert first.read_bytes() == b"GIF89aexercise-animation"
-    assert calls == ["https://api.workoutxapp.com/v1/gifs/0201"]
+    assert calls == ["https://api.workoutxapp.com/v1/gifs/0201.gif"]
 
 
 def test_examples_use_only_workoutx_gifs(app):
@@ -75,7 +75,7 @@ def test_workoutx_persists_a_gif_in_the_database_cache(app, tmp_path, monkeypatc
 
     assert first == second
     assert second.read_bytes() == b"GIF89adatabase-cache"
-    assert calls == ["https://api.workoutxapp.com/v1/gifs/0289"]
+    assert calls == ["https://api.workoutxapp.com/v1/gifs/0289.gif"]
 
 
 def test_workoutx_reads_a_stored_gif_without_an_api_request(app, tmp_path, monkeypatch):
@@ -109,7 +109,7 @@ def test_workoutx_429_starts_a_fast_failure_cooldown(app, tmp_path, monkeypatch)
             else:
                 raise AssertionError("rate-limited GIF unexpectedly loaded")
 
-    assert calls == ["https://api.workoutxapp.com/v1/gifs/0201"]
+    assert calls == ["https://api.workoutxapp.com/v1/gifs/0201.gif"]
 
 
 def test_workoutx_search_discards_unsafe_provider_ids(app, monkeypatch):
