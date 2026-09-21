@@ -3355,6 +3355,8 @@
     }
 
     let workoutViewportFrame = null;
+    let workoutViewportFullHeight = 0;
+    let workoutViewportWidth = 0;
     function updateWorkoutVisualViewport() {
         if (workoutViewportFrame) return;
         workoutViewportFrame = requestAnimationFrame(() => {
@@ -3367,14 +3369,19 @@
                 modal.classList.remove("has-workout-keyboard");
                 modal.style.removeProperty("--workout-viewport-height");
                 modal.style.removeProperty("--workout-viewport-top");
+                modal.style.removeProperty("--workout-entry-height");
                 return;
             }
+            if (Math.abs(window.innerWidth - workoutViewportWidth) > 100) workoutViewportFullHeight = 0;
+            workoutViewportWidth = window.innerWidth;
+            workoutViewportFullHeight = Math.max(workoutViewportFullHeight, window.innerHeight, viewport.height);
             modal.style.setProperty("--workout-viewport-height", `${Math.round(viewport.height)}px`);
             modal.style.setProperty("--workout-viewport-top", `${Math.round(viewport.offsetTop)}px`);
             const focused = document.activeElement;
             const isInput = focused?.matches?.("input, textarea") && modal.contains(focused);
-            const keyboard = Boolean(isInput && window.innerHeight - viewport.height > 100);
+            const keyboard = Boolean(isInput && workoutViewportFullHeight - viewport.height > 100);
             modal.classList.toggle("has-workout-keyboard", keyboard);
+            modal.style.setProperty("--workout-entry-height", `${Math.round(Math.min(viewport.height, workoutViewportFullHeight / 2))}px`);
             if (keyboard) {
                 const scroll = focused.closest(".workout-session-sheet__scroll, .workout-quick-set-layer");
                 if (!scroll) return;
@@ -4377,6 +4384,7 @@
         document.addEventListener("visibilitychange", () => { if (document.hidden) cancelWorkoutPlayerGesture(); });
         window.visualViewport?.addEventListener("resize", updateWorkoutVisualViewport);
         window.visualViewport?.addEventListener("scroll", updateWorkoutVisualViewport);
+        window.addEventListener("resize", updateWorkoutVisualViewport);
         byId("viewWorkoutPlanDetails")?.addEventListener("focusin", updateWorkoutVisualViewport);
         byId("viewWorkoutPlanDetails")?.addEventListener("focusout", updateWorkoutVisualViewport);
         window.addEventListener("pagehide", () => persistWorkoutDraftLocally(workoutView.session?.id));

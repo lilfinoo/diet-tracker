@@ -1,4 +1,24 @@
 {
+  "desenvolvimento_militar_barra": {
+    "provider_equipment": "Barbell",
+    "provider_id": "1457",
+    "provider_name": "Barbell Standing Wide Military Press"
+  },
+  "rosca_scott": {
+    "provider_equipment": "Ez Barbell",
+    "provider_id": "1627",
+    "provider_name": "Ez Barbell Close Grip Preacher Curl"
+  },
+  "prancha_lateral": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "0705",
+    "provider_name": "Side Bridge V. 2"
+  },
+  "polichinelo": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "3224",
+    "provider_name": "Jack Jump (male)"
+  },
   "flexao_de_bracos": {
     "provider_equipment": "Body Weight",
     "provider_id": "0662",

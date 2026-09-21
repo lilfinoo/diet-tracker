@@ -17414,7 +17414,16 @@ html[data-native-platform="ios"] .home-refresh-indicator:is([data-state="partial
 .current-exercise-stage--player.has-quick-set .current-exercise-media,
 .current-exercise-stage--player.has-quick-set .current-exercise-content--overlay { filter: brightness(.58); }
 
-.has-workout-keyboard .workout-quick-set-layer { max-height: calc(100% - 2.5rem); }
+.has-workout-keyboard .workout-quick-set-layer {
+    top: max(.5rem, env(safe-area-inset-top));
+    bottom: auto;
+    height: min(var(--workout-entry-height), calc(100% - max(.5rem, env(safe-area-inset-top)) - .5rem));
+    max-height: calc(100% - max(.5rem, env(safe-area-inset-top)) - .5rem);
+    scroll-padding-block: 4rem 1rem;
+    animation: none;
+    opacity: 1;
+    transform: none;
+}
 
 @keyframes workout-quick-set-enter { to { opacity: 1; transform: translateY(0); } }
 
@@ -17430,7 +17439,6 @@ html[data-native-platform="ios"] .home-refresh-indicator:is([data-state="partial
     .workout-quick-rest > div { width: 100%; }
     .workout-quick-rest button { flex: 1; }
     .workout-quick-secondary button { flex: 1 1 auto; }
-    .has-workout-keyboard .workout-quick-set-layer { max-height: calc(100% - 1rem); }
 }
 
 @media (prefers-reduced-motion: reduce) {

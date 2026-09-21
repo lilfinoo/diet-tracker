@@ -180,6 +180,19 @@ def _request(url, max_bytes=None):
     except HTTPError as error:
         retry_after = None
         if error.code == 429:
+            limit_kind = "unspecified"
+            try:
+                payload = json.loads(error.read(8192)) if error.fp is not None else {}
+                message = str(payload.get("message", "")).lower() if isinstance(payload, dict) else ""
+                if "month" in message:
+                    limit_kind = "monthly_quota"
+                elif "gif" in message:
+                    limit_kind = "gif_library"
+                elif "minute" in message or "rate" in message:
+                    limit_kind = "rate_limit"
+            except (ValueError, OSError):
+                pass
+            current_app.logger.warning("WorkoutX download blocked: %s", limit_kind)
             try:
                 retry_after = max(int(error.headers.get("Retry-After", "")), 1)
             except (AttributeError, TypeError, ValueError):
