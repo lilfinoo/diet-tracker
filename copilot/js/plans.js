@@ -2526,7 +2526,11 @@
     function exerciseImageMarkup(exercise, eager = false) {
         const imagePath = exerciseImage(exercise);
         if (imagePath) {
-            return `<img class="exercise-demonstration-image" src="${esc(imagePath)}" alt="Demonstração de ${esc(exercise?.name || "exercício")}" loading="${eager ? "eager" : "lazy"}" decoding="async" width="768" height="1024">`;
+            const fallbackPath = typeof exerciseFallbackImagePath === "function"
+                ? exerciseFallbackImagePath(exercise?.catalog_key)
+                : "";
+            const fallback = fallbackPath && fallbackPath !== imagePath ? ` data-fallback-src="${esc(fallbackPath)}"` : "";
+            return `<img class="exercise-demonstration-image" src="${esc(imagePath)}"${fallback} alt="Demonstração de ${esc(exercise?.name || "exercício")}" loading="${eager ? "eager" : "lazy"}" decoding="async" width="768" height="1024">`;
         }
         return '<span class="exercise-image-placeholder" role="img" aria-label="Imagem não disponível"><i class="fas fa-dumbbell" aria-hidden="true"></i></span>';
     }

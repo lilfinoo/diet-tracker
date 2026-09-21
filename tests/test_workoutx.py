@@ -227,7 +227,7 @@ def test_authenticated_user_can_serve_a_direct_workoutx_gif(app, client, tmp_pat
     assert client.post("/api/register", json=registration_payload("athlete")).status_code == 201
     media_path = tmp_path / "0289.gif"
     media_path.write_bytes(b"GIF89adirect")
-    monkeypatch.setattr("src.routes.profile_routes.get_stored_gif", lambda *args: media_path)
+    monkeypatch.setattr("src.routes.profile_routes.get_cached_gif", lambda *args: media_path)
     with app.app_context():
         db.session.add(WorkoutXExercise(provider_id="0289", data={
             "id": "0289", "name": "Dumbbell Bench Press",
@@ -240,9 +240,11 @@ def test_authenticated_user_can_serve_a_direct_workoutx_gif(app, client, tmp_pat
     assert response.data == b"GIF89adirect"
 
 
-def test_exercise_media_does_not_download_a_missing_gif(app, client, monkeypatch):
+def test_exercise_media_downloads_a_mapped_gif_on_demand(app, client, tmp_path, monkeypatch):
     assert client.post("/api/register", json=registration_payload("rate-limited-athlete")).status_code == 201
-    monkeypatch.setattr(workoutx, "_request", lambda *_args: (_ for _ in ()).throw(AssertionError("API called")))
+    media_path = tmp_path / "0289.gif"
+    media_path.write_bytes(b"GIF89aon-demand")
+    monkeypatch.setattr("src.routes.profile_routes.get_cached_gif", lambda *args: media_path)
     with app.app_context():
         db.session.add(WorkoutXExercise(provider_id="0289", data={
             "id": "0289", "name": "Dumbbell Bench Press",
@@ -251,7 +253,8 @@ def test_exercise_media_does_not_download_a_missing_gif(app, client, monkeypatch
         db.session.commit()
 
     response = client.get("/api/exercise-media/workoutx:0289")
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.data == b"GIF89aon-demand"
 
 
 def test_admin_can_import_a_workoutx_gif_directly_into_database(app, client):
@@ -311,7 +314,7 @@ def test_admin_can_approve_and_serve_exercise_media(app, client, tmp_path, monke
         "id": provider_id, "name": "Barbell Squat", "equipment": "Barbell", "gifUrl": "https://example.test/gif",
     })
     monkeypatch.setattr("src.routes.admin_routes.get_cached_gif", lambda *args: media_path)
-    monkeypatch.setattr("src.routes.profile_routes.get_stored_gif", lambda *args: media_path)
+    monkeypatch.setattr("src.routes.profile_routes.get_cached_gif", lambda *args: media_path)
 
     with app.app_context():
         db.session.add(WorkoutXExercise(provider_id="0201", data={

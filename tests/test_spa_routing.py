@@ -51,6 +51,14 @@ def test_spa_shell_uses_root_absolute_application_assets(client):
     assert exercise_image.mimetype == "image/png"
 
 
+def test_lucide_does_not_request_a_missing_source_map(client):
+    shell = client.get("/").get_data(as_text=True)
+    lucide = client.get("/vendor/lucide.min.js").get_data(as_text=True)
+
+    assert 'src="/vendor/lucide.min.js?v=1.42.0-no-map"' in shell
+    assert "sourceMappingURL=" not in lucide
+
+
 def test_frontend_exposes_history_navigation_adapter(client):
     source = client.get("/script.js").get_data(as_text=True)
 
