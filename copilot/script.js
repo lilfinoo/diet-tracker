@@ -107,14 +107,28 @@ function addEventListenerSafe(id, event, handler) {
     }
 }
 // Toast global para feedback visual
-function showToast(msg, tipo="success") {
+function showToast(msg, tipo="success", options = {}) {
     document.querySelectorAll('.toast:not(#globalLoading)').forEach((existing) => existing.remove());
 
     let toast = document.createElement("div");
     toast.className = "toast " + tipo;
-    toast.innerText = msg;
+    const message = document.createElement("span");
+    message.textContent = msg;
+    toast.appendChild(message);
     toast.setAttribute("role", tipo === "error" ? "alert" : "status");
     toast.setAttribute("aria-live", tipo === "error" ? "assertive" : "polite");
+    if (options.actionLabel && typeof options.onAction === "function") {
+        const action = document.createElement("button");
+        action.type = "button";
+        action.className = "toast__action";
+        action.textContent = options.actionLabel;
+        action.addEventListener("click", () => {
+            clearTimeout(dismissTimer);
+            toast.remove();
+            options.onAction();
+        });
+        toast.appendChild(action);
+    }
     document.body.appendChild(toast);
 
     const fluid = typeof Fluid !== "undefined" ? Fluid : null;
@@ -123,9 +137,9 @@ function showToast(msg, tipo="success") {
         else if (tipo === "error") fluid.haptic.snap();
     }
 
-    setTimeout(() => {
+    const dismissTimer = setTimeout(() => {
         toast.remove();
-    }, 2900);
+    }, options.duration || 2900);
 }
 
 // Mensagem para login/registro/perfil
@@ -3176,6 +3190,8 @@ let dietDailyDate = null;
 let dietDailyOptionsSlotKey = null;
 let dietDailyMutationSlotKey = null;
 let dietPlansLibraryLoaded = false;
+let dietDailySwipeGesture = null;
+let dietDailyActionsTrigger = null;
 
 function dietPlanItemText(item) {
     return window.formatDietPlanItem?.(item) || String(item || "");
@@ -3544,6 +3560,140 @@ function renderDietDailyAlternatives(slot, selectedMeal) {
     return `<div class="diet-daily-options" aria-label="Alternativas de ${escapeHtml(slot.label)}">${(slot.alternatives || []).map(meal => `<button type="button" class="diet-daily-option${Number(meal.id) === Number(selectedMeal?.id) ? ' is-selected' : ''}" onclick="selectDietDailyOption('${slot.slot_key}', ${Number(meal.id)})" aria-pressed="${Number(meal.id) === Number(selectedMeal?.id)}"><span><strong>Opção ${Number(meal.option) || 1}</strong><small>Dia ${Number(meal.option) || 1}</small></span><p>${escapeHtml(dietPlanItemsText(meal))}</p><i data-lucide="check" aria-hidden="true"></i></button>`).join('')}</div>`;
 }
 
+function closeDietDailyActions(restoreFocus = true) {
+    const overlay = document.querySelector('.diet-daily-actions-overlay');
+    if (!overlay) return;
+    overlay.classList.remove('is-open');
+    overlay.setAttribute('aria-hidden', 'true');
+    document.removeEventListener('keydown', handleDietDailyActionsKeydown);
+    const trigger = dietDailyActionsTrigger;
+    dietDailyActionsTrigger = null;
+    setTimeout(() => overlay.remove(), reducedMotion() ? 0 : 180);
+    if (restoreFocus) trigger?.focus?.();
+}
+
+function handleDietDailyActionsKeydown(event) {
+    if (event.key === 'Escape') closeDietDailyActions();
+}
+
+function openDietDailyActions(slotKey, trigger) {
+    const slot = (dietDailyView?.slots || []).find(item => item.slot_key === slotKey);
+    if (!slot || slot.result !== 'pending') return;
+    closeDietDailyActions(false);
+    dietDailyActionsTrigger = trigger || null;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'diet-daily-actions-overlay';
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.innerHTML = `<div class="diet-daily-actions-sheet" role="dialog" aria-modal="true" aria-labelledby="dietDailyActionsTitle">
+        <span class="diet-daily-actions-sheet__handle" aria-hidden="true"></span>
+        <header><div><small>Opções da refeição</small><h3 id="dietDailyActionsTitle">${escapeHtml(slot.label || 'Refeição')}</h3></div><button type="button" class="diet-daily-actions-sheet__close" aria-label="Fechar"><i data-lucide="x" aria-hidden="true"></i></button></header>
+        <button type="button" class="diet-daily-actions-sheet__item" data-action="different"><span><i data-lucide="utensils" aria-hidden="true"></i></span><div><strong>Comi diferente</strong><small>Registrar outra refeição consumida</small></div><i data-lucide="chevron-right" aria-hidden="true"></i></button>
+        <button type="button" class="diet-daily-actions-sheet__item" data-action="options"${(slot.alternatives || []).length > 1 ? '' : ' disabled'}><span><i data-lucide="repeat-2" aria-hidden="true"></i></span><div><strong>Trocar opção</strong><small>${(slot.alternatives || []).length > 1 ? 'Ver alternativas desta refeição' : 'Nenhuma alternativa disponível'}</small></div><i data-lucide="chevron-right" aria-hidden="true"></i></button>
+    </div>`;
+    overlay.addEventListener('click', event => {
+        if (event.target === overlay || event.target.closest('.diet-daily-actions-sheet__close')) {
+            closeDietDailyActions();
+            return;
+        }
+        const action = event.target.closest('[data-action]')?.dataset.action;
+        if (action === 'different') {
+            closeDietDailyActions(false);
+            openDietDailyDifferent(slotKey);
+        } else if (action === 'options') {
+            closeDietDailyActions(false);
+            toggleDietDailyOptions(slotKey);
+        }
+    });
+    document.body.appendChild(overlay);
+    document.addEventListener('keydown', handleDietDailyActionsKeydown);
+    requestAnimationFrame(() => {
+        overlay.classList.add('is-open');
+        overlay.setAttribute('aria-hidden', 'false');
+        overlay.querySelector('[data-action]')?.focus();
+    });
+    window.lucide?.createIcons?.();
+}
+
+function startDietDailySwipe(event) {
+    if (!event.isPrimary || event.button > 0 || dietDailyMutationSlotKey) return;
+    if (event.target.closest('button, a, input, select, textarea, label')) return;
+    const card = event.currentTarget;
+    dietDailySwipeGesture = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        deltaX: 0,
+        deltaY: 0,
+        axis: null,
+        startedAt: performance.now(),
+        slotKey: card.dataset.slotKey,
+        card
+    };
+}
+
+function moveDietDailySwipe(event) {
+    const gesture = dietDailySwipeGesture;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    gesture.deltaX = event.clientX - gesture.startX;
+    gesture.deltaY = event.clientY - gesture.startY;
+    const x = Math.abs(gesture.deltaX);
+    const y = Math.abs(gesture.deltaY);
+    if (!gesture.axis && Math.max(x, y) >= 10) {
+        if (x >= y * 1.35) {
+            gesture.axis = 'horizontal';
+            gesture.card.setPointerCapture?.(event.pointerId);
+        } else if (y >= x * 1.2) {
+            cancelDietDailySwipe(event);
+            return;
+        }
+    }
+    if (gesture.axis !== 'horizontal') return;
+    event.preventDefault();
+    const width = gesture.card.getBoundingClientRect?.().width || 320;
+    const limit = Math.min(132, width * 0.4);
+    const translated = Math.max(-limit, Math.min(limit, gesture.deltaX));
+    const threshold = Math.min(112, Math.max(78, width * 0.28));
+    gesture.card.style.setProperty('--diet-swipe-x', `${translated}px`);
+    gesture.card.classList.toggle('is-swiping-right', translated > 0);
+    gesture.card.classList.toggle('is-swiping-left', translated < 0);
+    gesture.card.classList.toggle('is-swipe-ready', Math.abs(gesture.deltaX) >= threshold);
+    gesture.card.parentElement?.classList.toggle('is-swiping-right', translated > 0);
+    gesture.card.parentElement?.classList.toggle('is-swiping-left', translated < 0);
+}
+
+function endDietDailySwipe(event) {
+    const gesture = dietDailySwipeGesture;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    gesture.deltaX = event.clientX - gesture.startX;
+    gesture.deltaY = event.clientY - gesture.startY;
+    const elapsed = Math.max(performance.now() - gesture.startedAt, 1);
+    const velocity = Math.abs(gesture.deltaX) / elapsed * 1000;
+    const width = gesture.card.getBoundingClientRect?.().width || 320;
+    const threshold = Math.min(112, Math.max(78, width * 0.28));
+    const horizontal = gesture.axis === 'horizontal' && Math.abs(gesture.deltaX) >= Math.abs(gesture.deltaY) * 1.35;
+    const commits = horizontal && (Math.abs(gesture.deltaX) >= threshold || (Math.abs(gesture.deltaX) >= 52 && velocity >= 700));
+    cancelDietDailySwipe(event);
+    if (!commits) return;
+
+    const result = gesture.deltaX > 0 ? 'skipped' : 'consumed_planned';
+    gesture.card.classList.add(gesture.deltaX > 0 ? 'is-committing-right' : 'is-committing-left');
+    gesture.card.parentElement?.classList.add(gesture.deltaX > 0 ? 'is-committing-right' : 'is-committing-left');
+    const complete = () => setDietDailyOutcome(gesture.slotKey, result);
+    if (reducedMotion()) complete();
+    else setTimeout(complete, 160);
+}
+
+function cancelDietDailySwipe(event) {
+    const gesture = dietDailySwipeGesture;
+    if (!gesture || (event && gesture.pointerId !== event.pointerId)) return;
+    dietDailySwipeGesture = null;
+    gesture.card.classList.remove('is-swiping-right', 'is-swiping-left', 'is-swipe-ready');
+    gesture.card.parentElement?.classList.remove('is-swiping-right', 'is-swiping-left', 'is-committing-right', 'is-committing-left');
+    gesture.card.style.removeProperty('--diet-swipe-x');
+    if (gesture.card.hasPointerCapture?.(gesture.pointerId)) gesture.card.releasePointerCapture(gesture.pointerId);
+}
+
 function renderDietDailySlot(slot) {
     const meal = dailySlotSelectedMeal(slot);
     if (!meal) return '';
@@ -3563,7 +3713,7 @@ function renderDietDailySlot(slot) {
         return `<article class="diet-daily-slot diet-daily-slot--done"><header><span class="diet-daily-slot__icon"><i data-lucide="${icon}" aria-hidden="true"></i></span><div><h3>${title}</h3><p>Opção ${option} · Dia ${option}</p></div><span class="diet-daily-status diet-daily-status--done"><i data-lucide="check" aria-hidden="true"></i> Registrada</span></header><div class="diet-daily-actual"><span>Você consumiu</span><strong>${escapeHtml(actual?.description || 'Consumo registrado')}</strong>${dailyMealMacros(actual)}</div><div class="diet-daily-planned"><span>Estava previsto</span><p>${plannedText}</p></div><div class="diet-daily-slot__footer"><span></span><div class="diet-daily-slot__record-actions"><button type="button" class="text-button" onclick="editDietEntry(${Number(actual?.id)})">Corrigir registro</button><button type="button" class="text-button diet-daily-skip" onclick="deleteDietEntry(${Number(actual?.id)})">Excluir registro</button></div></div></article>`;
     }
     const alternatives = slot.alternatives || [];
-    return `<article class="diet-daily-slot"><header><span class="diet-daily-slot__icon"><i data-lucide="${icon}" aria-hidden="true"></i></span><div><h3>${title}</h3><p>Opção ${option} de ${alternatives.length} · Dia ${option}</p></div><span class="diet-daily-status">Pendente</span></header><p class="diet-daily-slot__food">${escapeHtml(dietPlanItemsText(meal))}</p><button type="button" class="diet-daily-primary" onclick="setDietDailyOutcome('${slot.slot_key}', 'consumed_planned')"${busy}><i data-lucide="check" aria-hidden="true"></i> Comi isso</button><div class="diet-daily-secondary">${alternatives.length > 1 ? `<button type="button" class="text-button" onclick="toggleDietDailyOptions('${slot.slot_key}')" aria-expanded="${dietDailyOptionsSlotKey === slot.slot_key}"${busy}>Trocar opção</button>` : ''}<button type="button" class="text-button" onclick="openDietDailyDifferent('${slot.slot_key}')"${busy}>Comi diferente</button><button type="button" class="text-button diet-daily-skip" onclick="setDietDailyOutcome('${slot.slot_key}', 'skipped')"${busy}>Pulei</button></div>${renderDietDailyAlternatives(slot, meal)}</article>`;
+    return `<div class="diet-daily-swipe"><div class="diet-daily-swipe__action diet-daily-swipe__action--skip" aria-hidden="true"><i data-lucide="forward" aria-hidden="true"></i><span>Pular refeição</span></div><div class="diet-daily-swipe__action diet-daily-swipe__action--consumed" aria-hidden="true"><span>Marcar como consumida</span><i data-lucide="check" aria-hidden="true"></i></div><article class="diet-daily-slot diet-daily-slot__surface" data-slot-key="${slot.slot_key}" onpointerdown="startDietDailySwipe(event)" onpointermove="moveDietDailySwipe(event)" onpointerup="endDietDailySwipe(event)" onpointercancel="cancelDietDailySwipe(event)"><header><span class="diet-daily-slot__icon"><i data-lucide="${icon}" aria-hidden="true"></i></span><div><h3>${title}</h3><p>Opção ${option} de ${alternatives.length} · Dia ${option}</p></div><div class="diet-daily-slot__header-actions"><span class="diet-daily-status">Pendente</span><button type="button" class="diet-daily-more" onclick="openDietDailyActions('${slot.slot_key}', this)" aria-label="Mais opções para ${title}" aria-haspopup="dialog"${busy}><i data-lucide="ellipsis" aria-hidden="true"></i></button></div></header><p class="diet-daily-slot__food">${escapeHtml(dietPlanItemsText(meal))}</p><div class="diet-daily-swipe__hint" aria-hidden="true"><span><i data-lucide="arrow-left" aria-hidden="true"></i> Consumida</span><span>Pular <i data-lucide="arrow-right" aria-hidden="true"></i></span></div>${renderDietDailyAlternatives(slot, meal)}</article></div>`;
 }
 
 function renderDietDailyManualEntry(entry) {
@@ -3719,7 +3869,15 @@ async function setDietDailyOutcome(slotKey, result) {
             const data = await response.json().catch(() => ({}));
             throw new Error(data.error || 'Não foi possível atualizar a refeição.');
         }
-        showToast(result === 'skipped' ? 'Refeição marcada como pulada.' : 'Refeição registrada!', 'success');
+        if (result === 'skipped') {
+            showToast('Refeição marcada como pulada.', 'success', {
+                actionLabel: 'Desfazer',
+                duration: 5000,
+                onAction: () => resetDietDailySlot(slotKey)
+            });
+        } else {
+            showToast('Refeição registrada!', 'success');
+        }
         await refreshDietDailySurfaces();
     } catch (error) {
         showToast(error.message, 'error');

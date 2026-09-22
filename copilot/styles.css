@@ -17444,3 +17444,192 @@ html[data-native-platform="ios"] .home-refresh-indicator:is([data-state="partial
 @media (prefers-reduced-motion: reduce) {
     .workout-quick-set-layer { animation: none; opacity: 1; transform: none; }
 }
+
+/* Daily meal cards: swipe actions and compact overflow menu. */
+.diet-daily-swipe {
+    position: relative;
+    overflow: hidden;
+    border-radius: 15px;
+    background: #0c1725;
+}
+
+.diet-daily-swipe__action {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 0;
+    width: 50%;
+    display: flex;
+    align-items: center;
+    gap: .48rem;
+    padding: 0 1rem;
+    font-size: .7rem;
+    font-weight: 850;
+    letter-spacing: .01em;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+}
+
+.diet-daily-swipe__action .lucide { width: 1.05rem; height: 1.05rem; stroke-width: 2.5; }
+.diet-daily-swipe__action--consumed {
+    right: 0;
+    justify-content: flex-end;
+    color: #b9f8df;
+    background: linear-gradient(270deg, rgba(19, 126, 91, .95), rgba(21, 94, 77, .82));
+}
+.diet-daily-swipe__action--skip {
+    left: 0;
+    justify-content: flex-start;
+    color: #d8e0e8;
+    background: linear-gradient(90deg, rgba(69, 82, 99, .96), rgba(42, 54, 70, .84));
+}
+.diet-daily-swipe.is-swiping-left .diet-daily-swipe__action--consumed,
+.diet-daily-swipe.is-committing-left .diet-daily-swipe__action--consumed,
+.diet-daily-swipe.is-swiping-right .diet-daily-swipe__action--skip,
+.diet-daily-swipe.is-committing-right .diet-daily-swipe__action--skip { opacity: 1; }
+
+.diet-daily-slot__surface {
+    position: relative;
+    z-index: 1;
+    margin: 0;
+    touch-action: pan-y;
+    will-change: transform;
+    transform: translate3d(var(--diet-swipe-x, 0), 0, 0);
+    transition: transform 220ms cubic-bezier(.22, .75, .26, 1), opacity 180ms ease, box-shadow 180ms ease;
+}
+.diet-daily-slot__surface.is-swiping-left,
+.diet-daily-slot__surface.is-swiping-right {
+    transition: none;
+    user-select: none;
+    box-shadow: 0 12px 34px rgba(0, 0, 0, .3);
+}
+.diet-daily-slot__surface.is-swipe-ready { border-color: rgba(126, 231, 198, .42); }
+.diet-daily-slot__surface.is-committing-right { opacity: 0; transform: translate3d(110%, 0, 0) rotate(2deg); }
+.diet-daily-slot__surface.is-committing-left { opacity: 0; transform: translate3d(-110%, 0, 0) rotate(-2deg); }
+
+.diet-daily-slot__header-actions { display: flex; align-items: center; gap: .42rem; }
+.diet-daily-more {
+    width: 2.35rem;
+    min-width: 2.35rem;
+    min-height: 2.35rem;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 1px solid rgba(148, 163, 184, .14);
+    border-radius: 10px;
+    color: #aebdcb;
+    background: rgba(148, 163, 184, .06);
+    cursor: pointer;
+}
+.diet-daily-more:hover { color: #dffaf2; border-color: rgba(45, 212, 191, .32); background: rgba(45, 212, 191, .08); }
+.diet-daily-more:focus-visible { outline: 3px solid rgba(45, 212, 191, .24); outline-offset: 2px; }
+.diet-daily-more:disabled { opacity: .5; cursor: wait; }
+.diet-daily-more .lucide { width: 1.05rem; height: 1.05rem; }
+
+.diet-daily-swipe__hint {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-top: .72rem;
+    border-top: 1px solid rgba(148, 163, 184, .1);
+    color: #718397;
+    font-size: .63rem;
+    font-weight: 720;
+}
+.diet-daily-swipe__hint span { display: inline-flex; align-items: center; gap: .28rem; }
+.diet-daily-swipe__hint .lucide { width: .78rem; height: .78rem; }
+
+.diet-daily-actions-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2600;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(3, 8, 15, .58);
+    backdrop-filter: blur(10px);
+    opacity: 0;
+    transition: opacity 180ms ease;
+}
+.diet-daily-actions-overlay.is-open { opacity: 1; }
+.diet-daily-actions-sheet {
+    width: min(100%, 430px);
+    padding: .65rem .75rem max(.8rem, env(safe-area-inset-bottom));
+    border: 1px solid rgba(148, 163, 184, .18);
+    border-radius: 22px;
+    color: #eef7f4;
+    background: linear-gradient(180deg, rgba(19, 31, 48, .99), rgba(10, 19, 31, .99));
+    box-shadow: 0 24px 70px rgba(0, 0, 0, .5), inset 0 1px rgba(255, 255, 255, .04);
+    transform: translateY(24px) scale(.98);
+    transition: transform 200ms cubic-bezier(.22, .75, .26, 1);
+}
+.diet-daily-actions-overlay.is-open .diet-daily-actions-sheet { transform: translateY(0) scale(1); }
+.diet-daily-actions-sheet__handle { width: 2.5rem; height: 4px; display: block; margin: .05rem auto .65rem; border-radius: 999px; background: rgba(148, 163, 184, .34); }
+.diet-daily-actions-sheet > header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0 .25rem .65rem; }
+.diet-daily-actions-sheet > header small { color: #7f91a6; font-size: .62rem; font-weight: 760; text-transform: uppercase; letter-spacing: .06em; }
+.diet-daily-actions-sheet > header h3 { margin: .15rem 0 0; color: #f5faf8; font-size: 1rem; }
+.diet-daily-actions-sheet__close {
+    width: 2.4rem;
+    min-width: 2.4rem;
+    min-height: 2.4rem;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    color: #9aabbc;
+    background: rgba(148, 163, 184, .08);
+    cursor: pointer;
+}
+.diet-daily-actions-sheet__item {
+    width: 100%;
+    min-height: 4rem;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: .75rem;
+    padding: .65rem .55rem;
+    border: 0;
+    border-top: 1px solid rgba(148, 163, 184, .1);
+    color: #dfe9f1;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+}
+.diet-daily-actions-sheet__item > span { width: 2.35rem; height: 2.35rem; display: grid; place-items: center; border-radius: 11px; color: #82e5cd; background: rgba(45, 212, 191, .09); }
+.diet-daily-actions-sheet__item strong,
+.diet-daily-actions-sheet__item small { display: block; }
+.diet-daily-actions-sheet__item strong { font-size: .82rem; }
+.diet-daily-actions-sheet__item small { margin-top: .18rem; color: #7f91a5; font-size: .65rem; }
+.diet-daily-actions-sheet__item > .lucide { width: .95rem; color: #718297; }
+.diet-daily-actions-sheet__item:hover:not(:disabled) { background: rgba(45, 212, 191, .045); }
+.diet-daily-actions-sheet__item:disabled { opacity: .45; cursor: default; }
+
+.toast:has(.toast__action) { display: flex; align-items: center; gap: .75rem; }
+.toast:has(.toast__action) > span { flex: 1; }
+.toast__action {
+    min-height: 2.25rem;
+    padding: .35rem .6rem;
+    border: 1px solid currentColor;
+    border-radius: 8px;
+    color: inherit;
+    background: transparent;
+    font: inherit;
+    font-weight: 850;
+    cursor: pointer;
+}
+
+@media (max-width: 560px) {
+    .diet-daily-swipe { border-radius: 14px; }
+    .diet-daily-status { display: none; }
+    .diet-daily-actions-overlay { padding: 0; }
+    .diet-daily-actions-sheet { border-right: 0; border-bottom: 0; border-left: 0; border-radius: 22px 22px 0 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .diet-daily-slot__surface,
+    .diet-daily-actions-overlay,
+    .diet-daily-actions-sheet { transition: none; }
+}
