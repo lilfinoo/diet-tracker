@@ -156,10 +156,12 @@ def create_workout_plan(
     status="published",
     source="manual",
     relationship=None,
+    roster_relationship=None,
     supersedes_plan_id=None,
 ):
     plan = WorkoutPlan(
-        user_id=owner.id,
+        user_id=owner.id if owner else None,
+        professional_student_relationship_id=roster_relationship.id if roster_relationship else None,
         author_user_id=author.id,
         published_by_user_id=author.id if status == "published" else None,
         published_at=datetime.utcnow() if status == "published" else None,
@@ -234,10 +236,12 @@ def create_diet_plan(
     status="published",
     source="manual",
     relationship=None,
+    roster_relationship=None,
     supersedes_plan_id=None,
 ):
     plan = DietPlan(
-        user_id=owner.id,
+        user_id=owner.id if owner else None,
+        professional_student_relationship_id=roster_relationship.id if roster_relationship else None,
         author_user_id=author.id,
         published_by_user_id=author.id if status == "published" else None,
         published_at=datetime.utcnow() if status == "published" else None,

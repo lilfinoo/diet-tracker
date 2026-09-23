@@ -208,7 +208,7 @@
                         <div class="profile-section__label"><span class="profile-section__icon"><i class="fas fa-birthday-cake"></i></span><div><strong>Idade</strong><small>Anos</small></div></div>
                         <div class="stepper" data-step-field="profileAge">
                             <button type="button" class="stepper__btn stepper__minus" aria-label="Diminuir idade"><i class="fas fa-minus"></i></button>
-                            <input type="number" id="profileAge" class="stepper__input" min="10" max="100" value="" placeholder="—" step="1">
+                            <input type="number" id="profileAge" class="stepper__input" min="0" max="120" value="" placeholder="—" step="1">
                             <button type="button" class="stepper__btn stepper__plus" aria-label="Aumentar idade"><i class="fas fa-plus"></i></button>
                         </div>
                     </section>
@@ -552,7 +552,7 @@
                     <section id="professionalDashboard">
                         <div class="content-header professional-heading">
                             <div class="content-heading"><span class="content-kicker">Workspace profissional</span><h2>Seus alunos</h2><p>Crie, revise e publique treinos e planos alimentares.</p></div>
-                            <button type="button" class="btn-primary" onclick="openProfessionalInvite()"><i class="fas fa-user-plus"></i> Convidar aluno</button>
+                            <div class="professional-create-actions"><button type="button" class="btn-primary" onclick="openOfflineStudent()"><i class="fas fa-user-plus"></i> Novo aluno</button><button type="button" class="btn-secondary" onclick="openProfessionalInvite()"><i class="fas fa-link"></i> Convite avulso</button></div>
                         </div>
                         <div id="professionalStats" class="stats-grid"></div>
                         <section class="professional-draft-section" aria-labelledby="professionalDraftsTitle">
@@ -973,6 +973,27 @@
                     <h3 id="viewWorkoutPlanTitle">Plano de Treino</h3>
                 </div>
                 <div id="viewWorkoutPlanDetails" class="plan-details-container"></div>
+            </div>
+        </div>
+
+        <div id="professionalStudentModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="professionalStudentModalTitle">
+            <div class="modal-content professional-sheet">
+                <div class="modal-header"><div><span class="content-kicker">Cadastro do personal</span><h3 id="professionalStudentModalTitle">Novo aluno</h3></div><button type="button" class="btn-close" onclick="closeOfflineStudent()" aria-label="Fechar">&times;</button></div>
+                <p>Este cadastro pode ser gerenciado sem o aluno ter uma conta no aplicativo.</p>
+                <form id="professionalStudentForm" onsubmit="saveOfflineStudent(event)">
+                    <div class="professional-editor-basics">
+                        <label>Nome<input id="rosterName" maxlength="100" required></label>
+                        <label>Idade<input id="rosterAge" type="number" min="0" max="120" required></label>
+                        <label>Peso (kg)<input id="rosterWeight" type="number" min="0.1" max="500" step="0.1" required></label>
+                        <label>Altura (cm)<input id="rosterHeight" type="number" min="0.1" max="300" step="0.1" required></label>
+                        <label>Gênero usado no cálculo<select id="rosterGender"><option value="">Não informado</option><option value="masculino">Masculino</option><option value="feminino">Feminino</option></select></label>
+                        <label>Objetivo<input id="rosterGoal" maxlength="100"></label>
+                        <label>Nível de atividade<select id="rosterActivity"><option value="">Não informado</option><option value="sedentario">Sedentário</option><option value="leve">Leve</option><option value="moderado">Moderado</option><option value="intenso">Intenso</option></select></label>
+                        <label>Restrições alimentares<textarea id="rosterRestrictions" maxlength="2000" rows="2"></textarea></label>
+                    </div>
+                    <div id="professionalStudentMessage" class="modal-message" role="status" aria-live="polite"></div>
+                    <div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeOfflineStudent()">Cancelar</button><button class="btn-primary" type="submit">Salvar aluno</button></div>
+                </form>
             </div>
         </div>
 

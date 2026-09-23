@@ -533,7 +533,8 @@ class UserProfile(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=False, unique=True) # Perfil único por usuário
-    age = db.Column(db.Integer, nullable=True)
+    _age = db.Column("age", db.Integer, nullable=True)
+    birth_year = db.Column(db.Integer, nullable=True)
     gender = db.Column(db.String(10), nullable=True)  # masculino, feminino
     goal = db.Column(db.String(100), nullable=True)  # perder peso, ganhar massa, manter
     activity_level = db.Column(db.String(50), nullable=True)  # sedentario, leve, moderado, intenso
@@ -559,6 +560,17 @@ class UserProfile(db.Model):
     current_diet_plan = db.relationship("DietPlan", foreign_keys=[current_diet_plan_id])
     current_workout_plan = db.relationship("WorkoutPlan", foreign_keys=[current_workout_plan_id])
     pending_workout_plan = db.relationship("WorkoutPlan", foreign_keys=[pending_workout_plan_id])
+
+    @property
+    def age(self):
+        if self.birth_year is not None:
+            return datetime.utcnow().year - self.birth_year
+        return self._age
+
+    @age.setter
+    def age(self, value):
+        self._age = value
+        self.birth_year = datetime.utcnow().year - int(value) if value is not None else None
 
     def _current_body_value(self, field, fallback):
         # Keep legacy profile values as fallback, without inventing measurement dates.
@@ -752,10 +764,18 @@ class WorkoutPlan(db.Model):
     __table_args__ = (
         db.CheckConstraint("status IN ('draft', 'published', 'archived')", name="ck_workout_plan_status"),
         db.CheckConstraint("source IN ('manual', 'ai', 'legacy')", name="ck_workout_plan_source"),
+        db.CheckConstraint(
+            "(user_id IS NOT NULL AND professional_student_relationship_id IS NULL) OR "
+            "(user_id IS NULL AND professional_student_relationship_id IS NOT NULL)",
+            name="ck_workout_plan_owner",
+        ),
         db.Index("ix_workout_plan_user_created_at", "user_id", "created_at"),
     )
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(UUIDType(binary=False), db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey('user.id'), nullable=True)
+    professional_student_relationship_id = db.Column(
+        db.Integer, db.ForeignKey("professional_student_relationship.id", ondelete="CASCADE"), nullable=True
+    )
     author_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=False)
     published_by_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=True)
     supersedes_plan_id = db.Column(db.Integer, db.ForeignKey("workout_plan.id"), nullable=True)
@@ -1275,10 +1295,18 @@ class DietPlan(db.Model):
     __table_args__ = (
         db.CheckConstraint("status IN ('draft', 'published', 'archived')", name="ck_diet_plan_status"),
         db.CheckConstraint("source IN ('manual', 'ai', 'legacy')", name="ck_diet_plan_source"),
+        db.CheckConstraint(
+            "(user_id IS NOT NULL AND professional_student_relationship_id IS NULL) OR "
+            "(user_id IS NULL AND professional_student_relationship_id IS NOT NULL)",
+            name="ck_diet_plan_owner",
+        ),
         db.Index("ix_diet_plan_user_created_at", "user_id", "created_at"),
     )
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=False)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=True)
+    professional_student_relationship_id = db.Column(
+        db.Integer, db.ForeignKey("professional_student_relationship.id", ondelete="CASCADE"), nullable=True
+    )
     author_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=False)
     published_by_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id"), nullable=True)
     supersedes_plan_id = db.Column(db.Integer, db.ForeignKey("diet_plan.id"), nullable=True)
@@ -1515,7 +1543,7 @@ class ProfessionalStudentRelationship(db.Model):
             name="ck_professional_student_distinct_users",
         ),
         db.CheckConstraint(
-            "status IN ('pending', 'active', 'declined', 'revoked', 'expired')",
+            "status IN ('offline', 'pending', 'active', 'declined', 'revoked', 'expired')",
             name="ck_professional_student_status",
         ),
         db.Index("ix_professional_student_professional_status", "professional_user_id", "status"),
@@ -1552,6 +1580,8 @@ class ProfessionalStudentRelationship(db.Model):
         UUIDType(binary=False), db.ForeignKey("user.id", ondelete="SET NULL"), nullable=True
     )
     request_message = db.Column(db.String(500), nullable=True)
+    student_name = db.Column(db.String(100), nullable=True)
+    student_profile = db.Column(db.JSON, nullable=True)
 
     professional = db.relationship("User", foreign_keys=[professional_user_id])
     student = db.relationship("User", foreign_keys=[student_user_id])
@@ -1568,7 +1598,8 @@ class ProfessionalStudentRelationship(db.Model):
             "student": {
                 "id": self.student.id,
                 "username": self.student.username,
-            } if self.student else None,
+            } if self.student else ({"username": self.student_name} if self.student_name else None),
+            "student_name": self.student_name,
             "status": self.status,
             "invite_expires_at": self.invite_expires_at.isoformat() if self.invite_expires_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,

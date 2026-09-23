@@ -8,7 +8,9 @@
         dietPlans: [],
         exercises: [],
         editor: null,
-        exportText: ""
+        exportText: "",
+        rosterEditId: null,
+        inviteStudentId: null
     };
 
     const byId = (id) => document.getElementById(id);
@@ -41,6 +43,7 @@
 
     function planCard(plan, type) {
         const studentId = state.student.id;
+        const offline = Boolean(state.student.is_offline);
         const isDraft = plan.status === "draft";
         return `<article class="professional-plan-card">
             <div><span class="plan-status plan-status--${esc(plan.status)}">${esc(statusLabel(plan.status))}</span><small>${plan.source === "ai" ? "IA Premium" : "Manual"}</small></div>
@@ -48,8 +51,8 @@
             <p>${esc(plan.description || "Sem descrição")}</p>
             <div class="professional-card-actions">
                 <button type="button" class="btn-secondary" onclick="openProfessionalPlan('${type}', '${esc(plan.id)}')"><i class="fas fa-eye"></i> Abrir</button>
-                ${isDraft ? `<button type="button" class="btn-secondary" onclick="editProfessionalPlan('${type}', '${esc(plan.id)}')"><i class="fas fa-pen"></i> Editar</button><button type="button" class="btn-primary" onclick="publishProfessionalPlan('${type}', '${esc(plan.id)}')"><i class="fas fa-paper-plane"></i> Enviar</button>` : ""}
-                ${isDraft && type === "diet" ? `<button type="button" class="btn-secondary" onclick="suggestProfessionalDietChange('${esc(plan.id)}')"><i class="fas fa-wand-magic-sparkles"></i> Sugerir mudança</button>` : ""}
+                ${isDraft ? `<button type="button" class="btn-secondary" onclick="editProfessionalPlan('${type}', '${esc(plan.id)}')"><i class="fas fa-pen"></i> Editar</button>${offline ? "" : `<button type="button" class="btn-primary" onclick="publishProfessionalPlan('${type}', '${esc(plan.id)}')"><i class="fas fa-paper-plane"></i> Enviar</button>`}` : ""}
+                ${isDraft && type === "diet" && !offline ? `<button type="button" class="btn-secondary" onclick="suggestProfessionalDietChange('${esc(plan.id)}')"><i class="fas fa-wand-magic-sparkles"></i> Sugerir mudança</button>` : ""}
                 <button type="button" class="btn-secondary" onclick="exportProfessionalPlan('${type}', '${esc(plan.id)}', '${esc(studentId)}')" aria-label="Compartilhar ${esc(plan.title)} no WhatsApp"><i class="fab fa-whatsapp" aria-hidden="true"></i></button>
             </div>
         </article>`;
@@ -78,7 +81,7 @@
             + Number(student.latest_workout_plan?.status === "draft")
             + Number(student.latest_diet_plan?.status === "draft"), 0);
         if (stats) stats.innerHTML = `
-            <article class="stat-card"><span class="stat-card__icon"><i class="fas fa-users"></i></span><div><small>Alunos ativos</small><strong>${state.students.length}</strong></div></article>
+                            <article class="stat-card"><span class="stat-card__icon"><i class="fas fa-users"></i></span><div><small>Alunos acompanhados</small><strong>${state.students.length}</strong></div></article>
             <article class="stat-card"><span class="stat-card__icon stat-card__icon--blue"><i class="fas fa-file-pen"></i></span><div><small>Rascunhos recentes</small><strong>${drafts}</strong></div></article>`;
         const draftContainer = byId("professionalDrafts");
         if (draftContainer) {
@@ -96,13 +99,13 @@
         const container = byId("professionalStudents");
         if (!container) return;
         if (!state.students.length) {
-            container.innerHTML = '<div class="empty-state"><i class="fas fa-user-plus"></i><h3>Convide seu primeiro aluno</h3><p>O aluno continuará usando a conta normal e autorizará seu acesso pelo link.</p><button class="btn-primary" onclick="openProfessionalInvite()">Gerar convite</button></div>';
+            container.innerHTML = '<div class="empty-state"><i class="fas fa-user-plus"></i><h3>Cadastre seu primeiro aluno</h3><p>Você pode gerenciar o perfil e os planos mesmo sem ele ter uma conta no app.</p><button class="btn-primary" onclick="openOfflineStudent()">Cadastrar aluno</button></div>';
             return;
         }
         container.innerHTML = state.students.map((student) => `
             <button type="button" class="professional-student-card" onclick="openProfessionalStudent('${esc(student.id)}')">
                 <span class="professional-student-avatar">${student.avatar_url ? `<img src="${esc(student.avatar_url)}" alt="">` : esc(student.username.charAt(0).toUpperCase())}</span>
-                <span><strong>${esc(student.username)}</strong><small>${esc(student.profile?.goal || "Objetivo não informado")}</small></span>
+                <span><strong>${esc(student.username)}</strong><small>${student.is_offline ? "Cadastro do personal · sem conta no app" : esc(student.profile?.goal || "Objetivo não informado")}</small></span>
                 <span class="professional-student-meta"><small>Última medida</small><strong>${student.latest_measurement?.weight ? `${esc(student.latest_measurement.weight)} kg` : "Sem registro"}</strong></span>
                 <i class="fas fa-chevron-right"></i>
             </button>`).join("");
@@ -147,18 +150,18 @@
             <div class="professional-student-header">
                 <button type="button" class="back-button" onclick="loadProfessionalDashboard()"><i class="fas fa-arrow-left"></i></button>
                 <span class="professional-student-avatar professional-student-avatar--large">${student.avatar_url ? `<img src="${esc(student.avatar_url)}" alt="">` : esc(student.username.charAt(0).toUpperCase())}</span>
-                <div><span class="content-kicker">Aluno ativo</span><h2>${esc(student.username)}</h2><p>${esc(student.profile?.goal || "Perfil ainda incompleto")}</p></div>
-                <button type="button" class="btn-secondary professional-revoke" onclick="revokeProfessionalStudent()"><i class="fas fa-link-slash"></i> Desvincular</button>
+                <div><span class="content-kicker">${student.is_offline ? "Cadastro do personal" : "Aluno vinculado"}</span><h2>${esc(student.username)}</h2><p>${esc(student.profile?.goal || "Objetivo não informado")}</p></div>
+                ${student.is_offline ? `<button type="button" class="btn-secondary" onclick="openOfflineStudent('${esc(student.id)}')"><i class="fas fa-pen"></i> Editar perfil</button><button type="button" class="btn-primary professional-revoke" onclick="openProfessionalInviteForStudent()"><i class="fas fa-link"></i> ${student.roster_status === "pending" ? "Gerar novo link" : "Gerar convite"}</button>` : `<button type="button" class="btn-secondary professional-revoke" onclick="revokeProfessionalStudent()"><i class="fas fa-link-slash"></i> Desvincular</button>`}
             </div>
             <div class="professional-profile-grid">
                 ${profileFact("Idade", student.profile?.age, "anos")}${profileFact("Peso", student.profile?.weight, "kg")}${profileFact("Altura", student.profile?.height, "cm")}${profileFact("Atividade", student.profile?.activity_level)}
             </div>
             ${allowsWorkout ? `<section class="professional-plan-section">
-                <header><div><span class="content-kicker content-kicker--blue">Treinos</span><h3>Planos de treino</h3></div><div class="professional-create-actions"><button class="btn-secondary" onclick="createManualProfessionalPlan('workout')"><i class="fas fa-plus"></i> Manual</button><button class="btn-primary" onclick="openProfessionalPlanWizard('workout', '${esc(student.id)}')"><i class="fas fa-wand-magic-sparkles"></i> Gerar com IA</button></div></header>
+                <header><div><span class="content-kicker content-kicker--blue">Treinos</span><h3>Planos de treino</h3></div><div class="professional-create-actions"><button class="btn-secondary" onclick="createManualProfessionalPlan('workout')"><i class="fas fa-plus"></i> Manual</button>${student.is_offline ? "" : `<button class="btn-primary" onclick="openProfessionalPlanWizard('workout', '${esc(student.id)}')"><i class="fas fa-wand-magic-sparkles"></i> Gerar com IA</button>`}</div></header>
                 <div class="professional-plan-grid">${state.workoutPlans.length ? state.workoutPlans.map((plan) => planCard(plan, "workout")).join("") : emptyPlan("treino")}</div>
             </section>` : ""}
             ${allowsDiet ? `<section class="professional-plan-section">
-                <header><div><span class="content-kicker">Alimentação</span><h3>Planos alimentares</h3></div><div class="professional-create-actions"><button class="btn-secondary" onclick="createManualProfessionalPlan('diet')"><i class="fas fa-plus"></i> Manual</button><button class="btn-primary" onclick="openProfessionalPlanWizard('diet', '${esc(student.id)}')"><i class="fas fa-wand-magic-sparkles"></i> Gerar com IA</button></div></header>
+                <header><div><span class="content-kicker">Alimentação</span><h3>Planos alimentares</h3></div><div class="professional-create-actions"><button class="btn-secondary" onclick="createManualProfessionalPlan('diet')"><i class="fas fa-plus"></i> Manual</button>${student.is_offline ? "" : `<button class="btn-primary" onclick="openProfessionalPlanWizard('diet', '${esc(student.id)}')"><i class="fas fa-wand-magic-sparkles"></i> Gerar com IA</button>`}</div></header>
                 <div class="professional-plan-grid">${state.dietPlans.length ? state.dietPlans.map((plan) => planCard(plan, "diet")).join("") : emptyPlan("alimentar")}</div>
             </section>` : ""}
             ${allowsWorkout ? `<section class="professional-plan-section"><header><div><span class="content-kicker content-kicker--blue">Conclusões</span><h3>Treinos finalizados</h3></div></header><div class="professional-plan-grid">${workoutSessions.length ? workoutSessions.map((session) => `<article class="professional-plan-card"><strong>${esc(new Date(`${session.completed_at}Z`).toLocaleDateString("pt-BR"))}</strong><p>${asArray(session.completed_exercise_ids).length} exercício(s) concluído(s)</p></article>`).join("") : '<p class="muted">Nenhum treino finalizado recentemente.</p>'}</div></section>` : ""}
@@ -176,7 +179,62 @@
 
     const emptyPlan = (label) => `<div class="empty-state empty-state--compact"><p>Nenhum plano ${label} criado.</p></div>`;
 
-    function openProfessionalInvite() {
+    function openOfflineStudent(studentId = null) {
+        state.rosterEditId = studentId;
+        const student = studentId ? state.student : null;
+        const profile = student?.profile || {};
+        byId("professionalStudentModalTitle").textContent = student ? "Editar aluno" : "Cadastrar aluno";
+        byId("rosterName").value = student?.username || "";
+        byId("rosterAge").value = profile.age ?? "";
+        byId("rosterWeight").value = profile.weight ?? "";
+        byId("rosterHeight").value = profile.height ?? "";
+        byId("rosterGender").value = profile.gender || "";
+        byId("rosterGoal").value = profile.goal || "";
+        byId("rosterActivity").value = profile.activity_level || "";
+        byId("rosterRestrictions").value = profile.dietary_restrictions || "";
+        byId("professionalStudentMessage").textContent = "";
+        openAppModal(byId("professionalStudentModal"));
+    }
+
+    function closeOfflineStudent() { closeAppModal(byId("professionalStudentModal")); }
+
+    async function saveOfflineStudent(event) {
+        event.preventDefault();
+        const body = {
+            name: byId("rosterName").value.trim(),
+            profile: {
+                age: Number(byId("rosterAge").value),
+                weight: Number(byId("rosterWeight").value),
+                height: Number(byId("rosterHeight").value),
+                gender: byId("rosterGender").value,
+                goal: byId("rosterGoal").value.trim(),
+                activity_level: byId("rosterActivity").value,
+                dietary_restrictions: byId("rosterRestrictions").value.trim()
+            }
+        };
+        const message = byId("professionalStudentMessage");
+        try {
+            const path = state.rosterEditId
+                ? `/professional/students/${segment(state.rosterEditId)}`
+                : "/professional/students";
+            const result = await api(path, { method: state.rosterEditId ? "PUT" : "POST", body });
+            closeOfflineStudent();
+            showToast(state.rosterEditId ? "Cadastro atualizado." : "Aluno cadastrado.", "success");
+            await loadProfessionalDashboard();
+            if (state.rosterEditId) openProfessionalStudent(result.student.id);
+        } catch (error) {
+            if (message) message.textContent = error.message;
+        }
+    }
+
+    function openProfessionalInviteForStudent() {
+        if (!state.student?.is_offline) return;
+        state.inviteStudentId = state.student.id;
+        openProfessionalInvite(true);
+    }
+
+    function openProfessionalInvite(forRosterStudent = false) {
+        if (!forRosterStudent) state.inviteStudentId = null;
         byId("professionalInviteResult")?.classList.add("hidden");
         if (byId("professionalInviteMessage")) byId("professionalInviteMessage").textContent = "";
         openAppModal(byId("professionalInviteModal"));
@@ -188,11 +246,15 @@
         const button = byId("professionalInviteGenerate");
         if (button) button.disabled = true;
         try {
-            const data = await api("/professional/invitations", { method: "POST", body: {} });
+            const invitePath = state.inviteStudentId
+                ? `/professional/students/${segment(state.inviteStudentId)}/invitation`
+                : "/professional/invitations";
+            const data = await api(invitePath, { method: "POST", body: {} });
             const link = new URL(data.invite_path, window.location.origin).toString();
             byId("professionalInviteLink").value = link;
             byId("professionalInviteResult")?.classList.remove("hidden");
             if (byId("professionalInviteMessage")) byId("professionalInviteMessage").textContent = "Link criado. Ele expira em 7 dias.";
+            if (state.inviteStudentId) await openProfessionalStudent(state.inviteStudentId);
         } catch (error) {
             if (byId("professionalInviteMessage")) byId("professionalInviteMessage").textContent = error.message;
         } finally {
@@ -560,7 +622,11 @@
     Object.assign(window, {
         loadProfessionalDashboard,
         openProfessionalStudent,
+        openOfflineStudent,
+        closeOfflineStudent,
+        saveOfflineStudent,
         openProfessionalInvite,
+        openProfessionalInviteForStudent,
         closeProfessionalInvite,
         generateProfessionalInvite,
         copyProfessionalInvite,

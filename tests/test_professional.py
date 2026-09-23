@@ -400,6 +400,92 @@ def test_invitation_stores_only_token_hash(app):
         assert len(relationship.invite_token_hash) == 64
 
 
+def test_offline_student_can_have_profile_and_manual_plan_then_link_account(app):
+    trainer_client = app.test_client()
+    student_client = app.test_client()
+    register(trainer_client, "roster-trainer")
+    enable_professional(app, "roster-trainer")
+
+    created = trainer_client.post("/api/professional/students", json={
+        "name": "Aluno sem conta",
+        "profile": {
+            "age": 29,
+            "gender": "masculino",
+            "goal": "strength",
+            "activity_level": "moderado",
+            "weight": 78,
+            "height": 179,
+        },
+    })
+    assert created.status_code == 201
+    student = created.get_json()["student"]
+    student_id = student["id"]
+    assert student_id.startswith("offline-")
+    assert student["is_offline"] is True
+    assert student["profile"]["age"] == 29
+
+    plan_response = trainer_client.post(
+        f"/api/professional/students/{student_id}/workout-plans",
+        json={
+            "questionnaire": workout_questionnaire(),
+            "plan": {
+                "type": "workout_plan",
+                "title": "Treino preparado offline",
+                "days": [
+                    {"title": "A", "exercises": [{"catalog_key": "agachamento_goblet", "sets": 3, "reps": "8-12", "rest_seconds": 60}]},
+                    {"title": "B", "exercises": [{"catalog_key": "supino_reto_halteres", "sets": 3, "reps": "8-12", "rest_seconds": 60}]},
+                ],
+            },
+        },
+    )
+    assert plan_response.status_code == 201
+    plan_id = plan_response.get_json()["plan"]["id"]
+    assert trainer_client.get(
+        f"/api/professional/students/{student_id}/workout-plans/{plan_id}"
+    ).status_code == 200
+    with app.app_context():
+        plan = db.session.get(WorkoutPlan, plan_id)
+        relationship = db.session.get(ProfessionalStudentRelationship, int(student_id.split("-")[1]))
+        assert plan.user_id is None
+        assert plan.professional_student_relationship_id == relationship.id
+        assert relationship.status == "offline"
+
+    invitation = trainer_client.post(f"/api/professional/students/{student_id}/invitation", json={})
+    assert invitation.status_code == 201
+    register(student_client, "roster-account")
+    accepted = student_client.post(
+        f"/api/invitations/{invitation.get_json()['token']}/accept",
+        json=SHARING_CONSENT,
+    )
+    assert accepted.status_code == 200
+    assert trainer_client.get(
+        f"/api/professional/students/{accepted.get_json()['relationship']['student']['id']}/workout-plans"
+    ).get_json()[0]["id"] == plan_id
+    with app.app_context():
+        actual_user = User.query.filter_by(username="roster-account").one()
+        relationship = db.session.get(ProfessionalStudentRelationship, int(student_id.split("-")[1]))
+        plan = db.session.get(WorkoutPlan, plan_id)
+        assert relationship.status == "active"
+        assert relationship.student_user_id == actual_user.id
+        assert plan.user_id == actual_user.id
+        assert plan.professional_student_relationship_id is None
+        assert actual_user.profile.age == 29
+        assert actual_user.profile.height == 179
+
+
+def test_profile_age_advances_by_calendar_year(app):
+    client = app.test_client()
+    register(client, "age-user")
+    with app.app_context():
+        user = User.query.filter_by(username="age-user").one()
+        profile = UserProfile(user_id=user.id, age=30)
+        db.session.add(profile)
+        db.session.flush()
+        birth_year = profile.birth_year
+        profile.birth_year = birth_year - 1
+        assert profile.age == 31
+
+
 def test_non_professional_cannot_create_invitation(client):
     register(client, "normal")
     assert client.post("/api/professional/invitations", json={}).status_code == 403
