@@ -3756,7 +3756,7 @@ function renderDietDailyPlan() {
     const plan = dietDailyView?.plan;
     if (!plan) {
         cardapioActivePlan = null;
-        container.innerHTML = '<div><span class="eyebrow">Plano alimentar</span><h2 id="dietDailyPlanTitle">Sem plano atual</h2><p>O diário funciona normalmente sem um plano.</p></div><button type="button" class="btn-secondary" data-plan-wizard="diet">Criar plano alimentar</button>';
+        container.innerHTML = '<div><span class="eyebrow">Plano alimentar</span><h2 id="dietDailyPlanTitle">Sem plano atual</h2><p>O diário funciona normalmente sem um plano.</p></div><button type="button" class="btn-primary" data-plan-wizard="diet"><i class="fas fa-plus" aria-hidden="true"></i> Criar plano alimentar</button>';
         return;
     }
     cardapioActivePlan = plan;

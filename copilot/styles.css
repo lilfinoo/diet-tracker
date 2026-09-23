@@ -14128,6 +14128,8 @@ body:has(#dietTab.today-authenticated:not(.hidden)) .app-header { display: none;
 .diet-daily-plan__actions { display: flex; align-items: center; gap: 0.8rem; }
 .diet-daily-plan__actions .text-button { color: #8fc7bb; font-size: 0.7rem; }
 .diet-plans-library { margin-top: 1.2rem; }
+.diet-plans-library__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.6rem; }
+.diet-plans-library__actions button { min-height: 44px; }
 
 @media (max-width: 560px) {
     #diet_plansTab { padding-bottom: 1rem; }
@@ -14151,6 +14153,9 @@ body:has(#dietTab.today-authenticated:not(.hidden)) .app-header { display: none;
     .diet-daily-manual__actions { grid-column: 2; justify-content: flex-end; }
     .diet-daily-plan { align-items: flex-start; flex-direction: column; }
     .diet-daily-plan__actions { width: 100%; justify-content: space-between; }
+    #dietDailyPlan > .btn-primary { width: 100%; }
+    .diet-plans-library__actions { gap: 0.45rem; }
+    .diet-plans-library__actions [data-plan-wizard] { padding-inline: 0.7rem; font-size: 0.72rem; }
 }
 
 .professional-student-card {
