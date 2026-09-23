@@ -3202,6 +3202,7 @@
         const exercises = asArray(summary.exercises);
         const selectedExercises = exercises.filter((exercise) => draft.selectedExerciseIds.has(String(exercise.exercise_id)));
         const isDark = draft.mode === "dark";
+        const disclosureOpen = window.matchMedia?.("(min-width: 769px)").matches ? " open" : "";
         const infoModel = workoutShareInfoModel(summary, selectedExercises, draft);
         const exerciseControls = exercises.map((exercise) => {
             const selected = draft.selectedExerciseIds.has(String(exercise.exercise_id));
@@ -3209,7 +3210,7 @@
         }).join("");
         const photoSlider = !isDark ? `
                         <section class="workout-share-option" aria-labelledby="workoutSharePhotoAdjustTitle">
-                            <div class="workout-share-option__heading"><span><i class="fas fa-crop-simple" aria-hidden="true"></i></span><div><h4 id="workoutSharePhotoAdjustTitle">Ajustar foto</h4><p>Escala e posição da imagem de fundo.</p></div></div>
+                            <h4 id="workoutSharePhotoAdjustTitle" class="workout-share-adjust-title">Enquadramento</h4>
                             <div class="workout-share-slider">
                                 <label>Escala</label>
                                 <input type="range" min="50" max="200" value="${Math.round((draft.photoScale || 1) * 100)}" data-workout-action="set-share-photo-scale">
@@ -3228,14 +3229,11 @@
                         </section>` : "";
 
         const infoPresetToggle = `
-            <section class="workout-share-option" aria-labelledby="workoutShareInfoPresetTitle">
-                <div class="workout-share-option__heading"><span><i class="fas fa-layer-group" aria-hidden="true"></i></span><div><h4 id="workoutShareInfoPresetTitle">Informações</h4><p>Escolha o estilo do bloco de texto no card.</p></div></div>
-                <div class="workout-share-mode-toggle workout-share-mode-toggle--compact">
+                <div class="workout-share-mode-toggle workout-share-mode-toggle--compact" aria-label="Estilo das informações">
                     <button type="button" class="${infoModel.preset === "full" ? "is-active" : ""}" data-workout-action="set-share-info-preset" data-info-preset="full">Completo</button>
                     <button type="button" class="${infoModel.preset === "compact" ? "is-active" : ""}" data-workout-action="set-share-info-preset" data-info-preset="compact">Compacto</button>
                     <button type="button" class="${infoModel.preset === "minimal" ? "is-active" : ""}" data-workout-action="set-share-info-preset" data-info-preset="minimal">Minimalista</button>
-                </div>
-            </section>`;
+                </div>`;
 
         return `<section class="workout-share-shell">
             <header class="workout-share-header"><button type="button" data-workout-action="back-to-summary"><i class="fas fa-arrow-left" aria-hidden="true"></i> Voltar</button><span>Workout Share</span><h3 tabindex="-1">Monte seu compartilhamento</h3><p>Escolha o modo, ajuste a foto e as informações do card.</p></header>
@@ -3245,23 +3243,21 @@
                         <div class="workout-share-option__heading"><span><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i></span><div><h4 id="workoutShareModeTitle">Modo</h4><p>Foto com filtro ou fundo escuro com dados.</p></div></div>
                         <div class="workout-share-mode-toggle">
                             <button type="button" class="${!isDark ? "is-active" : ""}" data-workout-action="set-share-mode" data-share-mode="photo"><i class="fas fa-camera" aria-hidden="true"></i> Foto</button>
-                            <button type="button" class="${isDark ? "is-active" : ""}" data-workout-action="set-share-mode" data-share-mode="dark"><i class="fas fa-moon" aria-hidden="true"></i> Fundo preto</button>
+                            <button type="button" class="${isDark ? "is-active" : ""}" data-workout-action="set-share-mode" data-share-mode="dark"><i class="fas fa-moon" aria-hidden="true"></i> Sem foto</button>
                         </div>
                     </section>
-                    ${!isDark ? `<section class="workout-share-option" aria-labelledby="workoutSharePhotoTitle">
-                        <div class="workout-share-option__heading"><span><i class="fas fa-image" aria-hidden="true"></i></span><div><h4 id="workoutSharePhotoTitle">Foto</h4><p>Use uma imagem como fundo ou continue sem foto.</p></div></div>
+                    ${!isDark ? `<details class="workout-share-option workout-share-disclosure" data-workout-share-section="photo"${disclosureOpen}><summary><span class="workout-share-disclosure__title"><i class="fas fa-image" aria-hidden="true"></i> Foto e enquadramento</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary><div class="workout-share-disclosure__content"><section aria-label="Foto de fundo">
                         <div class="workout-share-photo-actions">
                             <button type="button" class="workout-share-photo-select" data-workout-action="choose-share-photo"><i class="fas fa-camera" aria-hidden="true"></i>${draft.photoDataUrl ? "Trocar foto" : "Selecionar foto"}</button>
                             <input id="workoutSharePhotoInput" type="file" accept="image/*" class="hidden">
                             ${draft.photoDataUrl ? '<button type="button" data-workout-action="remove-share-photo"><i class="fas fa-trash" aria-hidden="true"></i> Remover</button>' : ""}
                         </div>
-                    </section>` : ""}
-                    ${photoSlider}
-                    ${infoPresetToggle}
-                    <section class="workout-share-option" aria-labelledby="workoutShareExercisesTitle">
-                        <div class="workout-share-option__heading"><span><i class="fas fa-list-check" aria-hidden="true"></i></span><div><h4 id="workoutShareExercisesTitle">Exercícios</h4><p>Somente os ${esc(exercises.length)} exercícios realizados nesta sessão.</p></div></div>
+                    </section>${photoSlider}</div></details>` : ""}
+                    <details class="workout-share-option workout-share-disclosure" data-workout-share-section="info"${disclosureOpen}><summary><span class="workout-share-disclosure__title"><i class="fas fa-layer-group" aria-hidden="true"></i> Informações</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary><div class="workout-share-disclosure__content">${infoPresetToggle}</div></details>
+                    <details class="workout-share-option workout-share-disclosure" data-workout-share-section="exercises"${disclosureOpen}><summary><span class="workout-share-disclosure__title"><i class="fas fa-list-check" aria-hidden="true"></i> Exercícios</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary><div class="workout-share-disclosure__content"><section aria-label="Exercícios incluídos no card">
+                        <p class="workout-share-exercise-hint">Somente os ${esc(exercises.length)} exercícios realizados nesta sessão.</p>
                         ${exerciseControls ? `<ul class="workout-share-exercise-controls">${exerciseControls}</ul>` : '<p class="workout-share-empty">Nenhum exercício realizado para exibir.</p>'}
-                    </section>
+                    </section></div></details>
                 </div>
                 <section id="workoutSharePreview" class="workout-share-preview" aria-labelledby="workoutSharePreviewTitle">
                     <div class="workout-share-preview__heading"><div><span>Prévia</span><h4 id="workoutSharePreviewTitle">Seu card</h4></div><small>${esc(selectedExercises.length)} de ${esc(exercises.length)} exercícios</small></div>
@@ -3270,7 +3266,6 @@
                 </section>
             </div>
             <footer class="workout-share-shell__actions">
-                <button type="button" class="completed-workout-close" data-workout-action="back-to-summary"><i class="fas fa-arrow-left" aria-hidden="true"></i> Voltar</button>
                 <button type="button" class="btn-secondary" data-workout-action="share-workout-card" ${selectedExercises.length ? "" : "disabled"}><i class="fas fa-share-nodes" aria-hidden="true"></i> Compartilhar card</button>
             </footer>
         </section>`;
@@ -3400,12 +3395,18 @@
         const previousScroll = options.preserveScroll ? details.scrollTop : 0;
         const previousSheetScroll = details.querySelector(".workout-session-sheet__scroll")?.scrollTop || 0;
         const previousPlayerCard = details.querySelector("[data-workout-player-card]");
+        const previousShareSections = new Set(Array.from(details.querySelectorAll("[data-workout-share-section][open]"), (section) => section.dataset.workoutShareSection));
         const focused = details.contains(document.activeElement) ? document.activeElement : null;
         if (workoutView.completedSummary) {
             const title = byId("viewWorkoutPlanTitle");
             if (title) title.textContent = workoutView.shareOpen ? "Workout Share" : "Resumo do treino";
             details.innerHTML = renderCompletedWorkoutSummary();
-            if (workoutView.shareOpen) syncWorkoutSharePreview();
+            if (workoutView.shareOpen) {
+                details.querySelectorAll("[data-workout-share-section]").forEach((section) => {
+                    if (window.matchMedia?.("(max-width: 768px)").matches) section.open = previousShareSections.has(section.dataset.workoutShareSection);
+                });
+                syncWorkoutSharePreview();
+            }
             details.scrollTop = previousScroll;
             if (options.focusSelector) requestAnimationFrame(() => details.querySelector(options.focusSelector)?.focus());
             return;
