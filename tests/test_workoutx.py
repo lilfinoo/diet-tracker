@@ -46,6 +46,29 @@ def test_examples_use_only_workoutx_gifs(app):
         assert workoutx.approved_media("elevacao_lateral_cabo")["provider_id"] == "0178"
         assert workoutx.approved_media("abdominal_na_polia")["provider_id"] == "0175"
         assert workoutx.approved_media("rosca_martelo")["provider_id"] == "0313"
+        assert workoutx.approved_media("flexao_pike") == {
+            "provider_equipment": "Body Weight",
+            "provider_id": "3662",
+            "provider_name": "Pike-to-cobra Push-up",
+        }
+        assert workoutx.approved_media("triceps_testa") == {
+            "provider_equipment": "Dumbbell",
+            "provider_id": "0351",
+            "provider_name": "Dumbbell Lying Triceps Extension",
+        }
+
+        from src.services.workout_plans import catalog_by_key
+
+        removed_keys = {
+            "flexao_joelhos_bola",
+            "flexao_joelhos_deslizante",
+            "flexao_nordica",
+            "nordico_reverso",
+            "elevacao_lateral_elastico",
+            "bird_dog",
+            "corrida_na_esteira",
+        }
+        assert removed_keys.isdisjoint(catalog_by_key())
 
 
 def test_workoutx_restores_a_gif_from_persistent_cache(app, tmp_path, monkeypatch):

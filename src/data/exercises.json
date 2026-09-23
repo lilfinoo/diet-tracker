@@ -481,45 +481,6 @@
     "auto_replaceable": true
   },
   {
-    "key": "flexao_joelhos_bola",
-    "name": "Flexão de joelhos na bola",
-    "aliases": ["leg curl na bola", "flexora com bola suíça"],
-    "substitution_group": "knee_flexion",
-    "movement_pattern": "knee_flexion",
-    "primary_muscle": "posteriores de coxa",
-    "secondary_muscles": ["glúteos", "core", "gastrocnêmio"],
-    "equipment": "stability_ball",
-    "difficulty": "intermediate",
-    "image_category": "lower-body",
-    "auto_replaceable": true
-  },
-  {
-    "key": "flexao_joelhos_deslizante",
-    "name": "Flexão de joelhos deslizante",
-    "aliases": ["leg curl deslizante", "flexora no chão"],
-    "substitution_group": "knee_flexion",
-    "movement_pattern": "knee_flexion",
-    "primary_muscle": "posteriores de coxa",
-    "secondary_muscles": ["glúteos", "core", "gastrocnêmio"],
-    "equipment": "sliders",
-    "difficulty": "intermediate",
-    "image_category": "lower-body",
-    "auto_replaceable": true
-  },
-  {
-    "key": "flexao_nordica",
-    "name": "Flexão nórdica",
-    "aliases": ["nórdico", "Nordic curl"],
-    "substitution_group": "knee_flexion",
-    "movement_pattern": "knee_flexion",
-    "primary_muscle": "posteriores de coxa",
-    "secondary_muscles": ["glúteos", "gastrocnêmio", "core"],
-    "equipment": "bodyweight",
-    "difficulty": "advanced",
-    "image_category": "lower-body",
-    "auto_replaceable": false
-  },
-  {
     "key": "cadeira_extensora",
     "name": "Cadeira extensora",
     "aliases": ["extensora", "leg extension"],
@@ -568,19 +529,6 @@
     "secondary_muscles": ["core"],
     "equipment": "bodyweight",
     "difficulty": "advanced",
-    "image_category": "lower-body",
-    "auto_replaceable": false
-  },
-  {
-    "key": "nordico_reverso",
-    "name": "Nórdico reverso",
-    "aliases": ["reverse Nordic", "extensão nórdica reversa"],
-    "substitution_group": "knee_extension",
-    "movement_pattern": "knee_extension",
-    "primary_muscle": "quadríceps",
-    "secondary_muscles": ["core"],
-    "equipment": "bodyweight",
-    "difficulty": "intermediate",
     "image_category": "lower-body",
     "auto_replaceable": false
   },
@@ -819,19 +767,6 @@
     "auto_replaceable": true
   },
   {
-    "key": "elevacao_lateral_elastico",
-    "name": "Elevação lateral com elástico",
-    "aliases": ["elevação lateral com faixa", "band lateral raise"],
-    "substitution_group": "lateral_raise",
-    "movement_pattern": "lateral_raise",
-    "primary_muscle": "deltoide lateral",
-    "secondary_muscles": ["trapézio superior", "supraespinal"],
-    "equipment": "resistance_band",
-    "difficulty": "beginner",
-    "image_category": "upper-body",
-    "auto_replaceable": true
-  },
-  {
     "key": "elevacao_lateral_inclinada",
     "name": "Elevação lateral inclinada",
     "aliases": ["elevação lateral apoiada", "leaning lateral raise"],
@@ -949,19 +884,6 @@
     "auto_replaceable": true
   },
   {
-    "key": "bird_dog",
-    "name": "Perdigueiro",
-    "aliases": ["bird dog", "extensão alternada em quatro apoios"],
-    "substitution_group": "core_stability",
-    "movement_pattern": "core_stability",
-    "primary_muscle": "transverso abdominal",
-    "secondary_muscles": ["multífidos", "glúteos", "deltoides"],
-    "equipment": "bodyweight",
-    "difficulty": "beginner",
-    "image_category": "core",
-    "auto_replaceable": true
-  },
-  {
     "key": "press_pallof",
     "name": "Press Pallof",
     "aliases": ["Pallof press", "antirrotação com elástico"],
@@ -972,19 +894,6 @@
     "equipment": "resistance_band",
     "difficulty": "intermediate",
     "image_category": "core",
-    "auto_replaceable": true
-  },
-  {
-    "key": "corrida_na_esteira",
-    "name": "Corrida na esteira",
-    "aliases": ["correr na esteira", "treadmill running"],
-    "substitution_group": "cardio",
-    "movement_pattern": "cardio",
-    "primary_muscle": "quadríceps",
-    "secondary_muscles": ["glúteos", "posteriores de coxa", "panturrilhas", "core"],
-    "equipment": "treadmill",
-    "difficulty": "beginner",
-    "image_category": "cardio",
     "auto_replaceable": true
   },
   {

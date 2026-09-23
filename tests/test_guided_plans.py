@@ -79,7 +79,7 @@ def test_five_day_workout_accepts_user_selected_split(split_type):
 def generated_workout():
     day_keys = [
         ["leg_press_45", "supino_maquina", "remada_maquina", "prancha_frontal"],
-        ["agachamento_goblet", "supino_reto_halteres", "remada_unilateral_halter", "bird_dog"],
+        ["agachamento_goblet", "supino_reto_halteres", "remada_unilateral_halter", "dead_bug"],
     ]
     day_slot_ids = [
         ["FB_1_coverage_1", "FB_1_coverage_2", "FB_1_coverage_3", "FB_1_complement_4"],
@@ -116,7 +116,7 @@ def generated_abcde_workout():
         ["supino_reto_barra", "supino_inclinado_halteres", "crucifixo_halteres", "prancha_frontal"],
         ["puxada_alta_frente", "remada_curvada_barra", "remada_unilateral_halter", "dead_bug"],
         ["agachamento_livre", "levantamento_terra_romeno", "mesa_flexora", "panturrilha_em_pe_maquina"],
-        ["desenvolvimento_militar_barra", "elevacao_lateral_halteres", "remada_maquina", "bird_dog"],
+        ["desenvolvimento_militar_barra", "elevacao_lateral_halteres", "remada_maquina", "dead_bug"],
         ["rosca_direta_barra", "triceps_na_polia", "rosca_martelo", "prancha_frontal"],
     ]
     return {

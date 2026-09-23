@@ -4,6 +4,11 @@
     "provider_id": "1457",
     "provider_name": "Barbell Standing Wide Military Press"
   },
+  "flexao_pike": {
+    "provider_equipment": "Body Weight",
+    "provider_id": "3662",
+    "provider_name": "Pike-to-cobra Push-up"
+  },
   "rosca_scott": {
     "provider_equipment": "Ez Barbell",
     "provider_id": "1627",
@@ -78,6 +83,11 @@
     "provider_equipment": "Dumbbell",
     "provider_id": "2188",
     "provider_name": "Dumbbell Seated Triceps Extension"
+  },
+  "triceps_testa": {
+    "provider_equipment": "Dumbbell",
+    "provider_id": "0351",
+    "provider_name": "Dumbbell Lying Triceps Extension"
   },
   "elevacao_lateral_maquina": {
     "provider_equipment": "Leverage Machine",

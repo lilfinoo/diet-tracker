@@ -25,20 +25,17 @@ GIF_DOWNLOAD_BLOCKED_UNTIL = 0.0
 PERSISTENT_CACHE_BLOCKED_UNTIL = 0.0
 
 REVIEW_QUEUE = (
-    "puxada_com_elastico", "flexao_joelhos_deslizante", "flexao_nordica",
+    "puxada_com_elastico",
     "extensao_joelho_elastico", "extensao_terminal_joelho", "panturrilha_em_pe_maquina",
-    "panturrilha_com_halteres", "elevacao_lateral_elastico", "elevacao_lateral_inclinada",
+    "panturrilha_com_halteres", "elevacao_lateral_inclinada",
     "abdominal_reverso", "abdominal_na_polia", "abdominal_na_bola",
 )
 REVIEW_SEARCH_QUERIES = {
     "puxada_com_elastico": "band pulldown",
-    "flexao_joelhos_deslizante": "sliding leg curl",
-    "flexao_nordica": "nordic hamstring curl",
     "extensao_joelho_elastico": "band knee extension",
     "extensao_terminal_joelho": "terminal knee extension band",
     "panturrilha_em_pe_maquina": "standing calf raise machine",
     "panturrilha_com_halteres": "dumbbell calf raise",
-    "elevacao_lateral_elastico": "band lateral raise",
     "elevacao_lateral_inclinada": "incline dumbbell lateral raise",
     "abdominal_reverso": "reverse crunch",
     "abdominal_na_polia": "cable crunch",

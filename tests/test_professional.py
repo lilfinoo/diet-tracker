@@ -72,7 +72,7 @@ def workout_questionnaire():
 def generated_workout():
     day_keys = [
         ["leg_press_45", "supino_maquina", "remada_maquina", "prancha_frontal"],
-        ["agachamento_goblet", "supino_reto_halteres", "remada_unilateral_halter", "bird_dog"],
+        ["agachamento_goblet", "supino_reto_halteres", "remada_unilateral_halter", "dead_bug"],
     ]
     day_slot_ids = [
         ["FB_1_coverage_1", "FB_1_coverage_2", "FB_1_coverage_3", "FB_1_complement_4"],

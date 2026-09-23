@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from src.models.user import WorkoutXExercise, db
+from src.models.user import WorkoutSessionExerciseOverride, WorkoutXExercise, db
 from src.services.workout_plans import replacement_options
 from src.services.workoutx_substitutions import classify_exercise, substitution_options
 
@@ -138,6 +138,21 @@ def test_active_catalog_prefers_leg_press_and_rejects_distant_core_matches(app):
 
     assert [item["catalog_key"] for item in leg_press_options] == ["workoutx:2"]
     assert [item["catalog_key"] for item in crunch_options] == ["workoutx:5"]
+
+
+def test_workoutx_replacement_weight_fits_persisted_field_limit(app):
+    source = workout_exercise("1", "Cable Pulldown")
+    with app.app_context():
+        db.session.add_all([
+            WorkoutXExercise(provider_id="1", data=active_exercise("1", "Cable Pulldown", "Lats", "Cable")),
+            WorkoutXExercise(provider_id="2", data=active_exercise("2", "Band Pulldown", "Lats", "Resistance Band")),
+        ])
+        db.session.commit()
+
+        options = replacement_options(source, present_exercises=[source])
+
+    assert options
+    assert len(options[0]["weight"]) <= WorkoutSessionExerciseOverride.weight.type.length
 
 
 def test_legacy_replacement_keeps_the_movement_when_primary_muscle_labels_differ(app):
