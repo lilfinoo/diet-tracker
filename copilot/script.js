@@ -1264,6 +1264,7 @@ function showMainScreen(options = {}) {
         getElement('adminPanelBtn')?.classList.toggle('hidden', !isAdmin);
         getElement('profileAdminLink')?.classList.toggle('hidden', !isAdmin);
         getElement('professionalPanelBtn')?.classList.toggle('hidden', !isProfessional);
+        getElement('homeProfessionalShortcut')?.classList.toggle('hidden', !isProfessional);
         getElement('profileProfessionalDashboard')?.classList.toggle('hidden', !isProfessional);
         getElement('networkHeaderButton')?.classList.remove('hidden');
     } else {
@@ -1281,6 +1282,7 @@ function showMainScreen(options = {}) {
         getElement('adminPanelBtn')?.classList.add('hidden');
         getElement('profileAdminLink')?.classList.add('hidden');
         getElement('professionalPanelBtn')?.classList.add('hidden');
+        getElement('homeProfessionalShortcut')?.classList.add('hidden');
         getElement('profileProfessionalDashboard')?.classList.add('hidden');
         if (window.clearActiveWorkoutDock) window.clearActiveWorkoutDock();
     }

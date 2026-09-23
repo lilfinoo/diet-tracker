@@ -13398,6 +13398,38 @@ button.achievement-slot { cursor: pointer; }
     font-size: 0.82rem;
     font-weight: 500;
 }
+#dietTab .home-professional-shortcut {
+    width: 100%;
+    min-height: 4.25rem;
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    margin: 0 0 1rem;
+    padding: .7rem .85rem;
+    border: 1px solid rgba(59, 130, 246, .28);
+    border-radius: 14px;
+    color: var(--white);
+    text-align: left;
+    background: linear-gradient(115deg, rgba(59, 130, 246, .13), var(--surface-raised));
+    box-shadow: var(--elev-sm);
+}
+#dietTab .home-professional-shortcut__icon {
+    width: 2.5rem;
+    height: 2.5rem;
+    display: grid;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 1px solid rgba(59, 130, 246, .25);
+    border-radius: 11px;
+    color: #93c5fd;
+    background: rgba(59, 130, 246, .12);
+}
+#dietTab .home-professional-shortcut > span:nth-child(2) { display: grid; flex: 1; gap: .18rem; }
+#dietTab .home-professional-shortcut strong { font-size: .9rem; }
+#dietTab .home-professional-shortcut small { color: #8fa0b5; font-size: .72rem; }
+#dietTab .home-professional-shortcut > .lucide { width: 1.1rem; color: #8fa0b5; }
+#dietTab .home-professional-shortcut:hover { border-color: rgba(59, 130, 246, .5); transform: translateY(-1px); }
+#dietTab .home-professional-shortcut:focus-visible { outline: 3px solid rgba(59, 130, 246, .3); outline-offset: 3px; }
 #dietTab .home-greeting__avatar {
     flex-shrink: 0;
     cursor: pointer;
