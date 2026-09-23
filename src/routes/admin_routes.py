@@ -4,6 +4,7 @@ import csv
 import io
 
 from flask import Blueprint, abort, current_app, g, jsonify, request, send_file
+from sqlalchemy import case, func
 
 from src.models.user import (
     AdminActionAudit,
@@ -68,20 +69,30 @@ def _revoke_admin_grants(user, grant_type):
         subscription.current_period_end = now
 
 
-def _active_admin_grants(user):
+def _admin_subscription_is_current():
     now = datetime.utcnow()
-    return [
-        {
-            "plan_code": subscription.plan_code,
-            "status": subscription.status,
-            "current_period_start": subscription.current_period_start.isoformat() if subscription.current_period_start else None,
-            "current_period_end": subscription.current_period_end.isoformat() if subscription.current_period_end else None,
-        }
-        for subscription in user.subscriptions
-        if subscription.provider == "admin"
-        and subscription.status == "active"
-        and (subscription.current_period_end is None or subscription.current_period_end > now)
-    ]
+    return db.or_(
+        db.and_(
+            Subscription.status.in_(("active", "trialing")),
+            db.or_(
+                db.and_(Subscription.provider == "admin", Subscription.current_period_end.is_(None)),
+                db.and_(Subscription.current_period_end.isnot(None), Subscription.current_period_end > now),
+            ),
+        ),
+        db.and_(
+            Subscription.status == "canceled",
+            Subscription.current_period_end.isnot(None),
+            Subscription.current_period_end > now,
+        ),
+    )
+
+
+def _admin_subscription_grant_is_current():
+    return db.and_(
+        Subscription.provider == "admin",
+        Subscription.status == "active",
+        db.or_(Subscription.current_period_end.is_(None), Subscription.current_period_end > datetime.utcnow()),
+    )
 
 
 def _audit_admin(action, subject=None, details=None, resource_type="user", resource_id=None):
@@ -112,15 +123,90 @@ def admin_dashboard():
 @admin_bp.route("/admin/users", methods=["GET"])
 @admin_required
 def list_users():
-    users, _, _ = page_query(User.query.order_by(User.created_at.desc()))
-    users = users.all()
+    query = User.query
+    search = request.args.get("q", "").strip()
+    role = request.args.get("role", "all")
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(
+            db.or_(
+                User.name.ilike(pattern),
+                User.email.ilike(pattern),
+                User.username.ilike(pattern),
+                User.id.cast(db.String).ilike(pattern),
+                User.professional_scope.ilike(pattern),
+            )
+        )
+    if role == "admins":
+        query = query.filter(User.is_admin.is_(True))
+    elif role == "banned":
+        query = query.filter(User.is_banned.is_(True))
+    elif role == "professional":
+        query = query.filter(User.is_professional.is_(True))
+    elif role == "premium":
+        premium_subscription = db.session.query(Subscription.user_id).filter(
+            Subscription.user_id == User.id,
+            _admin_subscription_is_current(),
+            Subscription.plan_code != "free",
+        ).exists()
+        query = query.filter(db.or_(User.is_premium.is_(True), premium_subscription))
+    total = query.count()
+    page, limit, offset = page_query(
+        query.order_by(User.created_at.desc(), User.id.desc()), default_limit=30
+    )
+    users = page.all()
+    user_ids = [user.id for user in users]
+    subscriptions_by_user = defaultdict(list)
+    grants_by_user = defaultdict(list)
+    now = datetime.utcnow()
+    if user_ids:
+        subscriptions = Subscription.query.filter(
+            Subscription.user_id.in_(user_ids), _admin_subscription_is_current()
+        ).order_by(Subscription.created_at.desc()).all()
+        for subscription in subscriptions:
+            subscriptions_by_user[subscription.user_id].append(subscription)
+            if (
+                subscription.provider == "admin"
+                and subscription.status == "active"
+                and (subscription.current_period_end is None or subscription.current_period_end > now)
+            ):
+                grants_by_user[subscription.user_id].append({
+                    "plan_code": subscription.plan_code,
+                    "status": subscription.status,
+                    "current_period_start": subscription.current_period_start.isoformat() if subscription.current_period_start else None,
+                    "current_period_end": subscription.current_period_end.isoformat() if subscription.current_period_end else None,
+                })
     serialized_users = []
     for user in users:
-        serialized = user.admin_dict()
-        serialized["admin_grants"] = _active_admin_grants(user)
+        subscriptions = subscriptions_by_user.get(user.id, [])
+        plan_rank = {"free": 0, "premium_student": 1, "professional_single": 2, "professional_complete": 3}
+        subscription = max(
+            subscriptions,
+            key=lambda item: (plan_rank.get(item.plan_code, 0), item.created_at or datetime.min),
+            default=None,
+        )
+        plan_code = subscription.plan_code if subscription else ("premium_student" if user.is_premium else "free")
+        serialized = {
+            "id": str(user.id),
+            "username": user.username,
+            "name": user.account_name(),
+            "email": user.email,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "account_status": "banned" if user.is_banned else "active",
+            "account_type": "admin" if user.is_admin else ("professional" if user.is_professional else "standard"),
+            "is_banned": user.is_banned,
+            "is_admin": user.is_admin,
+            "is_premium": user.is_premium or plan_code != "free",
+            "is_professional": user.is_professional,
+            "professional_entitled": user.is_professional and plan_code in {"professional_single", "professional_complete"},
+            "professional_scope": user.professional_scope,
+            "plan_code": plan_code,
+            "subscription_status": subscription.status if subscription else "none",
+        }
+        serialized["admin_grants"] = grants_by_user.get(user.id, [])
         serialized["legacy_premium_grant"] = user.is_premium
         serialized_users.append(serialized)
-    return jsonify(serialized_users), 200
+    return jsonify({"items": serialized_users, "total": total, "limit": limit, "offset": offset}), 200
 
 
 @admin_bp.route("/admin/exercise-media/review", methods=["GET"])
@@ -441,69 +527,78 @@ def _date_series(start_date, end_date, bucket):
     return items
 
 
-def _admin_summary_counts(users, from_date, to_date):
+def _admin_summary_counts(from_date, to_date):
     period_start = datetime.combine(from_date, datetime.min.time())
     period_end = datetime.combine(to_date, datetime.max.time())
+    admin_users, banned_users, professional_users, new_users = db.session.query(
+        func.coalesce(func.sum(case((User.is_admin.is_(True), 1), else_=0)), 0),
+        func.coalesce(func.sum(case((User.is_banned.is_(True), 1), else_=0)), 0),
+        func.coalesce(func.sum(case((User.is_professional.is_(True), 1), else_=0)), 0),
+        func.coalesce(func.sum(case((User.created_at >= period_start, 1), else_=0)), 0),
+    ).filter(User.created_at <= period_end).one()
     total_users = User.query.count()
-    active_subscriptions = Subscription.query.filter(
+    active_users = db.session.query(func.count(func.distinct(AnalyticsEvent.subject_id))).filter(
+        AnalyticsEvent.subject_id.isnot(None),
+        AnalyticsEvent.created_at >= period_start,
+        AnalyticsEvent.created_at <= period_end,
+    ).scalar() or 0
+
+    premium_subscription = db.session.query(Subscription.user_id).filter(
+        Subscription.user_id == User.id,
+        _admin_subscription_is_current(),
+        Subscription.plan_code != "free",
+    ).exists()
+    premium_users = User.query.filter(
+        db.or_(User.is_premium.is_(True), premium_subscription)
+    ).count()
+    active_subscription_rows = db.session.query(
+        Subscription.plan_code, func.count(Subscription.id)
+    ).filter(
         Subscription.provider != "admin",
         Subscription.status.in_(("active", "trialing")),
         Subscription.current_period_end > datetime.utcnow(),
-    ).all()
+    ).group_by(Subscription.plan_code).all()
     user_plan_counts = {"premium_student": 0, "professional_single": 0, "professional_complete": 0}
-    for subscription in active_subscriptions:
-        if subscription.plan_code in user_plan_counts:
-            user_plan_counts[subscription.plan_code] += 1
-    premium_users = 0
-    professional_users = 0
-    banned_users = 0
-    admin_users = 0
-    active_users_ids = {
-        subject_id for subject_id, in db.session.query(AnalyticsEvent.subject_id).filter(
-            AnalyticsEvent.subject_id.isnot(None),
-            AnalyticsEvent.created_at >= period_start,
-            AnalyticsEvent.created_at <= period_end,
-        ).distinct()
-    }
-
-    for user in users:
-        if user.is_admin:
-            admin_users += 1
-        if user.is_banned:
-            banned_users += 1
-        if user.has_entitlement("premium"):
-            premium_users += 1
-        if user.is_professional:
-            professional_users += 1
-
+    for plan_code, count in active_subscription_rows:
+        if plan_code in user_plan_counts:
+            user_plan_counts[plan_code] = count
     return {
         "total_users": total_users,
-        "new_users": sum(1 for user in users if user.created_at and from_date <= user.created_at.date() <= to_date),
-        "active_users": len(active_users_ids),
+        "new_users": new_users,
+        "active_users": active_users,
         "admin_users": admin_users,
         "banned_users": banned_users,
         "premium_users": premium_users,
         "professional_users": professional_users,
-        "active_subscriptions": len(active_subscriptions),
+        "active_subscriptions": sum(user_plan_counts.values()),
         "active_subscription_plans": user_plan_counts,
     }
 
 
 def _build_admin_analytics_payload(from_date, to_date, bucket):
-    users = User.query.order_by(User.created_at.asc()).all()
-    summary = _admin_summary_counts(users, from_date, to_date)
+    summary = _admin_summary_counts(from_date, to_date)
     bucket_dates = _date_series(from_date, to_date, bucket)
 
     user_new_by_bucket = defaultdict(int)
     activity_by_bucket = defaultdict(lambda: {"diet_entries": 0, "measurements": 0, "chat_messages": 0, "workout_sessions": 0, "active_users": set()})
     subscription_by_bucket = defaultdict(lambda: {"premium_student": 0, "professional_single": 0, "professional_complete": 0})
 
-    for user in users:
-        if not user.created_at:
-            continue
-        key = _bucket_key(user.created_at, bucket)
-        if from_date <= key <= to_date:
-            user_new_by_bucket[key] += 1
+    if bucket == "day":
+        new_user_rows = db.session.query(
+            func.date(User.created_at), func.count(User.id)
+        ).filter(
+            User.created_at >= datetime.combine(from_date, datetime.min.time()),
+            User.created_at <= datetime.combine(to_date, datetime.max.time()),
+        ).group_by(func.date(User.created_at)).all()
+        for day, count in new_user_rows:
+            user_new_by_bucket[datetime.fromisoformat(day).date() if isinstance(day, str) else day] = count
+    else:
+        new_user_rows = User.query.with_entities(User.created_at).filter(
+            User.created_at >= datetime.combine(from_date, datetime.min.time()),
+            User.created_at <= datetime.combine(to_date, datetime.max.time()),
+        ).all()
+        for (created_at,) in new_user_rows:
+            user_new_by_bucket[_bucket_key(created_at, bucket)] += 1
 
     event_metrics = {
         "meal_logged": "diet_entries",
@@ -511,27 +606,40 @@ def _build_admin_analytics_payload(from_date, to_date, bucket):
         "ai_chat_completed": "chat_messages",
         "workout_finished": "workout_sessions",
     }
-    events = AnalyticsEvent.query.filter(
+    event_rows = db.session.query(
+        AnalyticsEvent.event_name,
+        func.date(AnalyticsEvent.created_at),
+        AnalyticsEvent.subject_id,
+        func.count(AnalyticsEvent.id),
+    ).filter(
         AnalyticsEvent.created_at >= datetime.combine(from_date, datetime.min.time()),
         AnalyticsEvent.created_at <= datetime.combine(to_date, datetime.max.time()),
+    ).group_by(
+        AnalyticsEvent.event_name, func.date(AnalyticsEvent.created_at), AnalyticsEvent.subject_id
     ).all()
-    for event in events:
-        key = _bucket_key(event.created_at, bucket)
-        metric_key = event_metrics.get(event.event_name)
+    for event_name, event_day, subject_id, count in event_rows:
+        event_day = datetime.fromisoformat(event_day).date() if isinstance(event_day, str) else event_day
+        key = _bucket_key(event_day, bucket)
+        metric_key = event_metrics.get(event_name)
         if metric_key:
-            activity_by_bucket[key][metric_key] += 1
-        if event.subject_id:
-            activity_by_bucket[key]["active_users"].add(event.subject_id)
+            activity_by_bucket[key][metric_key] += count
+        if subject_id:
+            activity_by_bucket[key]["active_users"].add(subject_id)
 
-    active_subscriptions = Subscription.query.filter(
+    subscription_rows = db.session.query(
+        Subscription.plan_code, func.date(Subscription.created_at), func.count(Subscription.id)
+    ).filter(
         Subscription.provider != "admin",
         Subscription.status.in_(("active", "trialing")),
         Subscription.current_period_end > datetime.utcnow(),
-    ).all()
-    for subscription in active_subscriptions:
-        key = _bucket_key(subscription.created_at or datetime.utcnow(), bucket)
-        if subscription.plan_code in subscription_by_bucket[key]:
-            subscription_by_bucket[key][subscription.plan_code] += 1
+        Subscription.created_at >= datetime.combine(from_date, datetime.min.time()),
+        Subscription.created_at <= datetime.combine(to_date, datetime.max.time()),
+    ).group_by(Subscription.plan_code, func.date(Subscription.created_at)).all()
+    for plan_code, created_day, count in subscription_rows:
+        created_day = datetime.fromisoformat(created_day).date() if isinstance(created_day, str) else created_day
+        key = _bucket_key(created_day, bucket)
+        if plan_code in subscription_by_bucket[key]:
+            subscription_by_bucket[key][plan_code] += count
 
     labels = []
     new_users_series = []
@@ -559,14 +667,16 @@ def _build_admin_analytics_payload(from_date, to_date, bucket):
             "professional_complete": subs["professional_complete"],
         })
 
-    applications = ProfessionalApplication.query.filter(
+    application_rows = db.session.query(
+        ProfessionalApplication.status, func.count(ProfessionalApplication.id)
+    ).filter(
         ProfessionalApplication.created_at >= datetime.combine(from_date, datetime.min.time()),
         ProfessionalApplication.created_at <= datetime.combine(to_date, datetime.max.time()),
-    ).all()
+    ).group_by(ProfessionalApplication.status).all()
     application_counts = {"pending": 0, "approved": 0, "rejected": 0}
-    for application in applications:
-        if application.status in application_counts:
-            application_counts[application.status] += 1
+    for status, count in application_rows:
+        if status in application_counts:
+            application_counts[status] = count
 
     return {
         "range": {"from": from_date.isoformat(), "to": to_date.isoformat(), "bucket": bucket},

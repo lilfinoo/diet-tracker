@@ -1,11 +1,11 @@
 import base64
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import uuid
 
 import pytest
 
-from src.models.user import AdminActionAudit, db, DietPlan, DietPlanMeal, Subscription, User, WorkoutExercise, WorkoutPlan
+from src.models.user import AdminActionAudit, AnalyticsEvent, db, DietPlan, DietPlanMeal, ProfessionalApplication, Subscription, User, WorkoutExercise, WorkoutPlan
 from src.services import ai
 from src.services.ai import (
     AIQuotaExceededError,
@@ -62,7 +62,69 @@ def test_admin_uuid_route(app, client):
     with app.app_context():
         audit = AdminActionAudit.query.one()
         assert audit.action == "user.banned"
-        assert audit.subject_user_id == target_id
+    assert audit.subject_user_id == target_id
+
+
+def test_admin_users_are_searchable_filterable_and_paginated(app, client):
+    register(client, "admin")
+    with app.app_context():
+        User.query.filter_by(username="admin").one().is_admin = True
+        for index in range(35):
+            db.session.add(User(username=f"member-{index:02d}", name=f"Member {index:02d}"))
+        db.session.add(User(username="premium-member", name="Premium Member", is_premium=True))
+        grant_user = User(username="admin-grant", name="Admin Grant")
+        db.session.add(grant_user)
+        db.session.flush()
+        db.session.add(Subscription(
+            user_id=grant_user.id, provider="admin", external_subscription_id="grant-premium-test",
+            status="active", plan_code="premium_student", current_period_end=None,
+        ))
+        db.session.commit()
+
+    first_page = client.get("/api/admin/users?limit=30&offset=0").get_json()
+    second_page = client.get("/api/admin/users?limit=30&offset=30").get_json()
+    assert first_page["total"] == 38
+    assert len(first_page["items"]) == 30
+    assert len(second_page["items"]) == 8
+    assert client.get("/api/admin/users?q=premium-member").get_json()["total"] == 1
+    premium = client.get("/api/admin/users?role=premium").get_json()
+    assert premium["total"] == 2
+    assert {user["username"] for user in premium["items"]} == {"premium-member", "admin-grant"}
+
+
+def test_admin_analytics_aggregates_events_and_csv(app, client):
+    register(client, "admin")
+    start = datetime(2026, 8, 1)
+    end = datetime(2026, 8, 3)
+    with app.app_context():
+        User.query.filter_by(username="admin").one().is_admin = True
+        user = User(username="active-member", created_at=start + timedelta(hours=1))
+        db.session.add(user)
+        db.session.flush()
+        db.session.add_all([
+            AnalyticsEvent(event_name="meal_logged", subject_id=user.analytics_subject_id, created_at=start + timedelta(hours=2)),
+            AnalyticsEvent(event_name="meal_logged", subject_id=user.analytics_subject_id, created_at=start + timedelta(hours=3)),
+            AnalyticsEvent(event_name="workout_finished", subject_id=user.analytics_subject_id, created_at=end + timedelta(hours=1)),
+            ProfessionalApplication(
+                user_id=user.id, plan_code="professional_single", full_name="Active Member",
+                profession="personal_trainer", registration_number="123", status="pending",
+                created_at=start + timedelta(hours=4),
+            ),
+        ])
+        db.session.commit()
+
+    params = "from=2026-08-01&to=2026-08-03&bucket=day"
+    payload = client.get(f"/api/admin/analytics?{params}").get_json()
+    assert payload["summary"]["total_users"] == 2
+    assert payload["summary"]["new_users"] == 1
+    assert payload["summary"]["active_users"] == 1
+    assert payload["series"]["activity"][0]["diet_entries"] == 2
+    assert payload["series"]["activity"][0]["active_users"] == 1
+    assert payload["series"]["activity"][2]["workout_sessions"] == 1
+    assert payload["breakdowns"]["applications"]["pending"] == 1
+    csv_response = client.get(f"/api/admin/analytics.csv?{params}")
+    assert csv_response.status_code == 200
+    assert "01/08,1,1,2" in csv_response.get_data(as_text=True)
 
 
 def test_admin_can_grant_and_revoke_premium(app, client):

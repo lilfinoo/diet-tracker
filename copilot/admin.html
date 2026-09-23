@@ -66,6 +66,7 @@
     .control { padding: 10px 14px; }
     .action, .tab { cursor: pointer; transition: .18s ease; }
     .action { padding: 10px 14px; font-weight: 700; }
+    .pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 14px; }
       .action.primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
     .action:hover, .tab:hover { transform: translateY(-1px); }
     .nav {
@@ -278,6 +279,7 @@
             <tbody id="usersTable"></tbody>
           </table>
         </div>
+        <div class="pagination" id="usersPagination"></div>
       </article>
     </section>
 
@@ -433,8 +435,14 @@
     const state = {
       analytics: null,
       users: [],
+      usersTotal: 0,
+      usersOffset: 0,
+      usersLimit: 30,
+      usersLoaded: false,
       applications: [],
+      applicationsLoaded: false,
       mediaQueue: [],
+      mediaQueueLoaded: false,
       currentPremiumUser: null,
       currentProfessionalUser: null,
       currentReview: null,
@@ -453,6 +461,7 @@
       distributionStats: document.getElementById('distributionStats'),
       recentActivity: document.getElementById('recentActivity'),
       usersTable: document.getElementById('usersTable'),
+      usersPagination: document.getElementById('usersPagination'),
       userSearch: document.getElementById('userSearch'),
       userRoleFilter: document.getElementById('userRoleFilter'),
       applicationStatusFilter: document.getElementById('applicationStatusFilter'),
@@ -699,14 +708,12 @@
     }
 
     function renderUsers() {
-      const q = els.userSearch.value.trim().toLowerCase();
-      const role = els.userRoleFilter.value;
-      const rows = state.users.filter(user => {
-        const matchText = !q || [user.name, user.email, user.username, user.id, user.plan_code, user.professional_scope].filter(Boolean).join(' ').toLowerCase().includes(q);
-        const matchRole = role === 'all' || (role === 'admins' && user.is_admin) || (role === 'premium' && user.is_premium) || (role === 'professional' && user.is_professional) || (role === 'banned' && user.is_banned);
-        return matchText && matchRole;
-      });
-      els.usersTable.innerHTML = rows.length ? rows.map(renderUserRow).join('') : '<tr><td colspan="5" class="empty">Nenhum usuário encontrado.</td></tr>';
+      els.usersTable.innerHTML = state.users.length ? state.users.map(renderUserRow).join('') : '<tr><td colspan="5" class="empty">Nenhum usuário encontrado.</td></tr>';
+      const page = Math.floor(state.usersOffset / state.usersLimit) + 1;
+      const pages = Math.max(1, Math.ceil(state.usersTotal / state.usersLimit));
+      els.usersPagination.innerHTML = `<button class="action small" id="usersPrevious"${state.usersOffset <= 0 ? ' disabled' : ''}>Anterior</button><span class="meta">Página ${page} de ${pages} · ${state.usersTotal} usuários</span><button class="action small" id="usersNext"${state.usersOffset + state.usersLimit >= state.usersTotal ? ' disabled' : ''}>Próxima</button>`;
+      document.getElementById('usersPrevious').addEventListener('click', () => { state.usersOffset = Math.max(0, state.usersOffset - state.usersLimit); loadUsers(); });
+      document.getElementById('usersNext').addEventListener('click', () => { state.usersOffset += state.usersLimit; loadUsers(); });
     }
 
     function renderApplications() {
@@ -753,20 +760,29 @@
     }
 
     async function loadUsers() {
-      state.users = await api('/admin/users');
+      els.usersTable.innerHTML = '<tr><td colspan="5" class="empty">Carregando usuários…</td></tr>';
+      const params = new URLSearchParams({ limit: String(state.usersLimit), offset: String(state.usersOffset), q: els.userSearch.value.trim(), role: els.userRoleFilter.value });
+      const data = await api(`/admin/users?${params}`);
+      state.users = data.items || [];
+      state.usersTotal = data.total || 0;
+      state.usersLoaded = true;
       renderUsers();
     }
 
     async function loadApplications() {
+      els.applicationsList.innerHTML = '<div class="empty">Carregando solicitações…</div>';
       const status = els.applicationStatusFilter.value;
       const qs = status === 'all' ? '' : `?status=${encodeURIComponent(status)}`;
       state.applications = await api(`/admin/professional-applications${qs}`);
+      state.applicationsLoaded = true;
       renderApplications();
     }
 
     async function loadMediaQueue() {
+      els.mediaQueue.innerHTML = '<div class="empty">Carregando fila de mídia…</div>';
       const data = await api('/admin/exercise-media/review');
       state.mediaQueue = data.items || [];
+      state.mediaQueueLoaded = true;
       renderMediaQueue();
     }
 
@@ -808,8 +824,9 @@
     async function loadAnalytics() {
       const { from, to } = currentRange();
       const bucket = currentBucket();
-      state.analytics = await api(`/admin/analytics?from=${from}&to=${to}&bucket=${bucket}`);
-      state.analytics.recent_activities = await api('/admin/recent_activity');
+      const [analytics, recentActivities] = await Promise.all([api(`/admin/analytics?from=${from}&to=${to}&bucket=${bucket}`), api('/admin/recent_activity')]);
+      state.analytics = analytics;
+      state.analytics.recent_activities = recentActivities;
       updateCsvLink();
       renderOverview();
     }
@@ -817,11 +834,17 @@
     async function loadAll() {
       const button = document.getElementById('refreshBtn');
       if (button) button.disabled = true;
+      const activeSection = document.querySelector('.section.active')?.id || 'overview';
+      const pending = [loadAnalytics()];
+      if (state.usersLoaded || activeSection === 'users') pending.push(loadUsers());
+      if (state.applicationsLoaded || activeSection === 'reviews') pending.push(loadApplications());
+      if (state.mediaQueueLoaded || activeSection === 'reviews') pending.push(loadMediaQueue());
       try {
-        await Promise.all([loadAnalytics(), loadUsers(), loadApplications(), loadMediaQueue()]);
+        const results = await Promise.allSettled(pending);
+        const failure = results.find(result => result.status === 'rejected');
+        if (failure) throw failure.reason;
       } catch (error) {
         showToast(error.message || 'Falha ao atualizar o painel');
-        throw error;
       } finally {
         if (button) button.disabled = false;
       }
@@ -870,7 +893,7 @@
       }
       await api(path, options);
       showToast('Usuário atualizado');
-      await loadUsers();
+      if (state.usersLoaded) await loadUsers();
       await loadAnalytics();
     }
 
@@ -891,7 +914,9 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision, note })
       });
       showToast(decision === 'approve' ? 'Solicitação aprovada' : 'Solicitação rejeitada');
-      await Promise.all([loadApplications(), loadUsers(), loadAnalytics()]);
+      const pending = [loadApplications(), loadAnalytics()];
+      if (state.usersLoaded) pending.push(loadUsers());
+      await Promise.all(pending);
     }
 
     async function loadMediaCandidates(catalogKey, query, replace = false) {
@@ -926,6 +951,16 @@
           const panel = document.getElementById(btn.dataset.section);
           panel.hidden = false;
           panel.classList.add('active');
+          if (btn.dataset.section === 'users' && !state.usersLoaded) loadUsers().catch(error => showToast(error.message || 'Falha ao carregar usuários'));
+          if (btn.dataset.section === 'reviews') {
+            const pending = [];
+            if (!state.applicationsLoaded) pending.push(loadApplications());
+            if (!state.mediaQueueLoaded) pending.push(loadMediaQueue());
+            Promise.allSettled(pending).then(results => {
+              const failure = results.find(result => result.status === 'rejected');
+              if (failure) showToast(failure.reason.message || 'Falha ao carregar revisões');
+            });
+          }
         });
         btn.addEventListener('keydown', event => {
           if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
@@ -950,8 +985,12 @@
       els.refreshBtn.addEventListener('click', loadAll);
       els.fromDate.addEventListener('change', loadAnalytics);
       els.toDate.addEventListener('change', loadAnalytics);
-      els.userSearch.addEventListener('input', renderUsers);
-      els.userRoleFilter.addEventListener('change', renderUsers);
+      let userSearchTimer;
+      els.userSearch.addEventListener('input', () => {
+        clearTimeout(userSearchTimer);
+        userSearchTimer = setTimeout(() => { state.usersOffset = 0; loadUsers().catch(error => showToast(error.message || 'Falha ao carregar usuários')); }, 250);
+      });
+      els.userRoleFilter.addEventListener('change', () => { state.usersOffset = 0; loadUsers().catch(error => showToast(error.message || 'Falha ao carregar usuários')); });
       els.applicationStatusFilter.addEventListener('change', loadApplications);
       els.mediaCacheImportBtn.addEventListener('click', () => els.mediaCacheImportInput.click());
       els.mediaCacheImportInput.addEventListener('change', () => importWorkoutXGifCache(els.mediaCacheImportInput.files));
@@ -1022,7 +1061,9 @@
         if (!saved) return;
         closePremiumModal();
         showToast('Premium concedido');
-        await Promise.all([loadUsers(), loadAnalytics()]);
+        const pending = [loadAnalytics()];
+        if (state.usersLoaded) pending.push(loadUsers());
+        await Promise.all(pending);
       });
       document.getElementById('closeProfessionalModal').addEventListener('click', () => els.professionalModal.classList.remove('show'));
       document.getElementById('cancelProfessional').addEventListener('click', () => els.professionalModal.classList.remove('show'));
@@ -1038,7 +1079,9 @@
         if (!saved) return;
         els.professionalModal.classList.remove('show');
         showToast('Profissional ativado');
-        await Promise.all([loadUsers(), loadAnalytics()]);
+        const pending = [loadAnalytics()];
+        if (state.usersLoaded) pending.push(loadUsers());
+        await Promise.all(pending);
       });
       document.getElementById('closeNoteModal').addEventListener('click', () => els.noteModal.classList.remove('show'));
       document.getElementById('cancelNote').addEventListener('click', () => els.noteModal.classList.remove('show'));
@@ -1054,7 +1097,11 @@
       wireModals();
       setPeriod(30);
       await refreshSession();
-      await loadAll();
+      try {
+        await loadAnalytics();
+      } catch (error) {
+        showToast(error.message || 'Falha ao carregar a visão geral');
+      }
     }
 
     init().catch(err => {
