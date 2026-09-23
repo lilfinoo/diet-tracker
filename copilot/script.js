@@ -3207,6 +3207,32 @@ let dietPlansLibraryLoaded = false;
 let dietDailySwipeGesture = null;
 let dietDailyActionsTrigger = null;
 
+function dietSurfaceView(surface) {
+    return surface === 'home' ? todayDietDay : dietDailyView;
+}
+
+function dietSurfaceDate(surface) {
+    return dietSurfaceView(surface)?.date || (surface === 'home' ? localDateInputValue() : dietDailyDate || localDateInputValue());
+}
+
+function dietSurfaceMutationKey(surface) {
+    return surface === 'home' ? todayDietMutationSlotKey : dietDailyMutationSlotKey;
+}
+
+function setDietSurfaceMutationKey(surface, slotKey) {
+    if (surface === 'home') todayDietMutationSlotKey = slotKey;
+    else dietDailyMutationSlotKey = slotKey;
+}
+
+function renderDietSurface(surface) {
+    if (surface === 'home') renderTodayCardapio(todayDietDay, null);
+    else renderDietDailyMeals();
+}
+
+function findDietSurfaceSlot(slotKey, surface) {
+    return (dietSurfaceView(surface)?.slots || []).find(slot => slot.slot_key === slotKey) || null;
+}
+
 function dietPlanItemText(item) {
     return window.formatDietPlanItem?.(item) || String(item || "");
 }
@@ -3357,31 +3383,14 @@ function renderTodayCardapio(dailyView, errorMessage) {
         return;
     }
     const slots = Array.isArray(dailyView?.slots) ? dailyView.slots : [];
-    const slot = slots.find(item => item.result === 'pending');
-    if (!slot) {
+    if (!slots.length) {
         if (!dailyView?.plan && renderPersonalizedHomeIntro()) return;
         const message = !dailyView?.plan ? 'Você pode registrar sua alimentação sem ter um plano.' : slots.length ? 'Todas as refeições planejadas de hoje já têm um resultado.' : 'Sem refeições previstas para hoje.';
         bodyEl.innerHTML = `<p class="today-muted">${message}</p>${register}`;
         return;
     }
-    const alternatives = Array.isArray(slot.alternatives) ? slot.alternatives : [];
-    const meal = alternatives.find(item => Number(item.id) === Number(slot.selected_plan_meal_id)) || alternatives[0];
-    if (!meal) {
-        bodyEl.innerHTML = `<p class="today-muted">Sem opção disponível para esta refeição.</p>${register}`;
-        return;
-    }
-    const optionPosition = alternatives.findIndex(item => Number(item.id) === Number(meal.id)) + 1;
-    const selectorOpen = todayDietOptionsSlotKey === slot.slot_key;
-    const selector = selectorOpen ? `<div class="today-meal-options" aria-label="Alternativas de ${escapeHtml(slot.label)}">${alternatives.map((option, index) => `
-        <button type="button" class="today-meal-option${Number(option.id) === Number(meal.id) ? ' is-selected' : ''}" onclick="selectTodayDietOption('${slot.slot_key}', ${Number(option.id)})" aria-pressed="${Number(option.id) === Number(meal.id)}">
-            <strong>Opção ${index + 1}</strong><span>${escapeHtml(dietPlanItemsText(option))}</span>
-        </button>`).join('')}</div>` : '';
-    const mutating = todayDietMutationSlotKey === slot.slot_key;
-    const disabled = mutating ? ' disabled' : '';
-    const primaryLabel = mutating
-        ? '<span class="today-action-spinner" aria-hidden="true"></span> Salvando...'
-        : '<i data-lucide="check" aria-hidden="true"></i> Comi isso';
-    bodyEl.innerHTML = `<div class="today-meal"><div class="today-meal__intro"><span class="today-meal__icon"><i data-lucide="${mealIconName(meal.meal_type)}" aria-hidden="true"></i></span><div><p class="today-muted">Opção ${optionPosition} de ${alternatives.length}</p><h3>${escapeHtml(slot.label || meal.meal_type)}</h3></div></div><p class="today-food-description">${escapeHtml(dietPlanItemsText(meal))}</p><button type="button" class="today-food-primary" onclick="quickLogDailyMeal('${slot.slot_key}', 'exact')"${disabled} aria-busy="${mutating}">${primaryLabel}</button><div class="today-food-secondary"><button type="button" class="text-button" onclick="quickLogDailyMeal('${slot.slot_key}', 'describe')"${disabled}>Comi diferente</button><button type="button" class="text-button diet-daily-skip" onclick="quickLogDailyMeal('${slot.slot_key}', 'skip')"${disabled}>Pular refeição</button>${alternatives.length > 1 ? `<button type="button" class="text-button" onclick="toggleTodayDietOptions('${slot.slot_key}')" aria-expanded="${selectorOpen}"${disabled}>Trocar opção</button>` : ''}</div>${selector}</div>`;
+    bodyEl.innerHTML = `<div class="today-diet-slots">${slots.map(slot => renderDietDailySlot(slot, 'home')).join('')}</div>${register}`;
+    window.lucide?.createIcons?.();
 }
 
 function renderDietCurrentPlanHub(plan, errorMessage) {
@@ -3419,89 +3428,19 @@ function findPlanMeal(mealId) {
     return (cardapioActivePlan.meals || []).find(meal => Number(meal.id) === Number(mealId)) || null;
 }
 
-function findTodayDietSlot(slotKey) {
-    return (todayDietDay?.slots || []).find(slot => slot.slot_key === slotKey) || null;
-}
-
 function toggleTodayDietOptions(slotKey) {
-    todayDietOptionsSlotKey = todayDietOptionsSlotKey === slotKey ? null : slotKey;
-    renderTodayCardapio(todayDietDay, null);
+    toggleDietDailyOptions(slotKey, 'home');
 }
 
 async function selectTodayDietOption(slotKey, mealId) {
-    if (todayDietMutationSlotKey) return;
-    const slot = findTodayDietSlot(slotKey);
-    if (!slot) return;
-    todayDietMutationSlotKey = slotKey;
-    renderTodayCardapio(todayDietDay, null);
-    try {
-        const response = await fetch(`${API_BASE}/diet/days/${encodeURIComponent(todayDietDay.date)}/slots/${encodeURIComponent(slotKey)}/selection`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({ diet_plan_meal_id: mealId })
-        });
-        if (!response.ok) {
-            const errorData = await response.json();
-            showToast(errorData.error || "Não foi possível trocar a opção.", "error");
-            return;
-        }
-        slot.selected_plan_meal_id = mealId;
-        todayDietOptionsSlotKey = null;
-        renderTodayCardapio(todayDietDay, null);
-    } catch (error) {
-        showToast("Erro de conexão!", "error");
-    } finally {
-        todayDietMutationSlotKey = null;
-        renderTodayCardapio(todayDietDay, null);
-    }
+    return selectDietDailyOption(slotKey, mealId, 'home');
 }
 
 async function quickLogDailyMeal(slotKey, mode) {
-    if (todayDietMutationSlotKey) return;
-    const slot = findTodayDietSlot(slotKey);
-    const meal = slot?.alternatives?.find(item => Number(item.id) === Number(slot.selected_plan_meal_id));
-    if (!slot || !meal) {
-        showToast("Refeição não encontrada.", "error");
-        return;
-    }
-    const entryType = cardapioMealTypeToEntry(meal.meal_type);
     if (mode === "describe") {
-        showAddDietModal();
-        pendingDietDailyContext = { slotKey, mealId: meal.id };
-    getElement('dietDate').disabled = true;
-    getElement('dietMeal').disabled = true;
-        getElement("dietDate").value = todayDietDay.date;
-        getElement("dietMeal").value = entryType;
-        getElement("dietDescription").value = "";
-        syncChoiceCards();
-        return;
+        return openDietDailyDifferent(slotKey, 'home');
     }
-    todayDietMutationSlotKey = slotKey;
-    renderTodayCardapio(todayDietDay, null);
-    try {
-        const response = await fetch(`${API_BASE}/diet/days/${encodeURIComponent(todayDietDay.date)}/slots/${encodeURIComponent(slotKey)}/outcome`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({
-                result: mode === "skip" ? "skipped" : "consumed_planned",
-                diet_plan_meal_id: meal.id
-            })
-        });
-        if (response.ok) {
-            showToast(mode === "skip" ? "Refeição marcada como pulada." : "Refeição registrada!", "success");
-            await loadTodayCardapio({ force: true });
-        } else {
-            const errorData = await response.json();
-            showToast(errorData.error || "Erro ao registrar!", "error");
-        }
-    } catch (error) {
-        showToast("Erro de conexão!", "error");
-    } finally {
-        todayDietMutationSlotKey = null;
-        if (todayDietDay) renderTodayCardapio(todayDietDay, null);
-    }
+    return setDietDailyOutcome(slotKey, mode === 'skip' ? 'skipped' : 'consumed_planned', 'home');
 }
 
 function dietDailyDateObject(value) {
@@ -3569,9 +3508,18 @@ function dailyMealMacros(entry) {
     return `<p class="diet-daily-slot__macros">${parts.join(' · ')}</p>`;
 }
 
-function renderDietDailyAlternatives(slot, selectedMeal) {
-    if (dietDailyOptionsSlotKey !== slot.slot_key) return '';
-    return `<div class="diet-daily-options" aria-label="Alternativas de ${escapeHtml(slot.label)}">${(slot.alternatives || []).map(meal => `<button type="button" class="diet-daily-option${Number(meal.id) === Number(selectedMeal?.id) ? ' is-selected' : ''}" onclick="selectDietDailyOption('${slot.slot_key}', ${Number(meal.id)})" aria-pressed="${Number(meal.id) === Number(selectedMeal?.id)}"><span><strong>Opção ${Number(meal.option) || 1}</strong><small>Dia ${Number(meal.option) || 1}</small></span><p>${escapeHtml(dietPlanItemsText(meal))}</p><i data-lucide="check" aria-hidden="true"></i></button>`).join('')}</div>`;
+function dietSurfaceOptionsKey(surface) {
+    return surface === 'home' ? todayDietOptionsSlotKey : dietDailyOptionsSlotKey;
+}
+
+function setDietSurfaceOptionsKey(surface, slotKey) {
+    if (surface === 'home') todayDietOptionsSlotKey = slotKey;
+    else dietDailyOptionsSlotKey = slotKey;
+}
+
+function renderDietDailyAlternatives(slot, selectedMeal, surface = 'diet') {
+    if (dietSurfaceOptionsKey(surface) !== slot.slot_key) return '';
+    return `<div class="diet-daily-options" aria-label="Alternativas de ${escapeHtml(slot.label)}">${(slot.alternatives || []).map(meal => `<button type="button" class="diet-daily-option${Number(meal.id) === Number(selectedMeal?.id) ? ' is-selected' : ''}" onclick="selectDietDailyOption('${slot.slot_key}', ${Number(meal.id)}, '${surface}')" aria-pressed="${Number(meal.id) === Number(selectedMeal?.id)}"><span><strong>Opção ${Number(meal.option) || 1}</strong><small>Dia ${Number(meal.option) || 1}</small></span><p>${escapeHtml(dietPlanItemsText(meal))}</p><i data-lucide="check" aria-hidden="true"></i></button>`).join('')}</div>`;
 }
 
 function closeDietDailyActions(restoreFocus = true) {
@@ -3591,7 +3539,8 @@ function handleDietDailyActionsKeydown(event) {
 }
 
 function openDietDailyActions(slotKey, trigger) {
-    const slot = (dietDailyView?.slots || []).find(item => item.slot_key === slotKey);
+    const surface = trigger?.closest('[data-diet-surface]')?.dataset.dietSurface || 'diet';
+    const slot = findDietSurfaceSlot(slotKey, surface);
     if (!slot || slot.result !== 'pending') return;
     closeDietDailyActions(false);
     dietDailyActionsTrigger = trigger || null;
@@ -3613,10 +3562,10 @@ function openDietDailyActions(slotKey, trigger) {
         const action = event.target.closest('[data-action]')?.dataset.action;
         if (action === 'different') {
             closeDietDailyActions(false);
-            openDietDailyDifferent(slotKey);
+            openDietDailyDifferent(slotKey, surface);
         } else if (action === 'options') {
             closeDietDailyActions(false);
-            toggleDietDailyOptions(slotKey);
+            toggleDietDailyOptions(slotKey, surface);
         }
     });
     document.body.appendChild(overlay);
@@ -3630,7 +3579,8 @@ function openDietDailyActions(slotKey, trigger) {
 }
 
 function startDietDailySwipe(event) {
-    if (!event.isPrimary || event.button > 0 || dietDailyMutationSlotKey) return;
+    const surface = event.currentTarget.dataset.dietSurface || 'diet';
+    if (!event.isPrimary || event.button > 0 || dietSurfaceMutationKey(surface)) return;
     if (event.target.closest('button, a, input, select, textarea, label')) return;
     const card = event.currentTarget;
     dietDailySwipeGesture = {
@@ -3642,6 +3592,7 @@ function startDietDailySwipe(event) {
         axis: null,
         startedAt: performance.now(),
         slotKey: card.dataset.slotKey,
+        surface,
         card
     };
 }
@@ -3693,7 +3644,7 @@ function endDietDailySwipe(event) {
     const result = gesture.deltaX > 0 ? 'skipped' : 'consumed_planned';
     gesture.card.classList.add(gesture.deltaX > 0 ? 'is-committing-right' : 'is-committing-left');
     gesture.card.parentElement?.classList.add(gesture.deltaX > 0 ? 'is-committing-right' : 'is-committing-left');
-    const complete = () => setDietDailyOutcome(gesture.slotKey, result);
+    const complete = () => setDietDailyOutcome(gesture.slotKey, result, gesture.surface);
     if (reducedMotion()) complete();
     else setTimeout(complete, 160);
 }
@@ -3708,17 +3659,17 @@ function cancelDietDailySwipe(event) {
     if (gesture.card.hasPointerCapture?.(gesture.pointerId)) gesture.card.releasePointerCapture(gesture.pointerId);
 }
 
-function renderDietDailySlot(slot) {
+function renderDietDailySlot(slot, surface = 'diet') {
     const meal = dailySlotSelectedMeal(slot);
     if (!meal) return '';
     const option = Number(meal.option) || 1;
-    const busy = dietDailyMutationSlotKey === slot.slot_key ? ' disabled' : '';
+    const busy = dietSurfaceMutationKey(surface) === slot.slot_key ? ' disabled' : '';
     const title = escapeHtml(slot.label || meal.meal_type || 'Refeição');
     const plannedText = escapeHtml(dietPlanItemsText(slot.planned_snapshot || meal));
     const actual = slot.entry;
     const icon = mealIconName(slot.label || meal.meal_type);
     if (slot.result === 'skipped') {
-        return `<article class="diet-daily-slot diet-daily-slot--compact"><span class="diet-daily-slot__icon"><i data-lucide="${icon}" aria-hidden="true"></i></span><div><h3>${title}</h3><p>Refeição pulada</p></div><span class="diet-daily-status diet-daily-status--skipped">Pulada</span><button type="button" class="text-button" onclick="resetDietDailySlot('${slot.slot_key}')"${busy}>Corrigir</button></article>`;
+        return `<article class="diet-daily-slot diet-daily-slot--compact"><span class="diet-daily-slot__icon"><i data-lucide="${icon}" aria-hidden="true"></i></span><div><h3>${title}</h3><p>Refeição pulada</p></div><span class="diet-daily-status diet-daily-status--skipped">Pulada</span><button type="button" class="text-button" onclick="resetDietDailySlot('${slot.slot_key}', '${surface}')"${busy}>Corrigir</button></article>`;
     }
     if (slot.result === 'consumed_planned') {
         return `<article class="diet-daily-slot diet-daily-slot--done"><header><span class="diet-daily-slot__icon"><i data-lucide="${icon}" aria-hidden="true"></i></span><div><h3>${title}</h3><p>Opção ${option} · Dia ${option}</p></div><span class="diet-daily-status diet-daily-status--done"><i data-lucide="check" aria-hidden="true"></i> Concluída</span></header><div class="diet-daily-actual"><span>Consumido</span><strong>${escapeHtml(actual?.description || plannedText)}</strong>${dailyMealMacros(actual)}</div><div class="diet-daily-slot__footer"><small>Conforme a opção planejada</small><div class="diet-daily-slot__record-actions"><button type="button" class="text-button" onclick="editDietEntry(${Number(actual?.id)})">Corrigir registro</button><button type="button" class="text-button diet-daily-skip" onclick="deleteDietEntry(${Number(actual?.id)})">Excluir registro</button></div></div></article>`;
@@ -3727,7 +3678,7 @@ function renderDietDailySlot(slot) {
         return `<article class="diet-daily-slot diet-daily-slot--done"><header><span class="diet-daily-slot__icon"><i data-lucide="${icon}" aria-hidden="true"></i></span><div><h3>${title}</h3><p>Opção ${option} · Dia ${option}</p></div><span class="diet-daily-status diet-daily-status--done"><i data-lucide="check" aria-hidden="true"></i> Registrada</span></header><div class="diet-daily-actual"><span>Você consumiu</span><strong>${escapeHtml(actual?.description || 'Consumo registrado')}</strong>${dailyMealMacros(actual)}</div><div class="diet-daily-planned"><span>Estava previsto</span><p>${plannedText}</p></div><div class="diet-daily-slot__footer"><span></span><div class="diet-daily-slot__record-actions"><button type="button" class="text-button" onclick="editDietEntry(${Number(actual?.id)})">Corrigir registro</button><button type="button" class="text-button diet-daily-skip" onclick="deleteDietEntry(${Number(actual?.id)})">Excluir registro</button></div></div></article>`;
     }
     const alternatives = slot.alternatives || [];
-    return `<div class="diet-daily-swipe"><div class="diet-daily-swipe__action diet-daily-swipe__action--skip" aria-hidden="true"><i data-lucide="forward" aria-hidden="true"></i><span>Pular refeição</span></div><div class="diet-daily-swipe__action diet-daily-swipe__action--consumed" aria-hidden="true"><span>Marcar como consumida</span><i data-lucide="check" aria-hidden="true"></i></div><article class="diet-daily-slot diet-daily-slot__surface" data-slot-key="${slot.slot_key}" onpointerdown="startDietDailySwipe(event)" onpointermove="moveDietDailySwipe(event)" onpointerup="endDietDailySwipe(event)" onpointercancel="cancelDietDailySwipe(event)"><header><span class="diet-daily-slot__icon"><i data-lucide="${icon}" aria-hidden="true"></i></span><div><h3>${title}</h3><p>Opção ${option} de ${alternatives.length} · Dia ${option}</p></div><div class="diet-daily-slot__header-actions"><span class="diet-daily-status">Pendente</span><button type="button" class="diet-daily-more" onclick="openDietDailyActions('${slot.slot_key}', this)" aria-label="Mais opções para ${title}" aria-haspopup="dialog"${busy}><i data-lucide="ellipsis" aria-hidden="true"></i></button></div></header><p class="diet-daily-slot__food">${escapeHtml(dietPlanItemsText(meal))}</p><div class="diet-daily-swipe__hint" aria-hidden="true"><span><i data-lucide="arrow-left" aria-hidden="true"></i> Consumida</span><span>Pular <i data-lucide="arrow-right" aria-hidden="true"></i></span></div>${renderDietDailyAlternatives(slot, meal)}</article></div>`;
+    return `<div class="diet-daily-swipe"><div class="diet-daily-swipe__action diet-daily-swipe__action--skip" aria-hidden="true"><i data-lucide="forward" aria-hidden="true"></i><span>Pular refeição</span></div><div class="diet-daily-swipe__action diet-daily-swipe__action--consumed" aria-hidden="true"><span>Marcar como consumida</span><i data-lucide="check" aria-hidden="true"></i></div><article class="diet-daily-slot diet-daily-slot__surface" data-slot-key="${slot.slot_key}" data-diet-surface="${surface}" onpointerdown="startDietDailySwipe(event)" onpointermove="moveDietDailySwipe(event)" onpointerup="endDietDailySwipe(event)" onpointercancel="cancelDietDailySwipe(event)"><header><span class="diet-daily-slot__icon"><i data-lucide="${icon}" aria-hidden="true"></i></span><div><h3>${title}</h3><p>Opção ${option} de ${alternatives.length} · Dia ${option}</p></div><div class="diet-daily-slot__header-actions"><span class="diet-daily-status">Pendente</span><button type="button" class="diet-daily-more" onclick="openDietDailyActions('${slot.slot_key}', this)" aria-label="Mais opções para ${title}" aria-haspopup="dialog"${busy}><i data-lucide="ellipsis" aria-hidden="true"></i></button></div></header><p class="diet-daily-slot__food">${escapeHtml(dietPlanItemsText(meal))}</p><div class="diet-daily-swipe__hint" aria-hidden="true"><span><i data-lucide="arrow-left" aria-hidden="true"></i> Consumida</span><span>Pular <i data-lucide="arrow-right" aria-hidden="true"></i></span></div>${renderDietDailyAlternatives(slot, meal, surface)}</article></div>`;
 }
 
 function renderDietDailyManualEntry(entry) {
@@ -3747,7 +3698,7 @@ function renderDietDailyMeals(errorMessage = '') {
         container.innerHTML = '<div class="diet-daily-empty"><span class="diet-daily-slot__icon"><i data-lucide="utensils" aria-hidden="true"></i></span><div><strong>Nenhuma refeição registrada</strong><p>Use “Registrar outra refeição” quando quiser adicionar o que consumiu.</p></div></div>';
         return;
     }
-    container.innerHTML = `${slots.map(renderDietDailySlot).join('')}${manual.length ? `<div class="diet-daily-additional"><h3>Outras refeições</h3>${manual.map(renderDietDailyManualEntry).join('')}</div>` : ''}`;
+    container.innerHTML = `${slots.map(slot => renderDietDailySlot(slot, 'diet')).join('')}${manual.length ? `<div class="diet-daily-additional"><h3>Outras refeições</h3>${manual.map(renderDietDailyManualEntry).join('')}</div>` : ''}`;
 }
 
 function renderDietDailyPlan() {
@@ -3825,17 +3776,19 @@ function showAddDietModalForDailyDate() {
     getElement('dietDate').value = dietDailyDate || localDateInputValue();
 }
 
-function toggleDietDailyOptions(slotKey) {
-    dietDailyOptionsSlotKey = dietDailyOptionsSlotKey === slotKey ? null : slotKey;
-    renderDietDailyMeals();
+function toggleDietDailyOptions(slotKey, surface = 'diet') {
+    setDietSurfaceOptionsKey(surface, dietSurfaceOptionsKey(surface) === slotKey ? null : slotKey);
+    renderDietSurface(surface);
 }
 
-async function selectDietDailyOption(slotKey, mealId) {
-    if (dietDailyMutationSlotKey) return;
-    dietDailyMutationSlotKey = slotKey;
-    renderDietDailyMeals();
+async function selectDietDailyOption(slotKey, mealId, surface = 'diet') {
+    if (dietSurfaceMutationKey(surface)) return;
+    const slot = findDietSurfaceSlot(slotKey, surface);
+    if (!slot) return;
+    setDietSurfaceMutationKey(surface, slotKey);
+    renderDietSurface(surface);
     try {
-        const response = await fetch(`${API_BASE}/diet/days/${encodeURIComponent(dietDailyDate)}/slots/${encodeURIComponent(slotKey)}/selection`, {
+        const response = await fetch(`${API_BASE}/diet/days/${encodeURIComponent(dietSurfaceDate(surface))}/slots/${encodeURIComponent(slotKey)}/selection`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
             body: JSON.stringify({ diet_plan_meal_id: mealId })
         });
@@ -3843,39 +3796,40 @@ async function selectDietDailyOption(slotKey, mealId) {
             const data = await response.json().catch(() => ({}));
             throw new Error(data.error || 'Não foi possível trocar a opção.');
         }
-        dietDailyOptionsSlotKey = null;
-        await refreshDietDailySurfaces();
+        slot.selected_plan_meal_id = mealId;
+        setDietSurfaceOptionsKey(surface, null);
+        await refreshDietDailySurfaces(surface === 'home');
     } catch (error) {
         showToast(error.message, 'error');
     } finally {
-        dietDailyMutationSlotKey = null;
-        if (dietDailyView) renderDietDailyMeals();
+        setDietSurfaceMutationKey(surface, null);
+        renderDietSurface(surface);
     }
 }
 
-function openDietDailyDifferent(slotKey) {
-    const slot = (dietDailyView?.slots || []).find(item => item.slot_key === slotKey);
+function openDietDailyDifferent(slotKey, surface = 'diet') {
+    const slot = findDietSurfaceSlot(slotKey, surface);
     const meal = dailySlotSelectedMeal(slot);
     if (!slot || !meal) return;
     showAddDietModal();
     pendingDietDailyContext = { slotKey, mealId: meal.id };
     getElement('dietDate').disabled = true;
     getElement('dietMeal').disabled = true;
-    getElement('dietDate').value = dietDailyDate;
+    getElement('dietDate').value = dietSurfaceDate(surface);
     getElement('dietMeal').value = cardapioMealTypeToEntry(meal.meal_type);
     getElement('dietDescription').value = '';
     syncChoiceCards();
 }
 
-async function setDietDailyOutcome(slotKey, result) {
-    if (dietDailyMutationSlotKey) return;
-    const slot = (dietDailyView?.slots || []).find(item => item.slot_key === slotKey);
+async function setDietDailyOutcome(slotKey, result, surface = 'diet') {
+    if (dietSurfaceMutationKey(surface)) return;
+    const slot = findDietSurfaceSlot(slotKey, surface);
     const meal = dailySlotSelectedMeal(slot);
     if (!slot || !meal) return;
-    dietDailyMutationSlotKey = slotKey;
-    renderDietDailyMeals();
+    setDietSurfaceMutationKey(surface, slotKey);
+    renderDietSurface(surface);
     try {
-        const response = await fetch(`${API_BASE}/diet/days/${encodeURIComponent(dietDailyDate)}/slots/${encodeURIComponent(slotKey)}/outcome`, {
+        const response = await fetch(`${API_BASE}/diet/days/${encodeURIComponent(dietSurfaceDate(surface))}/slots/${encodeURIComponent(slotKey)}/outcome`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
             body: JSON.stringify({ result, diet_plan_meal_id: meal.id })
         });
@@ -3887,44 +3841,45 @@ async function setDietDailyOutcome(slotKey, result) {
             showToast('Refeição marcada como pulada.', 'success', {
                 actionLabel: 'Desfazer',
                 duration: 5000,
-                onAction: () => resetDietDailySlot(slotKey)
+                onAction: () => resetDietDailySlot(slotKey, surface)
             });
         } else {
             showToast('Refeição registrada!', 'success');
         }
-        await refreshDietDailySurfaces();
+        await refreshDietDailySurfaces(surface === 'home');
     } catch (error) {
         showToast(error.message, 'error');
     } finally {
-        dietDailyMutationSlotKey = null;
-        if (dietDailyView) renderDietDailyMeals();
+        setDietSurfaceMutationKey(surface, null);
+        renderDietSurface(surface);
     }
 }
 
-async function resetDietDailySlot(slotKey) {
-    if (dietDailyMutationSlotKey) return;
-    dietDailyMutationSlotKey = slotKey;
+async function resetDietDailySlot(slotKey, surface = 'diet') {
+    if (dietSurfaceMutationKey(surface)) return;
+    setDietSurfaceMutationKey(surface, slotKey);
     try {
-        const response = await fetch(`${API_BASE}/diet/days/${encodeURIComponent(dietDailyDate)}/slots/${encodeURIComponent(slotKey)}/outcome`, {
+        const response = await fetch(`${API_BASE}/diet/days/${encodeURIComponent(dietSurfaceDate(surface))}/slots/${encodeURIComponent(slotKey)}/outcome`, {
             method: 'DELETE', credentials: 'include'
         });
         if (!response.ok) {
             const data = await response.json().catch(() => ({}));
             throw new Error(data.error || 'Não foi possível reabrir a refeição.');
         }
-        await refreshDietDailySurfaces();
+        await refreshDietDailySurfaces(surface === 'home');
     } catch (error) {
         showToast(error.message, 'error');
     } finally {
-        dietDailyMutationSlotKey = null;
+        setDietSurfaceMutationKey(surface, null);
+        renderDietSurface(surface);
     }
 }
 
-async function refreshDietDailySurfaces() {
+async function refreshDietDailySurfaces(includeHome = false) {
     window.AppReadCache.invalidate('diet:');
     await Promise.all([
         loadDietDailyScreen(dietDailyDate || localDateInputValue()),
-        dietDailyDate === localDateInputValue() ? loadTodayCardapio() : Promise.resolve()
+        includeHome || dietDailyDate === localDateInputValue() ? loadTodayCardapio({ force: true }) : Promise.resolve()
     ]);
 }
 

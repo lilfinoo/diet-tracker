@@ -13997,6 +13997,7 @@ body:has(#dietTab.today-authenticated:not(.hidden)) .app-header { display: none;
     cursor: pointer;
 }
 .diet-daily-meals__list { display: grid; gap: 0.7rem; }
+.today-diet-slots { display: grid; gap: 0.7rem; }
 .diet-daily-slot {
     padding: 1rem;
     border: 1px solid rgba(148, 163, 184, 0.15);

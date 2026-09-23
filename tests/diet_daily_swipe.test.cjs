@@ -9,6 +9,10 @@ const gestureSource = source.slice(
     source.indexOf('function closeDietDailyActions'),
     source.indexOf('function renderDietDailySlot')
 );
+const surfaceMutationHelper = source.slice(
+    source.indexOf('function dietSurfaceMutationKey'),
+    source.indexOf('function setDietSurfaceMutationKey')
+);
 
 function harness() {
     const outcomes = [];
@@ -27,23 +31,26 @@ function harness() {
         setTimeout: callback => { callback(); return 1; },
         reducedMotion: () => false,
         escapeHtml: String,
+        todayDietDay: { slots: [] },
+        todayDietMutationSlotKey: null,
+        todayDietOptionsSlotKey: null,
         dietDailyView: { slots: [] },
         dietDailyMutationSlotKey: null,
         dietDailyOptionsSlotKey: null,
         openDietDailyDifferent() {},
         toggleDietDailyOptions() {},
-        setDietDailyOutcome: (slotKey, result) => outcomes.push({ slotKey, result })
+        setDietDailyOutcome: (slotKey, result, surface) => outcomes.push(surface === 'home' ? { slotKey, result, surface } : { slotKey, result })
     };
     vm.createContext(context);
-    vm.runInContext(`let dietDailySwipeGesture = null; let dietDailyActionsTrigger = null; ${gestureSource}; this.api = { startDietDailySwipe, moveDietDailySwipe, endDietDailySwipe, cancelDietDailySwipe };`, context);
+    vm.runInContext(`let dietDailySwipeGesture = null; let dietDailyActionsTrigger = null; ${surfaceMutationHelper}; ${gestureSource}; this.api = { startDietDailySwipe, moveDietDailySwipe, endDietDailySwipe, cancelDietDailySwipe };`, context);
     return { api: context.api, outcomes, setNow: value => { now = value; } };
 }
 
-function card() {
+function card(surface = 'diet') {
     const classes = new Set();
     const styles = new Map();
     return {
-        dataset: { slotKey: 'almoco' },
+        dataset: { slotKey: 'almoco', dietSurface: surface },
         classList: {
             add: (...names) => names.forEach(name => classes.add(name)),
             remove: (...names) => names.forEach(name => classes.delete(name)),
@@ -101,6 +108,12 @@ test('swipe horizontal para a esquerda reutiliza o resultado consumed_planned', 
     assert.equal(surface.classes.has('is-committing-left'), true);
 });
 
+test('swipe na Home envia o resultado para a superfície Home', () => {
+    const { api, outcomes, setNow } = harness();
+    swipe(api, card('home'), -100, 3, setNow);
+    assert.deepEqual(outcomes, [{ slotKey: 'almoco', result: 'consumed_planned', surface: 'home' }]);
+});
+
 test('scroll vertical e gesto diagonal não são capturados nem disparam ações', () => {
     for (const [dx, dy] of [[5, 90], [90, 90]]) {
         const { api, outcomes, setNow } = harness();
@@ -129,10 +142,15 @@ test('gesto iniciado sobre um botão é ignorado', () => {
 
 test('card pendente expõe menu e reaproveita os fluxos existentes', () => {
     const pendingTemplate = source.slice(source.indexOf('function renderDietDailySlot'), source.indexOf('function renderDietDailyManualEntry'));
+    const homeRenderer = source.slice(source.indexOf('function renderTodayCardapio'), source.indexOf('function setCardapioDay'));
+    const dietRenderer = source.slice(source.indexOf('function renderDietDailyMeals'), source.indexOf('function renderDietDailyPlan'));
     assert.match(pendingTemplate, /openDietDailyActions/);
     assert.doesNotMatch(pendingTemplate, /diet-daily-primary/);
-    assert.match(gestureSource, /openDietDailyDifferent\(slotKey\)/);
-    assert.match(gestureSource, /toggleDietDailyOptions\(slotKey\)/);
+    assert.match(pendingTemplate, /data-diet-surface="\$\{surface\}"/);
+    assert.match(homeRenderer, /slots\.map\(slot => renderDietDailySlot\(slot, 'home'\)\)/);
+    assert.match(dietRenderer, /slots\.map\(slot => renderDietDailySlot\(slot, 'diet'\)\)/);
+    assert.match(gestureSource, /openDietDailyDifferent\(slotKey, surface\)/);
+    assert.match(gestureSource, /toggleDietDailyOptions\(slotKey, surface\)/);
     assert.match(source, /actionLabel: 'Desfazer'/);
-    assert.match(source, /onAction: \(\) => resetDietDailySlot\(slotKey\)/);
+    assert.match(source, /onAction: \(\) => resetDietDailySlot\(slotKey, surface\)/);
 });
