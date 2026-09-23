@@ -125,14 +125,19 @@
                     <div id="googleAuthSection" class="google-auth hidden">
                         <div class="auth-divider"><span>ou continue com</span></div>
                         <div id="googleSignInButton" class="google-signin-button"></div>
-                        <form id="googleUsernameForm" class="auth-form google-username-form hidden">
-                            <p>Escolha o nome que será mostrado na sua conta.</p>
+                    </div>
+
+                    <section id="googleSignupStep" class="google-signup-step hidden" aria-labelledby="googleSignupTitle">
+                        <button type="button" class="google-signup-back" onclick="backFromGoogleSignup()"><i class="fas fa-arrow-left" aria-hidden="true"></i> Voltar</button>
+                        <h2 id="googleSignupTitle">Quase lá!</h2>
+                        <p>Agora escolha seu nome de usuário. Ele será usado para identificar seu perfil no Fit Tracker.</p>
+                        <form id="googleUsernameForm" class="auth-form google-username-form">
                             <label for="googleUsername">Nome de usuário</label>
                             <input type="text" id="googleUsername" autocomplete="username" maxlength="80" required placeholder="Como você quer ser chamado?">
                             <label class="legal-check"><input type="checkbox" id="googleAiConsent"><span>Concordo com o envio dos dados que eu fornecer a recursos de IA. Posso revogar depois.</span></label>
                             <button type="submit" id="googleSignupSubmit" class="btn-primary btn-primary--block">Concluir cadastro</button>
                         </form>
-                    </div>
+                    </section>
                     
                     <div id="authMessage" class="message" role="status" aria-live="polite"></div>
             </div>
@@ -263,7 +268,6 @@
                     <button id="professionalPanelBtn" class="professional-header-button hidden" onclick="showTab('professional')"><i class="fas fa-user-tie" aria-hidden="true"></i><span>Área profissional</span></button>
                     <button id="networkHeaderButton" class="header-icon-button hidden" onclick="openNetworkCenter()" aria-label="Abrir rede e solicitações"><i class="fas fa-users"></i><span id="networkRequestCount" class="network-request-count hidden">0</span></button>
                     <button id="userHeaderButton" class="header-icon-button hidden" onclick="showTab('stats')" aria-label="Abrir perfil">
-                        <img id="headerUserAvatar" class="user-avatar-image hidden" alt="">
                         <span id="headerUserInitial" class="user-initial">U</span>
                     </button>
                 </div>
@@ -293,7 +297,7 @@
                     <div id="homeRefreshContent" class="home-refresh-content">
                     <header class="today-heading">
                         <div><h1>Hoje</h1><p id="homeDate"></p></div>
-                        <button class="home-greeting__avatar" type="button" onclick="showTab('stats')" aria-label="Abrir conta"><img id="homeUserAvatar" class="user-avatar-image hidden" alt=""><span id="homeUserInitial">U</span></button>
+                        <button class="home-greeting__avatar" type="button" onclick="showTab('stats')" aria-label="Abrir conta"><span id="homeUserInitial">U</span></button>
                     </header>
                     <section id="todayNutrition" class="today-nutrition hidden" aria-label="Nutrição registrada hoje" aria-live="polite">
                         <header class="today-nutrition__heading">
@@ -504,7 +508,7 @@
                         <header class="profile-page-heading"><span class="content-kicker">Seu espaço</span><h1>Perfil <small class="app-version">v1.1.2</small></h1></header>
                         <section class="profile-identity-card">
                             <div class="profile-identity-card__top">
-                                <button type="button" class="profile-identity-avatar" onclick="openNetworkCenter('settings')" aria-label="Alterar foto de perfil"><img id="profileUserAvatar" class="user-avatar-image hidden" alt=""><span id="profileUserInitial">U</span><span class="profile-avatar-camera"><i data-lucide="camera" aria-hidden="true"></i></span></button>
+                                <div class="profile-identity-avatar" aria-hidden="true"><span id="profileUserInitial">U</span></div>
                                 <div class="profile-identity-copy"><h2 id="profileUserName">Perfil</h2><p id="profileMembership">Plano gratuito</p></div>
                             </div>
                             <div id="profileBadges" class="profile-badges" aria-live="polite"></div>
@@ -588,7 +592,6 @@
             <div class="modal-content network-sheet">
                 <div class="modal-header"><div><span class="content-kicker">Sua rede</span><h3 id="networkModalTitle">Pessoas e solicitações</h3><p>Seu perfil público não expõe dieta, medidas ou histórico de saúde.</p></div><button type="button" class="btn-close" onclick="closeAppModal(document.getElementById('networkModal'))" aria-label="Fechar">&times;</button></div>
                 <div class="network-settings">
-                    <div class="network-avatar-editor"><img id="networkAvatarPreview" class="hidden" alt="Sua foto"><span id="networkAvatarFallback">U</span><button id="networkAvatarChoose" type="button" class="btn-secondary">Escolher foto</button><input id="networkAvatarInput" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" hidden><button id="networkAvatarRemove" type="button" class="btn-link">Remover</button></div>
                     <label class="legal-check"><input id="publicProfileToggle" type="checkbox"><span>Permitir que outros usuários encontrem meu perfil</span></label>
                     <label id="externalReviewsSetting" class="legal-check hidden"><input id="externalReviewsToggle" type="checkbox"><span>Aceitar revisões avulsas de treino</span></label>
                     <label id="externalDietReviewsSetting" class="legal-check hidden"><input id="externalDietReviewsToggle" type="checkbox"><span>Aceitar revisões avulsas de dieta</span></label>

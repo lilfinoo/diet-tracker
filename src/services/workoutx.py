@@ -6,6 +6,7 @@ import time
 import re
 import threading
 import unicodedata
+from functools import lru_cache
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -232,6 +233,46 @@ def search_exercises(query):
             "equipment": str(item.get("equipment", ""))[:100],
         })
     return results
+
+
+@lru_cache(maxsize=512)
+def _cached_recommendations(provider_id, kind):
+    if kind not in {"similar", "alternatives"}:
+        raise WorkoutXServiceError("Invalid WorkoutX recommendation type")
+    response = _request(
+        f"{BASE_URL}/exercises/{quote(provider_id)}/{kind}?limit=10"
+    )
+    try:
+        payload = json.loads(response)
+    except json.JSONDecodeError as error:
+        raise WorkoutXServiceError("WorkoutX returned invalid recommendation data") from error
+    entries = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(entries, list):
+        raise WorkoutXServiceError("WorkoutX returned unexpected recommendation data")
+
+    score_key = "similarityScore" if kind == "similar" else "alternativeScore"
+    results = []
+    for item in entries:
+        if not isinstance(item, dict) or not item.get("id"):
+            continue
+        try:
+            provider_id = _provider_id(item["id"])
+            score = float(item.get(score_key, 0))
+        except (WorkoutXServiceError, TypeError, ValueError):
+            continue
+        results.append({
+            "id": provider_id,
+            "name": str(item.get("name", ""))[:200],
+            "equipment": str(item.get("equipment", ""))[:100],
+            "target": str(item.get("target", ""))[:100],
+            "score": score,
+        })
+    return tuple(results)
+
+
+def recommended_exercises(provider_id, kind):
+    provider_id = _provider_id(provider_id)
+    return list(_cached_recommendations(provider_id, kind))
 
 
 def _normalized(value):
@@ -614,6 +655,7 @@ def import_exercises():
     return len(selected)
 
 
+@lru_cache(maxsize=512)
 def get_exercise(provider_id):
     provider_id = _provider_id(provider_id)
     try:

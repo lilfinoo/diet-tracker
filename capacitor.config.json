@@ -7,6 +7,6 @@
   },
   "ios": {
     "loggingBehavior": "none",
-    "zoomEnabled": true
+    "zoomEnabled": false
   }
 }

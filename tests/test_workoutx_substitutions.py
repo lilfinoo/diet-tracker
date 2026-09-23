@@ -155,6 +155,39 @@ def test_workoutx_replacement_weight_fits_persisted_field_limit(app):
     assert len(options[0]["weight"]) <= WorkoutSessionExerciseOverride.weight.type.length
 
 
+def test_workoutx_replacements_add_bodyweight_and_free_weight_recommendations(app, monkeypatch):
+    source = workout_exercise("1", "Cable Seated Row")
+    with app.app_context():
+        app.config["WORKOUTX_API_KEY"] = "wx_test"
+        db.session.add(WorkoutXExercise(
+            provider_id="1",
+            data=active_exercise("1", "Cable Seated Row", "Lats", "Cable"),
+        ))
+        db.session.commit()
+
+        monkeypatch.setattr(
+            "src.services.workoutx.recommended_exercises",
+            lambda _provider_id, kind: ([
+                {"id": "2", "name": "Bodyweight Standing Row", "equipment": "Body Weight", "target": "Lats", "score": 95},
+            ] if kind == "similar" else [
+                {"id": "3", "name": "Dumbbell One Arm Row", "equipment": "Dumbbell", "target": "Lats", "score": 90},
+            ]),
+        )
+        monkeypatch.setattr(
+            "src.services.workoutx.get_exercise",
+            lambda provider_id: active_exercise(
+                provider_id,
+                "Bodyweight Standing Row" if provider_id == "2" else "Dumbbell One Arm Row",
+                "Lats",
+                "Body Weight" if provider_id == "2" else "Dumbbell",
+            ),
+        )
+
+        options = replacement_options(source, present_exercises=[source])
+
+    assert {option["equipment"] for option in options} >= {"Body Weight", "Dumbbell"}
+
+
 def test_legacy_replacement_keeps_the_movement_when_primary_muscle_labels_differ(app):
     source = workout_exercise("legacy", "Rosca martelo", "rosca_martelo")
 

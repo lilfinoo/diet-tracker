@@ -89,6 +89,11 @@
     "provider_id": "0351",
     "provider_name": "Dumbbell Lying Triceps Extension"
   },
+  "puxada_com_elastico": {
+    "provider_equipment": "Band",
+    "provider_id": "0974",
+    "provider_name": "Band Close-grip Pulldown"
+  },
   "elevacao_lateral_maquina": {
     "provider_equipment": "Leverage Machine",
     "provider_id": "0584",

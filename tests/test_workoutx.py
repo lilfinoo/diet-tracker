@@ -56,6 +56,11 @@ def test_examples_use_only_workoutx_gifs(app):
             "provider_id": "0351",
             "provider_name": "Dumbbell Lying Triceps Extension",
         }
+        assert workoutx.approved_media("puxada_com_elastico") == {
+            "provider_equipment": "Band",
+            "provider_id": "0974",
+            "provider_name": "Band Close-grip Pulldown",
+        }
 
         from src.services.workout_plans import catalog_by_key
 
@@ -145,6 +150,30 @@ def test_workoutx_search_discards_unsafe_provider_ids(app, monkeypatch):
         assert workoutx.search_exercises("press") == [
             {"id": "123", "name": "Safe", "equipment": ""}
         ]
+
+
+def test_workoutx_recommendation_endpoints_parse_ranked_ids(app, monkeypatch):
+    calls = []
+
+    def request(url):
+        calls.append(url)
+        if url.endswith("/similar?limit=10"):
+            return b'{"data":[{"id":"1234","name":"Row","equipment":"Dumbbell","target":"Lats","similarityScore":91}]}'
+        return b'{"data":[{"id":"5678","name":"Bodyweight Row","equipment":"Body Weight","target":"Lats","alternativeScore":87}]}'
+
+    workoutx._cached_recommendations.cache_clear()
+    monkeypatch.setattr(workoutx, "_request", request)
+    with app.app_context():
+        similar = workoutx.recommended_exercises("9999", "similar")
+        alternatives = workoutx.recommended_exercises("9999", "alternatives")
+
+    assert similar[0]["score"] == 91
+    assert alternatives[0]["score"] == 87
+    assert calls == [
+        "https://api.workoutxapp.com/v1/exercises/9999/similar?limit=10",
+        "https://api.workoutxapp.com/v1/exercises/9999/alternatives?limit=10",
+    ]
+    workoutx._cached_recommendations.cache_clear()
 
 
 def test_workoutx_imports_every_page_and_updates_existing_records(app, monkeypatch):

@@ -93,18 +93,20 @@ test('cancel, lost capture, second finger, ambiguity and pending state never sav
     s.pendingAction='complete-100'; swipe(api,surface,-90,0);
     await tick(); assert.equal(calls.length,0); assert.equal(api.gesture(),null);
 });
-test('a left horizontal gesture completes the current exercise and advances without waiting for the server', async()=>{
-    const {api,s,c,calls}=harness();
+test('a left horizontal gesture completes the current exercise and advances before a slow server responds', async()=>{
+    const {api,s,c,calls}=harness(); let resolveServer;
     s.setDrafts.set('100',[{load_kg:'42,5',repetitions:'8',completed:true}]);
-    c.respond=async()=>({session:{...s.session,completed_exercise_ids:[100]}});
+    c.respond=()=>new Promise(resolve=>{resolveServer=resolve;});
     swipe(api,stage(),-90,0);
     await tick(); await tick();
     assert.equal(calls.length,1); assert.ok(calls[0].url.endsWith('/complete'));
+    assert.equal(s.activeExerciseId,'101'); assert.ok(s.session.completed_exercise_ids.includes('100'));
     assert.equal(calls[0].options.body.sets.length,1);
     assert.equal(calls[0].options.body.sets[0].load_kg,42.5);
     assert.equal(calls[0].options.body.sets[0].repetitions,8);
     assert.equal(calls[0].options.body.sets[0].is_warmup,false);
-    assert.equal(s.activeExerciseId,'101'); assert.ok(s.session.completed_exercise_ids.includes('100'));
+    resolveServer({session:{...s.session,completed_exercise_ids:[100]}});
+    await tick(); await tick();
 });
 test('a right horizontal gesture navigates back without completing the current exercise',()=>{
     const {api,s,calls}=harness(); s.activeExerciseId='101';

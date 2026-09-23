@@ -1092,9 +1092,13 @@ async function handleGoogleCredential(result) {
         if (response.status === 409 && data.code === 'username_required') {
             window.analytics?.track('signup_started', { surface: 'google_auth' });
             googleSignupToken = data.signup_token;
-            getElement('googleUsernameForm')?.classList.remove('hidden');
+            getElement('authChoicePanel')?.classList.add('hidden');
+            document.querySelector('.login-tabs')?.classList.add('hidden');
+            getElement('loginForm')?.classList.add('hidden');
+            getElement('registerForm')?.classList.add('hidden');
+            getElement('googleAuthSection')?.classList.add('hidden');
+            getElement('googleSignupStep')?.classList.remove('hidden');
             getElement('googleUsername')?.focus();
-            showAuthMessage('Só falta escolher seu nome de usuário.', 'info');
             return;
         }
         if (!response.ok) throw new Error(data.error || 'Não foi possível entrar com Google. Tente novamente.');
@@ -1135,7 +1139,7 @@ async function finishGoogleSignup(event) {
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || 'Não foi possível concluir o cadastro.');
         googleSignupToken = null;
-        getElement('googleUsernameForm')?.classList.add('hidden');
+        getElement('googleSignupStep')?.classList.add('hidden');
         await completeAuthentication(data.user, data.csrf_token);
     } catch (error) {
         showAuthMessage(error.message, 'error');
@@ -2460,6 +2464,7 @@ function closePlansModal() {
 
 function showLogin() {
     getElement("authChoicePanel")?.classList.add('hidden');
+    getElement('googleAuthSection')?.classList.remove('hidden');
     document.querySelector('.login-tabs')?.classList.remove('hidden');
     const loginForm = getElement("loginForm");
     const registerForm = getElement("registerForm");
@@ -2475,6 +2480,7 @@ function showLogin() {
 function showRegister() {
     window.analytics?.track('signup_started', { surface: 'auth_modal' });
     getElement("authChoicePanel")?.classList.add('hidden');
+    getElement('googleAuthSection')?.classList.remove('hidden');
     document.querySelector('.login-tabs')?.classList.remove('hidden');
     const loginForm = getElement("loginForm");
     const registerForm = getElement("registerForm");
@@ -2489,10 +2495,18 @@ function showRegister() {
 
 function showAuthChoice() {
     getElement("authChoicePanel")?.classList.remove('hidden');
+    getElement('googleAuthSection')?.classList.remove('hidden');
     document.querySelector('.login-tabs')?.classList.add('hidden');
     getElement("loginForm")?.classList.add('hidden');
     getElement("registerForm")?.classList.add('hidden');
-    getElement("googleUsernameForm")?.classList.add('hidden');
+    getElement("googleSignupStep")?.classList.add('hidden');
+}
+
+function backFromGoogleSignup() {
+    if (authRequestInFlight || nativeGoogleInFlight || sessionConfirmationInFlight) return;
+    googleSignupToken = null;
+    getElement('googleSignupStep')?.classList.add('hidden');
+    showAuthChoice();
 }
 
 function clearForms() {

@@ -14,7 +14,15 @@ def classify_exercise(exercise):
     return {"provider_id": str(exercise["id"]), **classify_workoutx_exercise(exercise)}
 
 
-def substitution_options(exercise, catalog, available_equipment=None, present_ids=(), minimum_score=MINIMUM_SUBSTITUTION_SCORE):
+def substitution_options(
+    exercise,
+    catalog,
+    available_equipment=None,
+    present_ids=(),
+    minimum_score=MINIMUM_SUBSTITUTION_SCORE,
+    limit=3,
+    provider_scores=None,
+):
     source = classify_exercise(exercise)
     source_name = _value(exercise, "name")
     present_ids = {str(provider_id) for provider_id in present_ids}
@@ -60,7 +68,12 @@ def substitution_options(exercise, catalog, available_equipment=None, present_id
         if any(marker in _value(candidate, "name") for marker in ("push-up", "push up")):
             score -= 30
         if score >= minimum_score:
-            options.append((score, candidate))
+            provider_score = (provider_scores or {}).get(candidate_data["provider_id"], 0)
+            options.append((score, provider_score, candidate))
 
-    options.sort(key=lambda item: (-item[0], str(item[1].get("name", "")).lower(), str(item[1]["id"])))
-    return [candidate for _, candidate in options[:3]]
+    options.sort(key=lambda item: (
+        -(item[0] + item[1] * 0.25),
+        str(item[2].get("name", "")).lower(),
+        str(item[2]["id"]),
+    ))
+    return [candidate for _, _, candidate in options[:max(int(limit), 0)]]

@@ -4,6 +4,7 @@ import unicodedata
 from functools import lru_cache
 from pathlib import Path
 
+from flask import current_app
 from src.services.workoutx_classification import classify_workoutx_exercise
 from src.services.workoutx_substitutions import substitution_options
 
@@ -1022,11 +1023,110 @@ def _workoutx_equipment_available(exercise, blocked, available, full_gym):
     return full_gym or equipment in available or (equipment == "body weight" and "bodyweight" in available)
 
 
+def _replacement_equipment_family(exercise):
+    equipment = str(exercise.get("equipment") or "").strip().lower()
+    if equipment in {"body weight", "bodyweight"}:
+        return "bodyweight"
+    if equipment in {
+        "barbell", "dumbbell", "ez barbell", "kettlebell", "olympic barbell",
+        "trap bar", "weighted",
+    }:
+        return "free_weight"
+    return None
+
+
+def _diversify_replacement_options(options, limit):
+    selected = []
+    selected_ids = set()
+    for family in ("bodyweight", "free_weight"):
+        candidate = next((
+            item for item in options
+            if str(item["id"]) not in selected_ids
+            and _replacement_equipment_family(item) == family
+        ), None)
+        if candidate:
+            selected.append(candidate)
+            selected_ids.add(str(candidate["id"]))
+    for candidate in options:
+        if len(selected) >= limit:
+            break
+        if str(candidate["id"]) not in selected_ids:
+            selected.append(candidate)
+            selected_ids.add(str(candidate["id"]))
+    return selected[:limit]
+
+
+def _api_replacement_candidates(source_item, candidates, blocked, available, full_gym, present_ids, limit):
+    from src.services.workoutx import WorkoutXServiceError, get_exercise, recommended_exercises
+
+    provider_scores = {}
+    recommendations = []
+    for kind in ("similar", "alternatives"):
+        try:
+            recommendations.extend(recommended_exercises(source_item["id"], kind))
+        except WorkoutXServiceError as error:
+            current_app.logger.info("WorkoutX %s lookup unavailable: %s", kind, error)
+
+    recommendations.sort(key=lambda item: -item["score"])
+    catalog_by_id = {str(item["id"]): item for item in candidates}
+    extra_candidates = []
+    detail_requests = 0
+    visited_ids = set()
+    for recommendation in recommendations:
+        provider_id = str(recommendation["id"])
+        if provider_id == str(source_item["id"]) or provider_id in visited_ids or provider_id in present_ids:
+            continue
+        visited_ids.add(provider_id)
+        provider_scores[provider_id] = max(
+            provider_scores.get(provider_id, 0), recommendation["score"]
+        )
+        if not _workoutx_equipment_available(recommendation, blocked, available, full_gym):
+            continue
+        candidate = catalog_by_id.get(provider_id)
+        if candidate is None:
+            if detail_requests >= 6:
+                continue
+            detail_requests += 1
+            try:
+                candidate = get_exercise(provider_id)
+            except WorkoutXServiceError as error:
+                current_app.logger.info("WorkoutX recommendation detail unavailable: %s", error)
+                continue
+            catalog_by_id[provider_id] = candidate
+            extra_candidates.append(candidate)
+        if not _workoutx_equipment_available(candidate, blocked, available, full_gym):
+            continue
+        evaluated = substitution_options(
+            source_item,
+            [*candidates, *extra_candidates],
+            present_ids=present_ids,
+            limit=max(len(candidates) + len(extra_candidates), limit),
+            provider_scores=provider_scores,
+        )
+        if len(_diversify_replacement_options(evaluated, limit)) >= limit:
+            families = {_replacement_equipment_family(item) for item in evaluated}
+            if {"bodyweight", "free_weight"} <= families:
+                break
+    return extra_candidates, provider_scores
+
+
 def _workoutx_replacement_options(exercise, source, unavailable_equipment, available_equipment, present_exercises, limit):
     from src.models.user import WorkoutXExercise
+    from src.services.workoutx import WorkoutXServiceError, approved_media, get_exercise
 
     catalog = [item.data for item in WorkoutXExercise.query.all()]
     source_item = _active_workoutx_source(exercise, source, catalog)
+    if not source_item:
+        media = approved_media(exercise.catalog_key)
+        if media:
+            source_item = next((
+                item for item in catalog if str(item["id"]) == str(media["provider_id"])
+            ), None)
+            if source_item is None:
+                try:
+                    source_item = get_exercise(media["provider_id"])
+                except WorkoutXServiceError as error:
+                    current_app.logger.info("WorkoutX source details unavailable: %s", error)
     if not source_item:
         return None
     blocked = {str(value).strip().lower() for value in unavailable_equipment or []}
@@ -1041,7 +1141,30 @@ def _workoutx_replacement_options(exercise, source, unavailable_equipment, avail
         present_item = _active_workoutx_source(present, resolve_catalog_exercise(present.catalog_key, present.name), catalog)
         if present_item:
             present_ids.add(str(present_item["id"]))
-    options = substitution_options(source_item, candidates, present_ids=present_ids)[:limit]
+    provider_scores = {}
+    extra_candidates = []
+    if current_app.config.get("WORKOUTX_API_KEY"):
+        extra_candidates, provider_scores = _api_replacement_candidates(
+            source_item,
+            candidates,
+            blocked,
+            available,
+            full_gym,
+            present_ids,
+            limit,
+        )
+        candidates.extend(
+            item for item in extra_candidates
+            if _workoutx_equipment_available(item, blocked, available, full_gym)
+        )
+    options = substitution_options(
+        source_item,
+        candidates,
+        present_ids=present_ids,
+        limit=max(len(candidates), limit),
+        provider_scores=provider_scores,
+    )
+    options = _diversify_replacement_options(options, limit)
     return [
         {
             "catalog_key": f"workoutx:{candidate['id']}",

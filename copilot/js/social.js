@@ -35,27 +35,12 @@
         return data;
     }
 
-    function showAvatar(url) {
+    function showAvatar() {
         const initial = String(currentUser?.username || "U").charAt(0).toUpperCase();
-        [["headerUserAvatar", "headerUserInitial"], ["homeUserAvatar", "homeUserInitial"], ["profileUserAvatar", "profileUserInitial"]].forEach(([imageId, fallbackId]) => {
-            const image = byId(imageId);
-            const fallback = byId(fallbackId);
-            if (image) {
-                image.src = mediaUrl(url);
-                image.classList.toggle("hidden", !url);
-            }
-            fallback?.classList.toggle("hidden", Boolean(url));
+        ["headerUserInitial", "homeUserInitial", "profileUserInitial"].forEach(id => {
+            const fallback = byId(id);
+            if (fallback) fallback.textContent = initial;
         });
-        const preview = byId("networkAvatarPreview");
-        if (preview) {
-            preview.src = mediaUrl(url);
-            preview.classList.toggle("hidden", !url);
-        }
-        const previewFallback = byId("networkAvatarFallback");
-        if (previewFallback) {
-            previewFallback.textContent = initial;
-            previewFallback.classList.toggle("hidden", Boolean(url));
-        }
     }
 
     function connectionActions(profile) {
@@ -150,63 +135,6 @@
         }
     }
 
-    async function uploadPhoto(file) {
-        const input = byId("networkAvatarInput");
-        if (input?.dataset.uploading) return;
-        if (!file || !file.type.startsWith("image/")) { showToast("Selecione um arquivo de imagem.", "error"); return; }
-        if (file.size > 12 * 1024 * 1024) { showToast("A foto deve ter no máximo 12 MB.", "error"); return; }
-        input?.setAttribute("aria-busy", "true");
-        if (input) input.dataset.uploading = "true";
-        if (input) input.disabled = true;
-        const form = new FormData();
-        let blob;
-        try {
-            const image = await downscaleImageFile(file, 1200);
-            blob = await fetch(image.dataUrl).then(response => response.blob());
-            form.append("photo", blob, "avatar.jpg");
-        } catch (error) {
-            showToast("Não foi possível preparar a foto. Escolha JPG/PNG ou tente outra imagem.", "error");
-            delete input?.dataset.uploading;
-            if (input) input.disabled = false;
-            input?.removeAttribute("aria-busy");
-            return;
-        }
-        try {
-            const response = await window.fetchWithTimeout(`${API_BASE}/profile/avatar`, { method: "POST", credentials: "include", body: form }, 60_000);
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.error || "Não foi possível atualizar a foto.");
-            const localUrl = URL.createObjectURL(blob);
-            if (data.queued) await window.AppOffline?.saveMedia("avatar-pending", blob, { type: "avatar" });
-            currentUser.avatar_url = data.avatar_url || localUrl;
-            window.currentUser = currentUser;
-            showAvatar(currentUser.avatar_url);
-            showToast(data.message || "Foto atualizada.", "success");
-        } catch (error) {
-            showToast(error.message, "error");
-        } finally {
-            delete input?.dataset.uploading;
-            if (input) input.disabled = false;
-            if (input) input.value = "";
-            input?.removeAttribute("aria-busy");
-        }
-    }
-
-    async function removePhoto() {
-        const input = byId("networkAvatarInput");
-        if (input?.dataset.uploading) return;
-        if (input) input.dataset.uploading = "true";
-        try {
-            const result = await api("/profile/avatar", { method: "DELETE", body: {} });
-            currentUser.avatar_url = null;
-            showAvatar(null);
-            showToast(result.message, "success");
-        } catch (error) {
-            showToast(error.message, "error");
-        } finally {
-            delete input?.dataset.uploading;
-        }
-    }
-
     async function openNetworkCenter(highlightReviewId) {
         if (!requireAuth("Entre para acessar sua rede.", { resume: openNetworkCenter })) return;
         openAppModal(byId("networkModal"));
@@ -228,16 +156,10 @@
 
     document.addEventListener("change", (event) => {
         if (event.target.matches("#publicProfileToggle, #externalReviewsToggle, #externalDietReviewsToggle")) updateSettings();
-        if (event.target.matches("#networkAvatarInput") && event.target.files?.[0]) uploadPhoto(event.target.files[0]);
     });
 
     document.addEventListener("click", async (event) => {
         if (event.target.closest("#networkSearchButton")) search();
-        if (event.target.closest("#networkAvatarChoose")) {
-            const pickerRequest = window.FitTrackerImagePicker?.open({ inputId: "networkAvatarInput", onFile: uploadPhoto, source: 'CAMERA' });
-            pickerRequest?.catch(() => showToast("Não foi possível abrir a câmera ou fototeca.", "error"));
-        }
-        if (event.target.closest("#networkAvatarRemove")) removePhoto();
         const connectButton = event.target.closest("[data-network-connect]");
         if (connectButton) connect(connectButton.dataset.networkUsername, connectButton.dataset.networkConnect);
         const action = event.target.closest("[data-connection-accept], [data-connection-decline], [data-connection-cancel]");
