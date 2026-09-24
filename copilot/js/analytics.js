@@ -105,4 +105,10 @@
     firstTouch();
     anonymousId();
     window.analytics = Object.freeze({ clearAttribution, context, track, trackReturns });
+    const viewedKey = `dt_analytics_viewed_${new Date().toISOString().slice(0, 10)}`;
+    if (!storageGet(viewedKey)) {
+        track("app_viewed").then((accepted) => {
+            if (accepted) storageSet(viewedKey, "1");
+        });
+    }
 })();

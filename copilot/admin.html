@@ -202,6 +202,18 @@
 
     <section class="section active" id="overview" role="tabpanel" aria-labelledby="adminTabOverview">
       <div class="grid overview-grid" id="metricsGrid"></div>
+      <article class="card" style="margin-top:16px;">
+        <div class="section-head">
+          <div>
+            <h3>Funil de aquisição e ativação</h3>
+            <p>Pessoas únicas por evento no período. Ação de valor inclui perfil, plano, refeição ou treino concluído; compare os volumes como sinais, não como coorte de conversão.</p>
+          </div>
+        </div>
+        <div class="mini-stats" id="funnelStats"></div>
+        <div class="table-wrap" style="margin-top:14px;">
+          <table><thead><tr><th>Origem / mídia</th><th>Cadastros</th><th>Ativados</th></tr></thead><tbody id="funnelSources"></tbody></table>
+        </div>
+      </article>
       <div class="grid" style="margin-top:16px; grid-template-columns: repeat(12, 1fr);">
         <article class="card span-8">
           <div class="section-head">
@@ -456,6 +468,8 @@
       downloadCsv2: document.getElementById('downloadCsv2'),
       metricsGrid: document.getElementById('metricsGrid'),
       usageChart: document.getElementById('usageChart'),
+      funnelStats: document.getElementById('funnelStats'),
+      funnelSources: document.getElementById('funnelSources'),
       activityChart: document.getElementById('activityChart'),
       subscriptionChart: document.getElementById('subscriptionChart'),
       distributionStats: document.getElementById('distributionStats'),
@@ -607,6 +621,13 @@
       if (!state.analytics) return;
       const a = state.analytics;
       const s = a.summary;
+      const funnel = a.funnel || { stages: [], sources: [] };
+      els.funnelStats.innerHTML = funnel.stages.map(stage =>
+        `<div class="mini"><div class="k">${escapeHtml(stage.label)}</div><div class="v">${escapeHtml(stage.users)}</div></div>`
+      ).join('');
+      els.funnelSources.innerHTML = funnel.sources.length ? funnel.sources.map(row =>
+        `<tr><td>${escapeHtml(row.source)}</td><td>${escapeHtml(row.signups)}</td><td>${escapeHtml(row.activated)}</td></tr>`
+      ).join('') : '<tr><td colspan="3">Sem cadastros com origem no período.</td></tr>';
       els.metricsGrid.innerHTML = [
         metricCard('Usuários', s.total_users, `+${s.new_users} novos no período`, 'fa-users'),
         metricCard('Ativos', s.active_users, 'Uso recente de dietas, medições, chats e treinos', 'fa-chart-line'),

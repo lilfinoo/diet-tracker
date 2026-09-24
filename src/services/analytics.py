@@ -10,6 +10,7 @@ from src.models.user import AnalyticsEvent, User, db
 
 
 ALLOWED_EVENTS = frozenset({
+    "app_viewed",
     "signup_started",
     "signup_completed",
     "profile_completed",
@@ -31,6 +32,7 @@ ALLOWED_EVENTS = frozenset({
     "returned_d7",
 })
 CLIENT_EVENTS = frozenset({
+    "app_viewed",
     "signup_started",
     "plan_generation_requested",
     "paywall_viewed",
@@ -42,6 +44,7 @@ UTM_FIELDS = ("utm_source", "utm_medium", "utm_campaign")
 _PROPERTY_KEY = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,63}$")
 _EMAIL_VALUE = re.compile(r"[^\s@]+@[^\s@]+\.[^\s@]+")
 EVENT_PROPERTIES = {
+    "app_viewed": set(),
     "signup_started": {"surface"},
     "signup_completed": set(),
     "profile_completed": set(),

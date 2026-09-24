@@ -577,6 +577,64 @@ def _admin_summary_counts(from_date, to_date):
 
 def _build_admin_analytics_payload(from_date, to_date, bucket):
     summary = _admin_summary_counts(from_date, to_date)
+    period_start = datetime.combine(from_date, datetime.min.time())
+    period_end = datetime.combine(to_date, datetime.max.time())
+    funnel_events = AnalyticsEvent.query.filter(
+        AnalyticsEvent.created_at >= period_start,
+        AnalyticsEvent.created_at <= period_end,
+        AnalyticsEvent.event_name.in_((
+            "app_viewed", "signup_started", "signup_completed", "profile_completed",
+            "plan_generation_succeeded", "meal_logged", "workout_finished",
+            "returned_d7", "checkout_started", "subscription_activated",
+        )),
+    ).all()
+    funnel_identities = defaultdict(set)
+    source_signups = defaultdict(set)
+    source_activations = defaultdict(set)
+    activated_subjects = set()
+    activation_events = {"profile_completed", "plan_generation_succeeded", "meal_logged", "workout_finished"}
+    for event in funnel_events:
+        identity = str(event.subject_id) if event.subject_id else None
+        if event.event_name in {"app_viewed", "signup_started"} and event.anonymous_id:
+            funnel_identities[event.event_name].add(event.anonymous_id)
+        elif identity:
+            funnel_identities[event.event_name].add(identity)
+        if event.event_name in activation_events and identity:
+            activated_subjects.add(identity)
+        if event.event_name == "signup_completed" and identity:
+            properties = event.properties or {}
+            source = properties.get("utm_source") or "Direto / sem UTM"
+            medium = properties.get("utm_medium") or ""
+            campaign = properties.get("utm_campaign") or ""
+            label = " / ".join(value for value in (source, medium, campaign) if value)
+            source_signups[label].add(identity)
+    for event in funnel_events:
+        if event.event_name != "signup_completed" or not event.subject_id:
+            continue
+        identity = str(event.subject_id)
+        if identity not in activated_subjects:
+            continue
+        properties = event.properties or {}
+        source = properties.get("utm_source") or "Direto / sem UTM"
+        medium = properties.get("utm_medium") or ""
+        campaign = properties.get("utm_campaign") or ""
+        label = " / ".join(value for value in (source, medium, campaign) if value)
+        source_activations[label].add(identity)
+    funnel = {
+        "stages": [
+            {"key": "app_viewed", "label": "Visitaram o app", "users": len(funnel_identities["app_viewed"])},
+            {"key": "signup_started", "label": "Começaram cadastro", "users": len(funnel_identities["signup_started"])},
+            {"key": "signup_completed", "label": "Concluíram cadastro", "users": len(funnel_identities["signup_completed"])},
+            {"key": "activated", "label": "Fizeram ação de valor", "users": len(activated_subjects)},
+            {"key": "returned_d7", "label": "Voltaram após 7 dias", "users": len(funnel_identities["returned_d7"])},
+            {"key": "checkout_started", "label": "Iniciaram pagamento", "users": len(funnel_identities["checkout_started"])},
+            {"key": "subscription_activated", "label": "Assinaram", "users": len(funnel_identities["subscription_activated"])},
+        ],
+        "sources": [
+            {"source": source, "signups": len(users), "activated": len(source_activations[source])}
+            for source, users in sorted(source_signups.items(), key=lambda item: (-len(item[1]), item[0]))[:10]
+        ],
+    }
     bucket_dates = _date_series(from_date, to_date, bucket)
 
     user_new_by_bucket = defaultdict(int)
@@ -681,6 +739,7 @@ def _build_admin_analytics_payload(from_date, to_date, bucket):
     return {
         "range": {"from": from_date.isoformat(), "to": to_date.isoformat(), "bucket": bucket},
         "summary": summary,
+        "funnel": funnel,
         "series": {
             "labels": labels,
             "new_users": new_users_series,
