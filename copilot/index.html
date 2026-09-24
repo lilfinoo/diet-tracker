@@ -982,14 +982,14 @@
                 <p>Este cadastro pode ser gerenciado sem o aluno ter uma conta no aplicativo.</p>
                 <form id="professionalStudentForm" onsubmit="saveOfflineStudent(event)">
                     <div class="professional-editor-basics">
-                        <label>Nome<input id="rosterName" maxlength="100" required></label>
-                        <label>Idade<input id="rosterAge" type="number" min="0" max="120" required></label>
-                        <label>Peso (kg)<input id="rosterWeight" type="number" min="0.1" max="500" step="0.1" required></label>
-                        <label>Altura (cm)<input id="rosterHeight" type="number" min="0.1" max="300" step="0.1" required></label>
-                        <label>Gênero usado no cálculo<select id="rosterGender"><option value="">Não informado</option><option value="masculino">Masculino</option><option value="feminino">Feminino</option></select></label>
-                        <label>Objetivo<input id="rosterGoal" maxlength="100"></label>
-                        <label>Nível de atividade<select id="rosterActivity"><option value="">Não informado</option><option value="sedentario">Sedentário</option><option value="leve">Leve</option><option value="moderado">Moderado</option><option value="intenso">Intenso</option></select></label>
-                        <label>Restrições alimentares<textarea id="rosterRestrictions" maxlength="2000" rows="2"></textarea></label>
+                        <label for="rosterName">Nome<input id="rosterName" maxlength="100" placeholder="Nome do aluno" required></label>
+                        <label for="rosterAge">Idade (anos)<input id="rosterAge" type="number" min="0" max="120" placeholder="Ex.: 30" required></label>
+                        <label for="rosterWeight">Peso (kg)<input id="rosterWeight" type="number" min="0.1" max="500" step="0.1" placeholder="Ex.: 70" required></label>
+                        <label for="rosterHeight">Altura (cm)<input id="rosterHeight" type="number" min="0.1" max="300" step="0.1" placeholder="Ex.: 170" required></label>
+                        <label for="rosterGender">Gênero usado no cálculo<select id="rosterGender"><option value="">Não informado</option><option value="masculino">Masculino</option><option value="feminino">Feminino</option></select></label>
+                        <label for="rosterGoal">Objetivo<input id="rosterGoal" maxlength="100" placeholder="Ex.: ganhar massa muscular"></label>
+                        <label for="rosterActivity">Nível de atividade<select id="rosterActivity"><option value="">Não informado</option><option value="sedentario">Sedentário</option><option value="leve">Leve</option><option value="moderado">Moderado</option><option value="intenso">Intenso</option></select></label>
+                        <label for="rosterRestrictions">Restrições alimentares<textarea id="rosterRestrictions" maxlength="2000" rows="2" placeholder="Ex.: intolerância à lactose"></textarea></label>
                     </div>
                     <div id="professionalStudentMessage" class="modal-message" role="status" aria-live="polite"></div>
                     <div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeOfflineStudent()">Cancelar</button><button class="btn-primary" type="submit">Salvar aluno</button></div>

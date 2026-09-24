@@ -14362,6 +14362,13 @@ body:has(#dietTab.today-authenticated:not(.hidden)) .app-header { display: none;
     font-size: .82rem;
 }
 
+#professionalStudentModal .professional-editor-basics label {
+    gap: .5rem;
+    color: var(--white);
+    font-size: .95rem;
+    font-weight: 700;
+}
+
 .professional-editor-basics input,
 .professional-editor-basics select,
 .professional-editor-day input,
