@@ -356,9 +356,7 @@ def get_ai_macros():
         return jsonify({"error": "Não foi possível calcular macros no momento"}), 503
 
 
-@profile_bp.route("/exercise-media/<catalog_key>", methods=["GET"])
-@login_required
-def get_exercise_media(catalog_key):
+def _serve_exercise_media(catalog_key):
     media = approved_media(catalog_key)
     if media is None:
         abort(404)
@@ -373,6 +371,17 @@ def get_exercise_media(catalog_key):
             response.headers["Retry-After"] = str(error.retry_after)
         return response
     return send_file(gif_path, mimetype="image/gif", conditional=True, max_age=31_536_000)
+
+
+@profile_bp.route("/exercise-media/<catalog_key>", methods=["GET"])
+@login_required
+def get_exercise_media(catalog_key):
+    return _serve_exercise_media(catalog_key)
+
+
+@profile_bp.route("/public/exercise-media/<catalog_key>", methods=["GET"])
+def get_public_exercise_media(catalog_key):
+    return _serve_exercise_media(catalog_key)
 
 
 @profile_bp.route("/measurements", methods=["POST"])

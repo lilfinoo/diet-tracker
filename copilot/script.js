@@ -2973,10 +2973,12 @@ async function deleteDietPlan(id) {
 
 function exerciseImagePath(_exerciseName, catalogKey) {
     const key = String(catalogKey || "");
-    return key ? `${API_BASE}/exercise-media/${encodeURIComponent(key)}` : "";
+    const path = document.documentElement.dataset.nativePlatform === "ios" ? "/public/exercise-media/" : "/exercise-media/";
+    return key ? `${API_BASE}${path}${encodeURIComponent(key)}` : "";
 }
 
 function exerciseFallbackImagePath(catalogKey) {
+    if (document.documentElement.dataset.nativePlatform === "ios") return "";
     const path = window.EXERCISE_MEDIA?.[String(catalogKey || "")]?.image || "";
     return path && !path.startsWith("/") ? `/${path}` : path;
 }
@@ -2994,6 +2996,15 @@ function exerciseImageMarkup(exercise, escapedName) {
 document.addEventListener('error', event => {
     const image = event.target;
     if (!(image instanceof HTMLImageElement) || !image.classList.contains('exercise-demonstration-image')) return;
+    if (document.documentElement.dataset.nativePlatform === "ios") {
+        const placeholder = document.createElement('span');
+        placeholder.className = 'exercise-image-placeholder';
+        placeholder.setAttribute('role', 'img');
+        placeholder.setAttribute('aria-label', 'GIF do exercício não disponível');
+        placeholder.innerHTML = '<i class="fas fa-dumbbell" aria-hidden="true"></i>';
+        image.replaceWith(placeholder);
+        return;
+    }
     const fallbackPath = image.dataset.fallbackSrc;
     if (fallbackPath) {
         delete image.dataset.fallbackSrc;
