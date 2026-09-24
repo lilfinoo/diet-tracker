@@ -16903,6 +16903,16 @@ button.profile-recent-card { width: 100%; text-align: left; color: inherit; font
 #dietModal .diet-summary-macros { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; font-size: 14px; line-height: 1.4; color: var(--text-secondary, #b4bfd0); }
 #dietModal #dietDiscardPanel button { display: block; width: 100%; min-height: 48px; margin-top: 12px; }
 #dietModal #dietKeepDraft { background: var(--action-strong, #2563eb); color: #fff; box-shadow: none; }
+#dietModal #dietShareOpen { width: 100%; min-height: 48px; margin: 4px 0 16px; }
+#dietModal .diet-share-panel { margin: 12px 0 20px; padding: 18px; border: 1px solid rgba(96, 165, 250, .3); border-radius: 18px; background: #0b1524; color: #f8fafc; }
+#dietModal .diet-share-panel h3 { margin: 0 0 14px; font-size: 19px; outline: none; }
+#dietModal #dietShareCanvas { display: block; width: min(100%, 280px); height: auto; aspect-ratio: 9 / 16; margin: 0 auto 18px; border-radius: 12px; background: #06101f; box-shadow: 0 12px 32px rgba(0, 0, 0, .35); }
+#dietModal .diet-share-controls { display: grid; gap: 6px; }
+#dietModal .diet-share-controls label { margin: 8px 0 0; color: #dbeafe; }
+#dietModal .diet-share-controls input { width: 100%; accent-color: #60a5fa; }
+#dietModal #dietShareStatus { min-height: 22px; margin: 14px 0; color: #cbd5e1; font-size: 14px; }
+#dietModal .diet-share-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+#dietModal .diet-share-actions button { flex: 1 1 150px; min-height: 48px; }
 
 /* Gerador de treino: mantém o modal da dieta intacto e concentra a experiência no celular. */
 .plan-wizard-modal--workout {

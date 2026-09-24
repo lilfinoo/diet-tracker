@@ -24,6 +24,10 @@ function harness() {
         respond: async () => ({ ok: true, json: async () => ({ description: 'Arroz e feijão', calories: 100, protein: 0, carbs: null, fat: 1 }) }),
         fetch: async (url, options) => { c.calls.push({ url, options }); return c.respond(); } };
     c.window.FitTrackerImagePicker = { open: async options => { c.pickerCalls.push(options); return null; } };
+    c.shareUpdates = [];
+    c.window.DietShare = { reset() {}, updatePreview: async (_canvas, file, values, framing, onState) => {
+        c.shareUpdates.push({ file, values, framing: { ...framing } }); onState('ready', 'Card pronto para compartilhar.');
+    }, sharePrepared: async () => ({ status: 'cancelled' }) };
     vm.createContext(c); vm.runInContext(source, c); c.ready(); c.flow = c.window.DietEntryFlow; c.node = node;
     c.closeDietModal = () => { c.closed = c.flow.canClose(); };
     c.click = id => node(id).listeners.click();
@@ -142,6 +146,28 @@ test('voltar preserva texto e fechar sem alterações é imediato', () => {
     const c = harness(); assert.equal(c.flow.canClose(), true); c.click('text'); c.input('dietSourceText', 'Banana');
     c.click('dietFlowBack'); assert.equal(c.node('step1').hidden, false); c.click('text');
     assert.equal(c.node('dietSourceText').value, 'Banana');
+});
+test('card aparece só após análise por foto e cancelar mantém revisão', async () => {
+    const c = harness(); c.click('photo'); await c.upload();
+    assert.equal(c.node('dietShareOpen').hidden, true);
+    await c.flow.analyze(); assert.equal(c.node('dietShareOpen').hidden, false);
+    c.click('dietShareOpen'); assert.equal(c.node('dietSharePanel').hidden, false);
+    c.node('dietShareZoom').listeners.input({ target: { value: '175' } });
+    assert.equal(c.shareUpdates.at(-1).framing.scale, 1.75);
+    c.input('dietProtein', '25');
+    assert.equal(c.shareUpdates.at(-1).values[1], '25');
+    c.click('dietShareCancel');
+    assert.equal(c.node('dietSharePanel').hidden, true);
+    assert.equal(c.node('step3').hidden, false);
+    assert.equal(c.node('dietCalories').value, 100);
+});
+test('card some ao editar descrição, remover foto ou seguir sem análise', async () => {
+    const c = harness(); c.click('photo'); await c.upload(); await c.flow.analyze();
+    c.input('dietDescription', 'Outro prato');
+    assert.equal(c.node('dietShareOpen').hidden, true);
+    c.click('dietFlowManual'); assert.equal(c.node('dietShareOpen').hidden, true);
+    c.click('dietFlowBack'); c.click('dietPhotoRemove');
+    assert.equal(c.node('dietShareOpen').hidden, true);
 });
 
 function savingHarness(entryId = '', daily = null) {

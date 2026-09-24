@@ -2,7 +2,9 @@
 (() => {
     const el = id => document.getElementById(id);
     const fields = ['dietCalories', 'dietProtein', 'dietCarbs', 'dietFat'];
-    let step = 1, method = 'text', photo = null, dirty = false, busy = false;
+    let step = 1, method = 'text', photo = null, photoFile = null, dirty = false, busy = false;
+    let analyzedPhoto = false, shareOpen = false;
+    const framing = { scale: 1, x: 0, y: 0 };
     let version = 0, estimateDescription = '', stale = false, editing = false;
     let photoVersion = 0, loadingPhoto = false, identified = false;
     let acquisitionVersion = 0, acquisitionActive = false, acquisitionSource = 'CAMERA';
@@ -20,6 +22,23 @@
         fields.forEach(id => { el(id).value = ''; });
         estimateDescription = '';
         stale = false;
+        analyzedPhoto = false;
+    }
+    function closeShare() {
+        shareOpen = false;
+        el('dietSharePanel').hidden = true;
+        window.DietShare?.reset();
+    }
+    function shareValues() { return fields.map(id => el(id).value); }
+    function syncSharePreview() {
+        if (!shareOpen) return;
+        const canvas = el('dietShareCanvas'), button = el('dietShareSubmit'), status = el('dietShareStatus');
+        window.DietShare?.updatePreview(canvas, photoFile, shareValues(), framing, (state, text) => {
+            if (!shareOpen || !canvas.isConnected) return;
+            button.disabled = state !== 'ready';
+            status.textContent = text;
+            status.setAttribute('role', state === 'error' ? 'alert' : 'status');
+        });
     }
     function dataUrlBlob(dataUrl) {
         const match = String(dataUrl).match(/^data:([^;,]+)(?:;[^,]+)*,([^]*)$/);
@@ -75,6 +94,9 @@
         photoStatus.setAttribute('aria-live', acquisitionTone === 'error' ? 'assertive' : 'polite');
         el('dietFinalDescription').textContent = el('dietDescription').value;
         summary();
+        const canShare = step === 3 && method === 'photo' && !!photoFile && analyzedPhoto && !stale && !busy;
+        el('dietShareOpen').hidden = !canShare || shareOpen;
+        if (!canShare && shareOpen) closeShare();
         if (focus) {
             el('dietModalTitle').focus();
             el('dietModal').querySelector('.modal-content').scrollTop = 0;
@@ -88,9 +110,12 @@
         el('dietSaveLoading').classList.add('hidden');
         lockSaving(false);
         invalidateAcquisition();
+        closeShare();
         editing = isEdit;
         dirty = false;
-        method = 'text'; photo = null; stale = false; identified = false;
+        method = 'text'; photo = null; photoFile = null; stale = false; identified = false; analyzedPhoto = false;
+        framing.scale = 1; framing.x = 0; framing.y = 0;
+        el('dietShareZoom').value = 100; el('dietShareX').value = 0; el('dietShareY').value = 0;
         el('dietSourceText').value = isEdit ? el('dietDescription').value : '';
         el('dietPhotoInput').value = '';
         ['dietPhotoPreview', 'dietReviewPhoto'].forEach(id => { el(id).hidden = true; });
@@ -128,6 +153,7 @@
             fields.forEach((id, index) => { el(id).value = data[keys[index]] ?? ''; });
             estimateDescription = el('dietDescription').value.trim();
             stale = false; dirty = true; identified = true; step = 3;
+            analyzedPhoto = method === 'photo' && !!photoFile;
             render(true);
         } catch (error) {
             if (requestVersion === version && owner === account()) message(error.message || 'Erro de conexão. Tente novamente ou continue manualmente.');
@@ -139,6 +165,7 @@
         invalidate();
         identified = false;
         clearNutrients();
+        closeShare();
         if (step === 2) el('dietDescription').value = el('dietSourceText').value.trim();
         step = 3; dirty = true;
         message(el('dietDescription').value.trim() ? '' : 'Descreva os alimentos para salvar sem análise.');
@@ -175,7 +202,7 @@
         return true;
     }
     function reset() {
-        dirty = false; invalidate(); invalidateAcquisition(); photo = null;
+        dirty = false; invalidate(); invalidateAcquisition(); photo = null; photoFile = null; closeShare();
         el('dietSaveBtn').disabled = false;
         el('dietForm').reset();
         begin();
@@ -196,11 +223,11 @@
             closeDietModal();
         });
         document.querySelectorAll('[data-diet-method]').forEach(button => button.addEventListener('click', () => {
-            if (method !== button.dataset.dietMethod) { invalidate(); invalidateAcquisition(); photo = null; el('dietPhotoInput').value = ''; el('dietPhotoPreview').hidden = true; clearNutrients(); }
+            if (method !== button.dataset.dietMethod) { invalidate(); invalidateAcquisition(); photo = null; photoFile = null; closeShare(); el('dietPhotoInput').value = ''; el('dietPhotoPreview').hidden = true; clearNutrients(); }
             method = button.dataset.dietMethod; step = 2; message(); render(true);
             if (method === 'photo') openPhotoSource('CAMERA');
         }));
-        el('dietFlowBack').addEventListener('click', () => { invalidate(); invalidateAcquisition(); step--; message(); render(true); });
+        el('dietFlowBack').addEventListener('click', () => { invalidate(); invalidateAcquisition(); closeShare(); step--; message(); render(true); });
         el('dietReviewAgain').addEventListener('click', () => { step = 3; message(); render(true); });
         el('dietFlowNext').addEventListener('click', () => {
             if (step === 2 || stale) analyze();
@@ -216,6 +243,7 @@
             }
             if (fields.includes(event.target.id) && !stale) estimateDescription = el('dietDescription').value.trim();
             render();
+            if (fields.includes(event.target.id)) syncSharePreview();
         });
         const handlePhotoFile = async (file, attempt = {}) => {
             if (!file) return false;
@@ -231,6 +259,8 @@
                 if (token !== photoVersion || owner !== account()
                     || (attempt.acquisitionToken != null && attempt.acquisitionToken !== acquisitionVersion)) return false;
                 photo = { data: result.base64, mime_type: mime || 'image/jpeg' };
+                photoFile = file;
+                closeShare();
                 dirty = true; clearNutrients();
                 el('dietPhotoPreviewImg').src = result.dataUrl; el('dietPhotoPreview').hidden = false; message();
                 setAcquisitionState('ready');
@@ -296,11 +326,40 @@
         el('dietPhotoBtn').addEventListener('click', () => openPhotoSource('CAMERA'));
         el('dietPhotoLibraryBtn').addEventListener('click', () => openPhotoSource('PHOTOS'));
         el('dietPhotoRemove').addEventListener('click', () => {
-            invalidate(); invalidateAcquisition(); photo = null; dirty = true; clearNutrients();
+            invalidate(); invalidateAcquisition(); photo = null; photoFile = null; closeShare(); dirty = true; clearNutrients();
             el('dietPhotoInput').value = ''; el('dietPhotoPreview').hidden = true; el('dietReviewPhoto').hidden = true;
             el('dietPhotoPreviewImg').removeAttribute('src'); render();
         });
         el('dietPhotoInput').addEventListener('change', event => handlePhotoFile(event.target.files?.[0]));
+        el('dietShareOpen').addEventListener('click', () => {
+            if (step !== 3 || !analyzedPhoto || stale || !photoFile) return;
+            shareOpen = true;
+            el('dietSharePanel').hidden = false;
+            el('dietShareOpen').hidden = true;
+            el('dietShareTitle').focus();
+            syncSharePreview();
+        });
+        el('dietShareCancel').addEventListener('click', () => { closeShare(); render(); el('dietShareOpen').focus(); });
+        for (const [id, key] of [['dietShareZoom', 'scale'], ['dietShareX', 'x'], ['dietShareY', 'y']]) {
+            el(id).addEventListener('input', event => {
+                framing[key] = key === 'scale' ? Number(event.target.value) / 100 : Number(event.target.value);
+                syncSharePreview();
+            });
+        }
+        el('dietShareSubmit').addEventListener('click', async () => {
+            const button = el('dietShareSubmit'), status = el('dietShareStatus');
+            button.disabled = true;
+            status.textContent = 'Abrindo compartilhamento…';
+            try {
+                const result = await window.DietShare.sharePrepared(photoFile, shareValues(), framing);
+                if (shareOpen) status.textContent = result.status === 'download-started'
+                    ? 'Download solicitado. Confira os downloads do navegador.' : 'Card pronto para compartilhar.';
+            } catch (error) {
+                if (shareOpen) { status.textContent = error.message; status.setAttribute('role', 'alert'); }
+            } finally {
+                if (shareOpen) button.disabled = false;
+            }
+        });
     });
     window.DietEntryFlow = { begin, canClose, canSave, reset, analyze, lockSaving, revision: () => version,
         saved() { dirty = false; el('dietSaveBtn').disabled = false; }, invalidate };

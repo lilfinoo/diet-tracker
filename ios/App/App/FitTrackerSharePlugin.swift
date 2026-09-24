@@ -25,7 +25,7 @@ public class FitTrackerSharePlugin: CAPPlugin, CAPBridgedPlugin {
                 return
             }
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-            let file = directory.appendingPathComponent("treino-card.png")
+            let file = directory.appendingPathComponent(call.getString("filename") == "macros-card.png" ? "macros-card.png" : "treino-card.png")
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                 try data.write(to: file, options: .atomic)
