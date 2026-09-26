@@ -23,7 +23,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet" media="print" onload="this.media='all'">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="/styles.css?v=20260924-diet-share">
+    <link rel="stylesheet" href="/styles.css?v=20260926-home-share">
     <link rel="stylesheet" href="/fluid.css?v=20260828-achievements">
 </head>
 <body data-auth-state="unknown">
@@ -768,9 +768,11 @@
                     </details>
                     <button type="button" id="dietShareOpen" class="btn-secondary" hidden>Compartilhar estimativas</button>
                     <section id="dietSharePanel" class="diet-share-panel" aria-labelledby="dietShareTitle" hidden>
-                        <h3 id="dietShareTitle" tabindex="-1">Prévia do card</h3>
+                        <header class="share-editor-heading"><span>Estimativas por foto</span><h3 id="dietShareTitle" tabindex="-1">Seu card</h3><p>Ajuste a foto e compartilhe suas estimativas nutricionais.</p></header>
+                        <p class="share-preview-label">Prévia · PNG 9:16</p>
                         <canvas id="dietShareCanvas" width="1080" height="1920" role="img" aria-label="Prévia do card com estimativas nutricionais"></canvas>
                         <div class="diet-share-controls">
+                            <h4>Foto e enquadramento</h4>
                             <label for="dietShareZoom">Zoom</label><input id="dietShareZoom" type="range" min="100" max="250" value="100">
                             <label for="dietShareX">Posição horizontal</label><input id="dietShareX" type="range" min="-100" max="100" value="0">
                             <label for="dietShareY">Posição vertical</label><input id="dietShareY" type="range" min="-100" max="100" value="0">
@@ -1045,11 +1047,11 @@
     <script defer src="/js/analytics.js?v=20260923-acquisition"></script>
     <script defer src="/js/body-evolution.js?v=20260909"></script>
     <script defer src="/js/exercise-media.js?v=20260828-achievements"></script>
-    <script defer src="/script.js?v=20260920-workout-media-fallback"></script>
-    <script defer src="/js/diet-entry.js?v=20260924-diet-share"></script>
-    <script defer src="/js/diet-share.js?v=20260924-diet-share"></script>
-    <script defer src="/js/workout-share.js?v=20260914-ios-fluid"></script>
-    <script defer src="/js/plans.js?v=20260924-ai-timeout"></script>
+    <script defer src="/script.js?v=20260926-home-share"></script>
+    <script defer src="/js/diet-entry.js?v=20260926-home-share"></script>
+    <script defer src="/js/diet-share.js?v=20260926-home-share"></script>
+    <script defer src="/js/workout-share.js?v=20260926-home-share"></script>
+    <script defer src="/js/plans.js?v=20260926-home-share"></script>
     <script defer src="/js/home-refresh.js?v=20260921-home-refresh"></script>
     <script defer src="/js/progress.js?v=20260919-progress"></script>
     <script defer src="/js/social.js?v=20260919-camera"></script>

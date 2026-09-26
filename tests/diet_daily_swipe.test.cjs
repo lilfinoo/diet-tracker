@@ -114,6 +114,14 @@ test('swipe na Home envia o resultado para a superfície Home', () => {
     assert.deepEqual(outcomes, [{ slotKey: 'almoco', result: 'consumed_planned', surface: 'home' }]);
 });
 
+test('swipe da Home aguarda o servidor antes de animar a saída', () => {
+    const { api, outcomes, setNow } = harness();
+    const surface = card('home');
+    swipe(api, surface, -100, 3, setNow);
+    assert.equal(outcomes.length, 1);
+    assert.equal(surface.classes.has('is-committing-left'), false);
+});
+
 test('scroll vertical e gesto diagonal não são capturados nem disparam ações', () => {
     for (const [dx, dy] of [[5, 90], [90, 90]]) {
         const { api, outcomes, setNow } = harness();
@@ -152,5 +160,5 @@ test('card pendente expõe menu e reaproveita os fluxos existentes', () => {
     assert.match(gestureSource, /openDietDailyDifferent\(slotKey, surface\)/);
     assert.match(gestureSource, /toggleDietDailyOptions\(slotKey, surface\)/);
     assert.match(source, /actionLabel: 'Desfazer'/);
-    assert.match(source, /onAction: \(\) => resetDietDailySlot\(slotKey, surface\)/);
+    assert.match(source, /onAction: \(\) => resetDietDailySlot\(slotKey, surface, date\)/);
 });

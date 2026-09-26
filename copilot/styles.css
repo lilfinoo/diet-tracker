@@ -16914,6 +16914,71 @@ button.profile-recent-card { width: 100%; text-align: left; color: inherit; font
 #dietModal .diet-share-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 #dietModal .diet-share-actions button { flex: 1 1 150px; min-height: 48px; }
 
+/* Home e editores de compartilhamento. */
+#todayCardapioBody .diet-daily-swipe { transition: opacity 120ms ease, transform 120ms ease; }
+#todayCardapioBody .diet-daily-swipe.is-removing { opacity: 0; transform: translateY(-8px) scale(.98); pointer-events: none; }
+#todayCardapioBody .today-meals-complete { padding: 1rem; margin-bottom: .75rem; border: 1px solid rgba(110, 231, 183, .25); border-radius: 14px; color: #a7f3d0; background: rgba(110, 231, 183, .06); line-height: 1.5; }
+#todayCardapioBody button { min-height: 44px; }
+#todayCardapioBody .diet-daily-more { min-width: 44px; }
+#dietModal .share-editor-heading,
+.workout-share-shell .share-editor-heading { display: grid; gap: 0; }
+.workout-share-shell .share-editor-heading > button { margin-bottom: .75rem; }
+#dietModal .share-editor-heading h3,
+.workout-share-shell .share-editor-heading h3 { margin: .35rem 0 .5rem; color: #f8fafc; font-size: 1.35rem; line-height: 1.25; }
+#dietModal .share-editor-heading > span,
+.workout-share-shell .share-editor-heading > span { color: #60a5fa; font-size: .75rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+#dietModal .share-editor-heading p,
+.workout-share-shell .share-editor-heading p { margin: 0 0 1rem; color: #cbd5e1; font-size: .875rem; line-height: 1.5; }
+#dietModal .share-preview-label { margin: 0 0 .75rem; color: #94a3b8; font-size: .75rem; font-weight: 700; }
+#dietModal .diet-share-panel,
+.workout-share-shell .workout-share-option,
+.workout-share-shell .workout-share-preview { background: #0b1220; border: 1px solid rgba(96, 165, 250, .25); border-radius: 18px; }
+#dietModal #dietShareCanvas,
+.workout-share-shell .workout-share-preview [data-workout-share-canvas] { display: block; width: min(100%, 280px); height: auto; max-height: none; aspect-ratio: 9 / 16; margin-inline: auto; border-radius: 12px; background: #0b1220; box-shadow: 0 12px 32px rgba(0, 0, 0, .25); }
+#dietModal .diet-share-controls { padding: 1rem; border-radius: 12px; background: rgba(96, 165, 250, .06); }
+#dietModal .diet-share-controls h4,
+.workout-share-shell .workout-share-option h4,
+.workout-share-shell .workout-share-preview h4 { color: #f8fafc; font-size: .9rem; }
+#dietModal .diet-share-controls label,
+.workout-share-shell .workout-share-slider label { color: #cbd5e1; font-size: .8rem; }
+#dietModal .diet-share-controls input { min-height: 32px; }
+.workout-share-shell .workout-share-slider { min-height: 44px; }
+.workout-share-shell .workout-share-mode-toggle button,
+.workout-share-shell .workout-share-exercise-controls button,
+.workout-share-shell .workout-share-photo-actions button { min-height: 44px; min-width: 44px; font-size: .8rem; }
+.workout-share-shell .workout-share-mode-toggle button { color: #cbd5e1; }
+.workout-share-shell .workout-share-mode-toggle button.is-active { color: #dbeafe; background: rgba(59, 130, 246, .2); border-color: #60a5fa; }
+#dietModal #dietShareSubmit,
+.workout-share-shell [data-workout-action="share-workout-card"] { min-height: 48px; padding: .75rem 1rem; border: 1px solid #3b82f6; border-radius: 12px; background: #2563eb; color: #fff; font: inherit; font-weight: 700; }
+#dietModal #dietShareSubmit:disabled,
+.workout-share-shell [data-workout-action="share-workout-card"]:disabled { opacity: .55; cursor: default; }
+#dietModal .diet-share-panel button,
+.workout-share-shell button,
+#todayCardapioBody button { transition: background-color 150ms ease, border-color 150ms ease, transform 150ms ease; }
+#dietModal .diet-share-panel button:active:not(:disabled),
+.workout-share-shell button:active:not(:disabled),
+#todayCardapioBody button:active:not(:disabled) { transform: scale(.98); }
+#dietModal .diet-share-panel :is(button, input, [tabindex]):focus-visible,
+.workout-share-shell :is(button, input, summary, [tabindex]):focus-visible,
+#todayCardapioBody button:focus-visible { outline: 2px solid #93c5fd; outline-offset: 3px; }
+#dietModal #dietShareStatus,
+.workout-share-shell .workout-share-status { min-height: 2.5em; color: #cbd5e1; line-height: 1.4; font-size: .875rem; }
+@media (max-width: 768px) {
+    .workout-share-shell .workout-share-editor { grid-template-columns: minmax(0, 1fr); }
+    .workout-share-shell .workout-share-preview { position: static; }
+    #dietModal #dietShareCanvas,
+    .workout-share-shell .workout-share-preview [data-workout-share-canvas] { width: min(100%, 240px, 25dvh); }
+}
+@media (prefers-reduced-motion: reduce) {
+    #todayCardapioBody .diet-daily-swipe,
+    #todayCardapioBody button,
+    #dietModal .diet-share-panel *,
+    .workout-share-shell * { animation: none !important; transition: none !important; }
+    #todayCardapioBody button:active,
+    #dietModal .diet-share-panel button:active,
+    .workout-share-shell button:active { transform: none; }
+}
+
 /* Gerador de treino: mantém o modal da dieta intacto e concentra a experiência no celular. */
 .plan-wizard-modal--workout {
     --plan-accent: #60a5fa;

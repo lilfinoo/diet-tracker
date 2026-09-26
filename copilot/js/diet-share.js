@@ -45,7 +45,7 @@
         canvas.width = WIDTH; canvas.height = HEIGHT;
         const ctx = canvas.getContext('2d');
         if (!ctx) throw new Error('Não foi possível preparar o card.');
-        ctx.fillStyle = '#06101f'; ctx.fillRect(0, 0, WIDTH, HEIGHT);
+        ctx.fillStyle = '#0b1220'; ctx.fillRect(0, 0, WIDTH, HEIGHT);
         const ratio = Math.max(WIDTH / photo.naturalWidth, HEIGHT / photo.naturalHeight) * model.scale;
         const width = photo.naturalWidth * ratio, height = photo.naturalHeight * ratio;
         const overflowX = (width - WIDTH) / 2, overflowY = (height - HEIGHT) / 2;
@@ -57,27 +57,30 @@
         shade.addColorStop(1, 'rgba(4, 13, 24, .98)');
         ctx.fillStyle = shade; ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
+        ctx.fillStyle = '#0b1220';
+        ctx.beginPath(); ctx.roundRect(48, 1120, WIDTH - 96, 752, 36); ctx.fill();
         ctx.textBaseline = 'top';
-        ctx.fillStyle = '#73e9bc'; ctx.font = '700 43px Inter, Arial, sans-serif';
-        ctx.fillText('FIT-TRACKER.AI', 88, 112);
-        ctx.fillStyle = '#dbeafe'; ctx.font = '600 42px Inter, Arial, sans-serif';
-        ctx.fillText('ESTIMATIVAS POR FOTO', 88, 1220);
-        ctx.fillStyle = '#ffffff'; ctx.font = '800 160px Inter, Arial, sans-serif';
-        ctx.fillText(label(model.values[0], ''), 80, 1300, WIDTH - 160);
+        ctx.fillStyle = '#60a5fa'; ctx.font = '700 42px Inter, Arial, sans-serif';
+        ctx.fillText('ESTIMATIVAS POR FOTO', 104, 1176);
+        ctx.fillStyle = '#ffffff'; ctx.font = '800 144px Inter, Arial, sans-serif';
+        ctx.fillText(label(model.values[0], ''), 104, 1256, WIDTH - 208);
         ctx.fillStyle = '#cbd5e1'; ctx.font = '600 44px Inter, Arial, sans-serif';
-        ctx.fillText('kcal estimadas', 88, 1480);
+        ctx.fillText('kcal estimadas', 104, 1420);
 
         const labels = ['PROTEÍNAS', 'CARBOIDRATOS', 'GORDURAS'];
-        const groupWidth = (WIDTH - 176) / 3;
+        const groupWidth = (WIDTH - 208) / 3;
         model.values.slice(1).forEach((value, index) => {
-            const x = 88 + index * groupWidth;
-            ctx.fillStyle = index === 1 ? '#60a5fa' : '#73e9bc';
-            ctx.fillRect(x, 1624, 60, 5);
+            const x = 104 + index * groupWidth;
+            ctx.fillStyle = index === 1 ? '#60a5fa' : '#6ee7b7';
+            ctx.fillRect(x, 1556, 56, 5);
             ctx.fillStyle = '#ffffff'; ctx.font = '700 56px Inter, Arial, sans-serif';
-            ctx.fillText(label(value, ' g'), x, 1654, groupWidth - 16);
+            ctx.fillText(label(value, ' g'), x, 1586, groupWidth - 16);
             ctx.fillStyle = '#cbd5e1'; ctx.font = '600 25px Inter, Arial, sans-serif';
-            ctx.fillText(labels[index], x, 1734, groupWidth - 16);
+            ctx.fillText(labels[index], x, 1666, groupWidth - 16);
         });
+        ctx.fillStyle = '#6ee7b7'; ctx.fillRect(104, 1750, 56, 5);
+        ctx.font = '700 42px Inter, Arial, sans-serif';
+        ctx.fillText('Fit-Tracker.AI', 104, 1776);
         return canvas;
     }
 

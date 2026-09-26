@@ -22,6 +22,7 @@ function harness({ native = false, share = false, delayFirstBlob = false } = {})
             drawings.push(drawing);
             return { isConnected: true, width: 0, height: 0, getContext: () => ({
                 drawImage: (...args) => drawing.push(args), fillRect() {}, fillText: value => texts.push(value),
+                beginPath() {}, roundRect() {}, fill() {},
                 createLinearGradient: () => ({ addColorStop() {} }),
             }), toBlob: callback => {
                 blobCount++;

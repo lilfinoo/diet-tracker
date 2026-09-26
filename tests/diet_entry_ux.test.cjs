@@ -204,3 +204,19 @@ test('falha ao salvar mantém rascunho e libera nova tentativa', async () => {
     assert.equal(c.node('dietDescription').value, 'Café'); assert.equal(c.node('dietSaveBtn').disabled, false);
     assert.equal(c.node('dietForm').inert, false); assert.ok(c.error);
 });
+
+test('Comi diferente na Home atualiza gráficos e oferece desfazer após recarregar', async () => {
+    const c = savingHarness('', { slotKey: 'cafe', mealId: 9, surface: 'home' });
+    const events = []; let action;
+    c.respond = async () => ({ ok: true, json: async () => ({ state: { result: 'consumed_different', entry: { calories: 0 } } }) });
+    c.applyHomeMealOutcome = (slot, date, state) => { assert.equal(state.result, 'consumed_different'); events.push('summary'); };
+    c.animateHomeMealRemoval = async () => { events.push('animate'); };
+    c.loadTodayCardapio = async () => { events.push('refresh'); };
+    c.focusHomeMeal = () => {};
+    c.showToast = (_, __, options) => { action = options.onAction; events.push('undo'); };
+    c.resetDietDailySlot = (...args) => { assert.deepEqual(args, ['cafe', 'home', '2026-09-10']); };
+    await c.handleDietFormSubmit();
+    assert.deepEqual(events, ['summary', 'animate', 'refresh', 'undo']);
+    assert.equal(c.error, undefined);
+    action();
+});

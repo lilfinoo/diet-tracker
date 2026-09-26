@@ -36,6 +36,7 @@
         window.DietShare?.updatePreview(canvas, photoFile, shareValues(), framing, (state, text) => {
             if (!shareOpen || !canvas.isConnected) return;
             button.disabled = state !== 'ready';
+            button.setAttribute('aria-busy', String(state === 'preparing'));
             status.textContent = text;
             status.setAttribute('role', state === 'error' ? 'alert' : 'status');
         });
@@ -349,15 +350,17 @@
         el('dietShareSubmit').addEventListener('click', async () => {
             const button = el('dietShareSubmit'), status = el('dietShareStatus');
             button.disabled = true;
+            button.setAttribute('aria-busy', 'true');
+            status.setAttribute('role', 'status');
             status.textContent = 'Abrindo compartilhamento…';
             try {
                 const result = await window.DietShare.sharePrepared(photoFile, shareValues(), framing);
                 if (shareOpen) status.textContent = result.status === 'download-started'
-                    ? 'Download solicitado. Confira os downloads do navegador.' : 'Card pronto para compartilhar.';
+                    ? 'Download solicitado. Confira os downloads do navegador.' : result.status === 'shared' ? 'Card compartilhado!' : 'Card pronto para compartilhar.';
             } catch (error) {
                 if (shareOpen) { status.textContent = error.message; status.setAttribute('role', 'alert'); }
             } finally {
-                if (shareOpen) button.disabled = false;
+                if (shareOpen) { button.disabled = false; button.setAttribute('aria-busy', 'false'); }
             }
         });
     });

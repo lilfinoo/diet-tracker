@@ -3,7 +3,7 @@
 
     const WIDTH = 1080;
     const HEIGHT = 1920;
-    const FONT = "Arial, Helvetica, sans-serif";
+    const FONT = "Inter, Arial, sans-serif";
     let revision = 0;
     let current = null;
     let prepared = null;
@@ -20,6 +20,7 @@
             title: String(summary.workout_name || "Meu treino"),
             duration: Number(summary.duration_seconds) || 0,
             mode: draft.mode === "dark" ? "dark" : "photo",
+            transparent: draft.mode !== "dark" && draft.transparent === true,
             preset: ["full", "compact", "minimal"].includes(draft.infoPreset) ? draft.infoPreset : "full",
             photo: draft.photoDataUrl || "",
             scale: Math.max(0.5, Math.min(2, Number(draft.photoScale) || 1)),
@@ -131,19 +132,25 @@
         const listHeight = rows.reduce((height, row) => height + row.height, 0);
         const blockHeight = 66 + 30 + titles.length * 80 + 80 + listHeight + (extraCount ? 64 : 0) + (model.preset === "compact" ? 170 : 0) + 96;
         const top = HEIGHT - 144 - blockHeight;
-        // An opaque panel makes text contrast independent of the chosen photograph.
-        ctx.fillStyle = "#0b1220";
-        ctx.beginPath();
-        const panelY = top - 48, panelBottom = panelY + blockHeight + 96;
-        ctx.moveTo(84, panelY);
-        ctx.arcTo(WIDTH - 48, panelY, WIDTH - 48, panelBottom, 36);
-        ctx.arcTo(WIDTH - 48, panelBottom, 48, panelBottom, 36);
-        ctx.arcTo(48, panelBottom, 48, panelY, 36);
-        ctx.arcTo(48, panelY, WIDTH - 48, panelY, 36);
-        ctx.closePath();
-        ctx.fill();
+        if (model.transparent) {
+            ctx.shadowColor = "rgba(0, 0, 0, .85)";
+            ctx.shadowBlur = 12;
+            ctx.shadowOffsetY = 3;
+        } else {
+            // An opaque panel makes text contrast independent of the chosen photograph.
+            ctx.fillStyle = "#0b1220";
+            ctx.beginPath();
+            const panelY = top - 48, panelBottom = panelY + blockHeight + 96;
+            ctx.moveTo(84, panelY);
+            ctx.arcTo(WIDTH - 48, panelY, WIDTH - 48, panelBottom, 36);
+            ctx.arcTo(WIDTH - 48, panelBottom, 48, panelBottom, 36);
+            ctx.arcTo(48, panelBottom, 48, panelY, 36);
+            ctx.arcTo(48, panelY, WIDTH - 48, panelY, 36);
+            ctx.closePath();
+            ctx.fill();
+        }
         ctx.textBaseline = "top";
-        ctx.fillStyle = "#6ee7b7";
+        ctx.fillStyle = "#60a5fa";
         ctx.font = `700 42px ${FONT}`;
         ctx.fillText("TREINO CONCLUÍDO", x, top);
         let y = top + 88;
@@ -158,7 +165,7 @@
         y += 74;
         if (model.preset === "compact") {
             ctx.fillStyle = "#172337";
-            ctx.fillRect(x, y, width, 132);
+            if (!model.transparent) ctx.fillRect(x, y, width, 132);
             ctx.fillStyle = "#ffffff";
             ctx.font = `700 48px ${FONT}`;
             ctx.fillText(count, x + 28, y + 20);
@@ -224,7 +231,7 @@
         prepared = null;
         notify({ state: "preparing", message: "Preparando card…" });
         const work = (async () => {
-            // Canvas uses the system Arial/Helvetica stack, available without a network font.
+            // Arial remains available when the app's Inter font has not loaded.
             const photo = model.mode === "photo" ? await photoAsset(model.photo) : null;
             if (token !== revision) return null;
             const canvas = drawCard(model, photo);
