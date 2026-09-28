@@ -10,7 +10,7 @@ function harness(native = false) {
         fillText: value => texts.push(value), measureText: value => ({ width: value.length * 25 }) };
     const c = { window: { Capacitor: native ? { isNativePlatform: () => true, getPlatform: () => 'ios', Plugins: {
         FitTrackerShare: { sharePNG: async value => { shares.push(value); return { status: 'shared' }; } }
-    } } : undefined }, navigator: {}, Blob, File,
+    } } : undefined }, navigator: {}, Blob, File, requestAnimationFrame: fn => queueMicrotask(fn),
         URL: { createObjectURL: () => 'blob:card', revokeObjectURL() {} }, setTimeout: fn => { fn(); return 0; },
         FileReader: class { readAsDataURL() { this.result = 'data:image/png;base64,cG5n'; this.onload(); } },
         document: { createElement: tag => tag === 'a' ? { click() { downloads.push(this.download); } }
@@ -68,4 +68,26 @@ test('transparente remove painel, mantém texto e invalida PNG anterior', async 
     h.draft.mode = 'dark';
     await h.api.preparePNG(h.summary, h.draft);
     assert.equal(h.panels.length, 1);
+});
+
+test('prévia aparece no frame antes da exportação e PNG antigo nunca habilita o novo conteúdo', async () => {
+    const h = harness(); const frames = []; const blobs = []; const states = []; let paints = 0;
+    h.c.requestAnimationFrame = callback => frames.push(callback);
+    const create = h.c.document.createElement;
+    h.c.document.createElement = tag => { const node = create(tag); if (tag === 'canvas') node.toBlob = callback => blobs.push(callback); return node; };
+    const canvas = { isConnected: true, setAttribute() {}, getContext: () => ({ drawImage() { paints++; } }) };
+    const first = h.api.updatePreview(canvas, h.summary, h.draft, event => states.push(event.state));
+    frames.splice(0).forEach(fn => fn()); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(paints, 1); assert.equal(blobs.length, 0);
+    frames.splice(0).forEach(fn => fn()); await new Promise(resolve => setImmediate(resolve));
+    h.draft.selectedExerciseIds.add('2');
+    const second = h.api.updatePreview(canvas, h.summary, h.draft, event => states.push(event.state));
+    await assert.rejects(h.api.sharePrepared(h.summary, h.draft), /Aguarde/);
+    blobs.shift()(new Blob(['old'])); await first;
+    assert.equal(states.includes('ready'), false);
+    frames.splice(0).forEach(fn => fn()); await new Promise(resolve => setImmediate(resolve));
+    frames.splice(0).forEach(fn => fn()); await new Promise(resolve => setImmediate(resolve));
+    blobs.shift()(new Blob(['latest'])); await second;
+    assert.equal(states.at(-1), 'ready');
+    assert.equal((await h.api.sharePrepared(h.summary, h.draft)).status, 'download-started');
 });

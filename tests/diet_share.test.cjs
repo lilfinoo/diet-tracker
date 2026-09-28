@@ -9,20 +9,21 @@ function harness({ native = false, share = false, delayFirstBlob = false } = {})
     const links = [];
     const shares = [];
     const texts = [];
+    let panels = 0;
     let heldBlob = null, blobCount = 0;
     const url = { createObjectURL: () => 'blob:photo', revokeObjectURL() {} };
     const context = {
         window: { Capacitor: native ? { isNativePlatform: () => true, getPlatform: () => 'ios', Plugins: {
             FitTrackerShare: { sharePNG: async arg => { shares.push(arg); return { status: 'cancelled' }; } },
         } } : undefined },
-        URL: url, Blob, File, setTimeout: fn => { fn(); return 0; },
+        URL: url, Blob, File, requestAnimationFrame: fn => queueMicrotask(fn), setTimeout: fn => { fn(); return 0; },
         navigator: share ? { canShare: () => true, share: async arg => { shares.push(arg); } } : {},
         document: { createElement: tag => tag === 'a' ? { click() { links.push(this.download); } } : (() => {
             const drawing = [];
             drawings.push(drawing);
             return { isConnected: true, width: 0, height: 0, getContext: () => ({
                 drawImage: (...args) => drawing.push(args), fillRect() {}, fillText: value => texts.push(value),
-                beginPath() {}, roundRect() {}, fill() {},
+                beginPath() {}, roundRect() { panels++; }, fill() {},
                 createLinearGradient: () => ({ addColorStop() {} }),
             }), toBlob: callback => {
                 blobCount++;
@@ -34,7 +35,7 @@ function harness({ native = false, share = false, delayFirstBlob = false } = {})
         FileReader: class { readAsDataURL() { this.result = 'data:image/png;base64,cG5n'; this.onload(); } },
     };
     vm.createContext(context); vm.runInContext(source, context);
-    return { api: context.window.DietShare, context, drawings, links, shares, texts,
+    return { api: context.window.DietShare, context, drawings, links, shares, texts, panels: () => panels,
         releaseBlob: () => heldBlob(new Blob(['old'], { type: 'image/png' })),
         canvas: { isConnected: true, getContext: () => ({ drawImage() {} }) },
         file: new File(['photo'], 'photo.jpg', { type: 'image/jpeg' }),
@@ -51,6 +52,18 @@ test('prévia 9:16 usa cover, limita deslocamento e mantém ausências como tra�
     assert.ok(y <= 0 && y + height >= 1920);
     assert.ok(h.texts.includes('—'));
     await assert.rejects(h.api.sharePrepared(h.file, h.values, h.framing), /Aguarde/);
+});
+
+test('prévia transparente remove o painel e invalida o PNG sólido anterior', async () => {
+    const h = harness();
+    await h.api.updatePreview(h.canvas, h.file, h.values, h.framing, () => {});
+    assert.equal(h.panels(), 1);
+    const transparent = { ...h.framing, transparent: true };
+    await assert.rejects(h.api.sharePrepared(h.file, h.values, transparent), /Aguarde/);
+    await h.api.updatePreview(h.canvas, h.file, h.values, transparent, () => {});
+    assert.equal(h.panels(), 1);
+    assert.ok(h.texts.includes('ESTIMATIVAS POR FOTO'));
+    assert.equal((await h.api.sharePrepared(h.file, h.values, transparent)).status, 'download-started');
 });
 
 test('resultado assíncrono antigo não substitui enquadramento novo', async () => {
@@ -83,4 +96,27 @@ test('iOS usa plugin existente e navegador sem share baixa PNG', async () => {
     await web.api.updatePreview(web.canvas, web.file, web.values, web.framing, () => {});
     assert.equal((await web.api.sharePrepared(web.file, web.values, web.framing)).status, 'download-started');
     assert.deepEqual(web.links, ['macros-card.png']);
+});
+
+test('desenha antes do PNG; eventos no mesmo frame só desenham a última prévia', async () => {
+    const h = harness({ delayFirstBlob: true }); const frames = []; let paints = 0;
+    h.context.requestAnimationFrame = callback => frames.push(callback);
+    h.canvas.getContext = () => ({ drawImage() { paints++; } });
+    const old = h.api.updatePreview(h.canvas, h.file, h.values, h.framing, () => {});
+    const current = h.api.updatePreview(h.canvas, h.file, h.values, { ...h.framing, scale: 2 }, () => {});
+    await new Promise(resolve => setImmediate(resolve));
+    frames.splice(0).forEach(fn => fn()); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(paints, 1);
+    await assert.rejects(h.api.sharePrepared(h.file, h.values, { ...h.framing, scale: 2 }), /Aguarde/);
+    frames.splice(0).forEach(fn => fn()); await new Promise(resolve => setImmediate(resolve));
+    h.releaseBlob(); await Promise.all([old, current]);
+    assert.equal((await h.api.sharePrepared(h.file, h.values, { ...h.framing, scale: 2 })).status, 'download-started');
+});
+test('fechar durante exportação impede PNG antigo de habilitar compartilhamento', async () => {
+    const h = harness({ delayFirstBlob: true }); const states = [];
+    const pending = h.api.updatePreview(h.canvas, h.file, h.values, h.framing, state => states.push(state));
+    await new Promise(resolve => setImmediate(resolve));
+    h.api.reset(); h.releaseBlob(); await pending;
+    assert.deepEqual(states, ['preparing']);
+    await assert.rejects(h.api.sharePrepared(h.file, h.values, h.framing), /Aguarde/);
 });

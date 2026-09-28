@@ -222,7 +222,15 @@
         return window.Capacitor?.isNativePlatform?.() && window.Capacitor.getPlatform?.() === "ios";
     }
 
-    async function preparePNG(summary, draft) {
+    function paintPreview(canvas, rendered, model) {
+        if (!canvas || canvas.isConnected === false) return;
+        canvas.width = WIDTH;
+        canvas.height = HEIGHT;
+        canvas.getContext("2d").drawImage(rendered, 0, 0);
+        canvas.setAttribute("aria-label", `Card do treino ${model.title}: ${model.exercises.length} exercícios selecionados.`);
+    }
+
+    async function preparePNG(summary, draft, preview = null) {
         const model = snapshot(summary, draft);
         if (prepared && sameSnapshot(prepared.model, model)) return prepared;
         if (preparing && sameSnapshot(current, model)) return preparing;
@@ -233,9 +241,15 @@
         const work = (async () => {
             // Arial remains available when the app's Inter font has not loaded.
             const photo = model.mode === "photo" ? await photoAsset(model.photo) : null;
+            await new Promise(requestAnimationFrame);
             if (token !== revision) return null;
             const canvas = drawCard(model, photo);
+            paintPreview(preview, canvas, model);
+            // Let the visible preview paint before encoding; newer input cancels stale exports.
+            await new Promise(requestAnimationFrame);
+            if (token !== revision) return null;
             const blob = await pngBlob(canvas);
+            if (token !== revision) return null;
             const file = new File([blob], "treino-card.png", { type: "image/png" });
             const base64 = isNativeIOS() ? await pngData(blob) : null;
             if (token !== revision) return null;
@@ -257,12 +271,9 @@
         notify = onState;
         const model = snapshot(summary, draft);
         try {
-            const result = await preparePNG(summary, draft);
+            const result = await preparePNG(summary, draft, canvas);
             if (!result || !sameSnapshot(current, model) || canvas.isConnected === false) return;
-            canvas.width = WIDTH;
-            canvas.height = HEIGHT;
-            canvas.getContext("2d").drawImage(result.canvas, 0, 0);
-            canvas.setAttribute("aria-label", `Card do treino ${model.title}: ${model.exercises.length} exercícios selecionados.`);
+            paintPreview(canvas, result.canvas, model);
             notify({ state: busy ? "sharing" : "ready", message: busy ? "Compartilhamento aberto…" : "Card pronto para compartilhar." });
         } catch (_) {
             // preparePNG already exposes the error beside the sharing action.

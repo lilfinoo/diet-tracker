@@ -3,8 +3,8 @@
     const el = id => document.getElementById(id);
     const fields = ['dietCalories', 'dietProtein', 'dietCarbs', 'dietFat'];
     let step = 1, method = 'text', photo = null, photoFile = null, dirty = false, busy = false;
-    let analyzedPhoto = false, shareOpen = false;
-    const framing = { scale: 1, x: 0, y: 0 };
+    let analyzedPhoto = false, shareOpen = false, shareReady = false, sharing = false;
+    const framing = { scale: 1, x: 0, y: 0, transparent: false };
     let version = 0, estimateDescription = '', stale = false, editing = false;
     let photoVersion = 0, loadingPhoto = false, identified = false;
     let acquisitionVersion = 0, acquisitionActive = false, acquisitionSource = 'CAMERA';
@@ -26,6 +26,7 @@
     }
     function closeShare() {
         shareOpen = false;
+        shareReady = false;
         el('dietSharePanel').hidden = true;
         window.DietShare?.reset();
     }
@@ -35,11 +36,20 @@
         const canvas = el('dietShareCanvas'), button = el('dietShareSubmit'), status = el('dietShareStatus');
         window.DietShare?.updatePreview(canvas, photoFile, shareValues(), framing, (state, text) => {
             if (!shareOpen || !canvas.isConnected) return;
-            button.disabled = state !== 'ready';
-            button.setAttribute('aria-busy', String(state === 'preparing'));
+            shareReady = state === 'ready';
+            button.disabled = !shareReady || sharing;
+            button.setAttribute('aria-busy', String(state === 'preparing' || sharing));
             status.textContent = text;
             status.setAttribute('role', state === 'error' ? 'alert' : 'status');
         });
+    }
+    function setShareBackground(transparent) {
+        framing.transparent = transparent;
+        el('dietShareSolid').classList.toggle('is-active', !transparent);
+        el('dietShareSolid').setAttribute('aria-pressed', String(!transparent));
+        el('dietShareTransparent').classList.toggle('is-active', transparent);
+        el('dietShareTransparent').setAttribute('aria-pressed', String(transparent));
+        syncSharePreview();
     }
     function dataUrlBlob(dataUrl) {
         const match = String(dataUrl).match(/^data:([^;,]+)(?:;[^,]+)*,([^]*)$/);
@@ -341,6 +351,8 @@
             syncSharePreview();
         });
         el('dietShareCancel').addEventListener('click', () => { closeShare(); render(); el('dietShareOpen').focus(); });
+        el('dietShareSolid').addEventListener('click', () => setShareBackground(false));
+        el('dietShareTransparent').addEventListener('click', () => setShareBackground(true));
         for (const [id, key] of [['dietShareZoom', 'scale'], ['dietShareX', 'x'], ['dietShareY', 'y']]) {
             el(id).addEventListener('input', event => {
                 framing[key] = key === 'scale' ? Number(event.target.value) / 100 : Number(event.target.value);
@@ -349,6 +361,8 @@
         }
         el('dietShareSubmit').addEventListener('click', async () => {
             const button = el('dietShareSubmit'), status = el('dietShareStatus');
+            if (sharing || !shareReady) return;
+            sharing = true;
             button.disabled = true;
             button.setAttribute('aria-busy', 'true');
             status.setAttribute('role', 'status');
@@ -356,11 +370,12 @@
             try {
                 const result = await window.DietShare.sharePrepared(photoFile, shareValues(), framing);
                 if (shareOpen) status.textContent = result.status === 'download-started'
-                    ? 'Download solicitado. Confira os downloads do navegador.' : result.status === 'shared' ? 'Card compartilhado!' : 'Card pronto para compartilhar.';
+                    ? 'Download solicitado. Confira os downloads do navegador.' : result.status === 'shared' ? 'Card compartilhado!' : 'Compartilhamento cancelado. Seu card foi mantido.';
             } catch (error) {
                 if (shareOpen) { status.textContent = error.message; status.setAttribute('role', 'alert'); }
             } finally {
-                if (shareOpen) { button.disabled = false; button.setAttribute('aria-busy', 'false'); }
+                sharing = false;
+                if (shareOpen) { button.disabled = !shareReady; button.setAttribute('aria-busy', String(!shareReady)); }
             }
         });
     });

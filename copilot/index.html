@@ -23,7 +23,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet" media="print" onload="this.media='all'">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="/styles.css?v=20260926-home-share">
+    <link rel="stylesheet" href="/styles.css?v=20260926-diet-transparent">
     <link rel="stylesheet" href="/fluid.css?v=20260828-achievements">
 </head>
 <body data-auth-state="unknown">
@@ -776,6 +776,12 @@
                             <label for="dietShareZoom">Zoom</label><input id="dietShareZoom" type="range" min="100" max="250" value="100">
                             <label for="dietShareX">Posição horizontal</label><input id="dietShareX" type="range" min="-100" max="100" value="0">
                             <label for="dietShareY">Posição vertical</label><input id="dietShareY" type="range" min="-100" max="100" value="0">
+                            <h4>Fundo das estimativas</h4>
+                            <div class="diet-share-background" aria-label="Fundo das estimativas">
+                                <button type="button" id="dietShareSolid" class="is-active" data-diet-share-background="solid" aria-pressed="true">Sólido</button>
+                                <button type="button" id="dietShareTransparent" data-diet-share-background="transparent" aria-pressed="false">Transparente</button>
+                            </div>
+                            <small class="diet-share-background-hint">Sem painel, com sombra no texto para destacar a foto.</small>
                         </div>
                         <p id="dietShareStatus" role="status" aria-live="polite"></p>
                         <div class="diet-share-actions"><button type="button" id="dietShareCancel" class="btn-secondary">Voltar à revisão</button><button type="button" id="dietShareSubmit" class="btn-primary" disabled>Compartilhar PNG</button></div>
@@ -1048,8 +1054,8 @@
     <script defer src="/js/body-evolution.js?v=20260909"></script>
     <script defer src="/js/exercise-media.js?v=20260828-achievements"></script>
     <script defer src="/script.js?v=20260926-home-share"></script>
-    <script defer src="/js/diet-entry.js?v=20260926-home-share"></script>
-    <script defer src="/js/diet-share.js?v=20260926-home-share"></script>
+    <script defer src="/js/diet-entry.js?v=20260926-diet-transparent"></script>
+    <script defer src="/js/diet-share.js?v=20260926-diet-transparent"></script>
     <script defer src="/js/workout-share.js?v=20260926-home-share"></script>
     <script defer src="/js/plans.js?v=20260926-home-share"></script>
     <script defer src="/js/home-refresh.js?v=20260921-home-refresh"></script>

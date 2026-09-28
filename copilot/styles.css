@@ -16942,6 +16942,10 @@ button.profile-recent-card { width: 100%; text-align: left; color: inherit; font
 #dietModal .diet-share-controls label,
 .workout-share-shell .workout-share-slider label { color: #cbd5e1; font-size: .8rem; }
 #dietModal .diet-share-controls input { min-height: 32px; }
+#dietModal .diet-share-controls .diet-share-background { display: flex; gap: .5rem; }
+#dietModal .diet-share-controls .diet-share-background button { flex: 1; min-height: 44px; border: 1px solid rgba(148, 163, 184, .25); border-radius: 10px; color: #cbd5e1; background: #111c2c; font: inherit; font-weight: 700; }
+#dietModal .diet-share-controls .diet-share-background button.is-active { color: #dbeafe; border-color: #60a5fa; background: rgba(59, 130, 246, .2); }
+#dietModal .diet-share-controls .diet-share-background-hint { color: #94a3b8; font-size: .75rem; line-height: 1.4; }
 .workout-share-shell .workout-share-slider { min-height: 44px; }
 .workout-share-shell .workout-share-mode-toggle button,
 .workout-share-shell .workout-share-exercise-controls button,
@@ -17686,7 +17690,6 @@ html[data-native-platform="ios"] .home-refresh-indicator:is([data-state="partial
     background: rgba(3, 8, 15, .58);
     backdrop-filter: blur(10px);
     opacity: 0;
-    transition: opacity 180ms ease;
 }
 .diet-daily-actions-overlay.is-open { opacity: 1; }
 .diet-daily-actions-sheet {
@@ -17697,8 +17700,6 @@ html[data-native-platform="ios"] .home-refresh-indicator:is([data-state="partial
     color: #eef7f4;
     background: linear-gradient(180deg, rgba(19, 31, 48, .99), rgba(10, 19, 31, .99));
     box-shadow: 0 24px 70px rgba(0, 0, 0, .5), inset 0 1px rgba(255, 255, 255, .04);
-    transform: translateY(24px) scale(.98);
-    transition: transform 200ms cubic-bezier(.22, .75, .26, 1);
 }
 .diet-daily-actions-overlay.is-open .diet-daily-actions-sheet { transform: translateY(0) scale(1); }
 .diet-daily-actions-sheet__handle { width: 2.5rem; height: 4px; display: block; margin: .05rem auto .65rem; border-radius: 999px; background: rgba(148, 163, 184, .34); }

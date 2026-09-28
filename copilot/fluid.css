@@ -46,9 +46,6 @@
 
 /* ---------- 2. Modal material: JS drives scale/translate/opacity ---------- */
 /* Base styles.css used a fixed keyframe entrance; hand it to the spring engine. */
-.modal-content {
-  will-change: transform, opacity;
-}
 .modal .modal-content[data-fluid-material="true"] {
   animation: none;
 }

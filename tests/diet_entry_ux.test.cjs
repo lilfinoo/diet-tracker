@@ -154,6 +154,13 @@ test('card aparece só após análise por foto e cancelar mantém revisão', asy
     c.click('dietShareOpen'); assert.equal(c.node('dietSharePanel').hidden, false);
     c.node('dietShareZoom').listeners.input({ target: { value: '175' } });
     assert.equal(c.shareUpdates.at(-1).framing.scale, 1.75);
+    assert.equal(c.shareUpdates.at(-1).framing.transparent, false);
+    c.click('dietShareTransparent');
+    assert.equal(c.shareUpdates.at(-1).framing.transparent, true);
+    assert.equal(c.node('dietShareTransparent')['aria-pressed'], 'true');
+    assert.equal(c.node('dietShareSolid')['aria-pressed'], 'false');
+    c.click('dietShareSolid');
+    assert.equal(c.shareUpdates.at(-1).framing.transparent, false);
     c.input('dietProtein', '25');
     assert.equal(c.shareUpdates.at(-1).values[1], '25');
     c.click('dietShareCancel');
@@ -172,7 +179,9 @@ test('card some ao editar descrição, remover foto ou seguir sem análise', asy
 
 function savingHarness(entryId = '', daily = null) {
     const c = harness();
-    Object.assign(c, { pendingDietDailyContext: daily, currentTab: 'diet',
+    Object.assign(c, { pendingDietDailyContext: daily, currentTab: 'diet', todayDietDay: null,
+        invalidateHomeMealReads() {}, applyHomeDietEntry() {}, renderTodayCardapio() {},
+        refreshHomeMealsInBackground() { c.loadTodayCardapio(); },
         showToast() {}, showDietMessage(text) { c.error = text; },
         closeDietModal() { c.closed = true; c.flow.canClose(); },
         loadDietEntries: async () => {}, loadTodayCardapio: async () => {}, refreshDietDailySurfaces: async () => {} });
@@ -205,7 +214,7 @@ test('falha ao salvar mantém rascunho e libera nova tentativa', async () => {
     assert.equal(c.node('dietForm').inert, false); assert.ok(c.error);
 });
 
-test('Comi diferente na Home atualiza gráficos e oferece desfazer após recarregar', async () => {
+test('Comi diferente na Home atualiza gráficos e oferece desfazer sem aguardar recarga', async () => {
     const c = savingHarness('', { slotKey: 'cafe', mealId: 9, surface: 'home' });
     const events = []; let action;
     c.respond = async () => ({ ok: true, json: async () => ({ state: { result: 'consumed_different', entry: { calories: 0 } } }) });

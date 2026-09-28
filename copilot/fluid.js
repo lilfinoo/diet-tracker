@@ -17,6 +17,23 @@
     const active = new Map();
     const AXES = ["x", "y", "scale", "opacity"];
     let ticking = false;
+    const motionQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    const reducedMotion = () => Boolean(motionQuery?.matches);
+
+    function finish(el, st) {
+        active.delete(el);
+        clearTimeout(st.timer);
+        write(el, st.target);
+        st.onComplete?.();
+    }
+
+    motionQuery?.addEventListener("change", () => {
+        if (!reducedMotion()) return;
+        for (const [el, st] of [...active]) {
+            if (active.get(el) === st) finish(el, st);
+        }
+        window.dispatchEvent?.(new CustomEvent('fittracker:reduced-motion'));
+    });
 
     function readCurrent(el, from, existing) {
         if (existing) {
@@ -48,6 +65,14 @@
 
     function tick(now) {
         for (const [el, st] of active) {
+            if (st.duration != null) {
+                const progress = Math.min(1, (now - st.started) / st.duration);
+                const eased = 1 - Math.pow(1 - progress, 3);
+                for (const key of AXES) st.cur[key] = st.from[key] + (st.target[key] - st.from[key]) * eased;
+                if (progress === 1 || reducedMotion()) finish(el, st);
+                else write(el, st.cur);
+                continue;
+            }
             const elapsed = ((now - (st.last || now)) / 1000) || 0.016;
             st.last = now;
             let remaining = Math.min(elapsed, 0.064);
@@ -65,9 +90,7 @@
                 Math.abs(st.vel.x) < 0.02 && Math.abs(st.vel.y) < 0.02 &&
                 Math.abs(st.vel.scale) < 0.001 && Math.abs(st.vel.opacity) < 0.001;
             if (settled) {
-                write(el, st.target);
-                active.delete(el);
-                if (st.onComplete) st.onComplete();
+                finish(el, st);
             }
         }
         if (active.size > 0) {
@@ -96,17 +119,18 @@
         opts = opts || {};
         const existing = active.get(el);
 
-        if (existing) {
+        if (existing && opts.duration == null && !reducedMotion()) {
             // Interruptible re-target: continue from the live value/velocity.
             for (const key of AXES) if (to[key] !== undefined) existing.target[key] = to[key];
             if (opts.velocity) {
                 existing.vel.x += opts.velocity.x || 0;
                 existing.vel.y += opts.velocity.y || 0;
             }
+            existing.onComplete = opts.onComplete;
             return handle(existing);
         }
 
-        const cur = readCurrent(el, opts.from, null);
+        const cur = readCurrent(el, opts.from, existing);
         const ph = animate.paramsFor(opts);
         const st = {
             cur: { x: cur.x, y: cur.y, scale: cur.scale, opacity: cur.opacity },
@@ -118,9 +142,26 @@
                       scale: to.scale !== undefined ? to.scale : cur.scale,
                       opacity: to.opacity !== undefined ? to.opacity : cur.opacity },
             k: ph.k, c: ph.c, last: null,
-            onComplete: opts.onComplete
+            onComplete: opts.onComplete,
+            duration: opts.duration,
+            started: performance.now(),
+            from: { ...cur }
         };
+        clearTimeout(existing?.timer);
+        active.delete(el);
+        if (reducedMotion()) {
+            write(el, st.target);
+            st.onComplete?.();
+            return emptyHandle();
+        }
         active.set(el, st);
+        if (st.duration != null) {
+            // A throttled/background frame must not keep a closing overlay or its focus trap alive.
+            st.timer = setTimeout(() => {
+                if (active.get(el) === st) finish(el, st);
+            }, st.duration);
+        }
+        write(el, cur);
         ensureTicking();
         return handle(st);
     }
@@ -138,7 +179,7 @@
             },
             stop() {
                 const entry = [...active.entries()].find(([, value]) => value === st);
-                if (entry) active.delete(entry[0]);
+                if (entry) { clearTimeout(st.timer); active.delete(entry[0]); }
             }
         };
     }
@@ -173,6 +214,8 @@
 
     window.Fluid = {
         animate,
+        reducedMotion,
+        stop(el) { clearTimeout(active.get(el)?.timer); active.delete(el); },
         project,
         relativeVelocity,
         rubberband,

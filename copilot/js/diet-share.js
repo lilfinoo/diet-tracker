@@ -16,6 +16,7 @@
             scale: Math.max(1, Math.min(2.5, Number(framing.scale) || 1)),
             x: Math.max(-100, Math.min(100, Number(framing.x) || 0)),
             y: Math.max(-100, Math.min(100, Number(framing.y) || 0)),
+            transparent: framing.transparent === true,
         };
     }
 
@@ -57,8 +58,14 @@
         shade.addColorStop(1, 'rgba(4, 13, 24, .98)');
         ctx.fillStyle = shade; ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-        ctx.fillStyle = '#0b1220';
-        ctx.beginPath(); ctx.roundRect(48, 1120, WIDTH - 96, 752, 36); ctx.fill();
+        if (model.transparent) {
+            ctx.shadowColor = 'rgba(0, 0, 0, .85)';
+            ctx.shadowBlur = 12;
+            ctx.shadowOffsetY = 3;
+        } else {
+            ctx.fillStyle = '#0b1220';
+            ctx.beginPath(); ctx.roundRect(48, 1120, WIDTH - 96, 752, 36); ctx.fill();
+        }
         ctx.textBaseline = 'top';
         ctx.fillStyle = '#60a5fa'; ctx.font = '700 42px Inter, Arial, sans-serif';
         ctx.fillText('ESTIMATIVAS POR FOTO', 104, 1176);
@@ -105,13 +112,18 @@
         onState('preparing', 'Preparando card…');
         try {
             const photo = await loadPhoto(file);
-            if (token !== revision) return;
-            const rendered = draw(photo, model);
-            const blob = await pngBlob(rendered);
-            const base64 = isNativeIOS() ? await base64Data(blob) : null;
+            await new Promise(requestAnimationFrame);
             if (token !== revision || !canvas.isConnected) return;
+            const rendered = draw(photo, model);
             canvas.width = WIDTH; canvas.height = HEIGHT;
             canvas.getContext('2d').drawImage(rendered, 0, 0);
+            // Export only after the visible frame, and only for the current preview.
+            await new Promise(requestAnimationFrame);
+            if (token !== revision || !canvas.isConnected) return;
+            const blob = await pngBlob(rendered);
+            if (token !== revision) return;
+            const base64 = isNativeIOS() ? await base64Data(blob) : null;
+            if (token !== revision || !canvas.isConnected) return;
             prepared = { file, model, blob, base64, revision: token };
             onState('ready', 'Card pronto para compartilhar.');
         } catch (error) {

@@ -172,3 +172,29 @@ test('Home derives active dock from existing daily contract and loads one reques
     assert.equal(calls.length,1); assert.equal(api.dock().plan.id,1);
     await api.loadWorkoutTodayCard(); assert.equal(calls.length,1);
 });
+
+test('confirmed finish focuses the summary and enters once; queued finish only focuses', async () => {
+    for (const queued of [false, true]) {
+        const h = harness(); const entries = [], focus = [], toasts = [];
+        const summaryNode = {};
+        h.nodes.set('completedWorkoutTitle', { focus: () => focus.push('summary'), closest: () => summaryNode });
+        h.window.Fluid = { animate: (node, target, options) => entries.push({ node, options }) };
+        h.c.showToast = (_, type) => toasts.push(type);
+        h.c.respond = async () => ({ queued, summary: { workout_name: 'Treino', personal_records: [{ exercise_name: 'Supino' }] } });
+        await h.api.finishWorkoutSession();
+        assert.deepEqual(focus, ['summary']);
+        assert.equal(entries.length, queued ? 0 : 1);
+        assert.equal(h.s.completedSummary.sync_pending, queued);
+        assert.equal(h.s.completedSummary.personal_records.length, 1);
+        assert.deepEqual(toasts, [queued ? 'info' : 'success']);
+        await h.api.finishWorkoutSession();
+        assert.equal(entries.length, queued ? 0 : 1);
+    }
+});
+test('failed finish keeps the session and never animates a success', async () => {
+    const h = harness(); let entered = false;
+    h.window.Fluid = { animate() { entered = true; } };
+    h.c.respond = async () => { throw Object.assign(new Error('Falhou'), { status: 500 }); };
+    await h.api.finishWorkoutSession();
+    assert.equal(h.s.session.id, 77); assert.equal(entered, false); assert.equal(h.s.completedSummary, null);
+});

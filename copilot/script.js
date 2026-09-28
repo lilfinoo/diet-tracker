@@ -610,17 +610,20 @@ async function handleDietFormSubmit() {
 
         if (!ownsDraft()) return;
         if (response.ok) {
+            const data = await response.json();
+            if (!ownsDraft()) return;
+            invalidateHomeMealReads();
             window.DietEntryFlow?.saved();
-            closeDietModal();
             if (dailyContext?.surface === 'home') {
-                const data = await response.json();
                 applyHomeMealOutcome(dailyContext.slotKey, payload.date, data.state);
-                await animateHomeMealRemoval(dailyContext.slotKey);
+                animateHomeMealRemoval(dailyContext.slotKey);
+                renderTodayCardapio(todayDietDay);
+            } else if (todayDietDay && data.entry) {
+                applyHomeDietEntry(data.entry);
             }
-            if (currentTab === 'diet_plans') await refreshDietDailySurfaces();
-            else await loadTodayCardapio({ force: true });
+            closeDietModal();
+            refreshHomeMealsInBackground();
             if (dailyContext?.surface === 'home') {
-                focusHomeMeal();
                 showToast('Refeição registrada!', 'success', {
                     actionLabel: 'Desfazer', duration: 5000,
                     onAction: () => resetDietDailySlot(dailyContext.slotKey, 'home', payload.date)
@@ -2540,16 +2543,16 @@ function getModalFocusable(modal) {
     if (!modal) return [];
     const selector = "a[href], button:not([disabled]), input:not([disabled]):not([type='hidden']), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
     return Array.from(modal.querySelectorAll(selector)).filter(element => {
-        return !element.hidden && element.getAttribute("aria-hidden") !== "true" && element.getClientRects().length > 0;
+        return !element.closest("[inert], [hidden], [aria-hidden='true']") && element.getClientRects().length > 0;
     });
 }
 
 function updateModalBackground(modal) {
-    document.querySelectorAll(".modal.modal--active").forEach(element => {
+    document.querySelectorAll(".modal--active").forEach(element => {
         element.classList.remove("modal--active");
     });
     document.querySelectorAll("[data-modal-background-inert]").forEach(element => {
-        element.inert = false;
+        element.inert = element.dataset.modalBackgroundInert === "true";
         delete element.dataset.modalBackgroundInert;
     });
     if (!modal) return;
@@ -2558,28 +2561,34 @@ function updateModalBackground(modal) {
     const background = modal.parentElement === document.body
         ? [getElement("mainScreen")]
         : [document.querySelector(".app-header"), document.querySelector(".app-shell"), getElement("activeWorkoutDock")];
-    document.querySelectorAll(".modal.show").forEach(otherModal => {
+    document.querySelectorAll(".modal.show, .diet-daily-actions-overlay.show").forEach(otherModal => {
         if (otherModal !== modal) background.push(otherModal);
     });
     background.filter(Boolean).forEach(element => {
+        element.dataset.modalBackgroundInert = String(element.inert);
         element.inert = true;
-        element.dataset.modalBackgroundInert = "true";
     });
 }
 
 function openAppModal(modal) {
     if (!modal) return;
-    modalTrigger = document.activeElement;
-    modal._modalTrigger = modalTrigger;
-    modal._previousActiveModal = activeModal && activeModal !== modal ? activeModal : null;
+    if (activeModal !== modal) {
+        modalTrigger = document.activeElement;
+        modal._modalTrigger = modalTrigger;
+        modal._previousActiveModal = activeModal;
+    }
     activeModal = modal;
+    modal._fluidClosing = false;
+    modal._restoreFocus = true;
     modal.classList.add("show");
     modal.setAttribute("aria-hidden", "false");
     document.body.classList.add("modal-open");
     window.dispatchEvent(new CustomEvent('fittracker:home-refresh-eligibility'));
     updateModalBackground(modal);
     const focusTarget = getModalFocusable(modal)[0];
-    if (focusTarget) requestAnimationFrame(() => focusTarget.focus());
+    if (focusTarget) requestAnimationFrame(() => {
+        if (activeModal === modal && !modal._fluidClosing) focusTarget.focus({ preventScroll: true });
+    });
 
     const fluid = typeof Fluid !== "undefined" ? Fluid : null;
     if (fluid) {
@@ -2589,37 +2598,31 @@ function openAppModal(modal) {
 }
 
 function materializeModal(modal, fluid) {
-    const content = modal.querySelector(".modal-content");
+    const content = modal.querySelector(".modal-content, .diet-daily-actions-sheet");
     if (!content) return;
-    const reduced = typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-
     modal._fluidGen = (modal._fluidGen || 0) + 1;
     modal._fluidClosing = false;
     content.dataset.fluidMaterial = "true";
-
-    if (reduced) {
-        content.style.transform = "none";
-        content.style.opacity = "";
-        modal.style.opacity = "";
-        return;
-    }
-
-    content.style.willChange = "transform, opacity";
-    content.style.transform = "translate3d(0,26px,0) scale(0.96)";
-    content.style.opacity = "0";
-    modal.style.opacity = "0";
-    requestAnimationFrame(() => {
-        fluid.animate(content, { y: 0, scale: 1, opacity: 1 }, {
-            response: 0.42,
-            damping: 1.0,
-            from: { y: 26, scale: 0.96, opacity: 0 }
-        });
-        fluid.animate(modal, { opacity: 1 }, { response: 0.32, damping: 1.0 });
+    fluid.animate(modal, { opacity: 1 }, { duration: 180, from: { opacity: 0 } });
+    fluid.animate(content, { y: 0, scale: 1, opacity: 1 }, {
+        duration: 280, from: { y: 16, scale: 1, opacity: 0 }
     });
 }
 
+function restoreModalFocus(trigger, previousModal) {
+    const valid = trigger instanceof HTMLElement && trigger.isConnected
+        && !trigger.closest('[inert], [hidden], [aria-hidden="true"]')
+        && !trigger.disabled && trigger.getClientRects().length;
+    const fallback = previousModal ? getModalFocusable(previousModal)[0]
+        : document.querySelector('.nav-btn.active, [data-app-view="diet"]');
+    (valid ? trigger : fallback)?.focus({ preventScroll: true });
+}
+
 function finalizeModalClose(modal) {
-    const content = modal.querySelector(".modal-content");
+    const content = modal.querySelector(".modal-content, .diet-daily-actions-sheet");
+    modal._cancelDrag?.();
+    window.Fluid?.stop(modal);
+    window.Fluid?.stop(content);
     if (content) {
         content.style.transform = "none";
         content.style.opacity = "";
@@ -2629,7 +2632,7 @@ function finalizeModalClose(modal) {
     modal.classList.remove("show");
     modal.classList.remove("modal--active");
     modal.setAttribute("aria-hidden", "true");
-    document.querySelectorAll(".modal.show").forEach(otherModal => {
+    document.querySelectorAll(".modal.show, .diet-daily-actions-overlay.show").forEach(otherModal => {
         if (otherModal._previousActiveModal === modal) {
             otherModal._previousActiveModal = modal._previousActiveModal;
         }
@@ -2640,23 +2643,25 @@ function finalizeModalClose(modal) {
         document.body.classList.toggle("modal-open", Boolean(previousModal));
         updateModalBackground(previousModal);
         const trigger = modal._modalTrigger;
-        if (trigger instanceof HTMLElement && !trigger.inert) trigger.focus();
+        if (modal._restoreFocus !== false) restoreModalFocus(trigger, previousModal);
         modalTrigger = previousModal?._modalTrigger || null;
     }
     modal._previousActiveModal = null;
     modal._modalTrigger = null;
+    if (modal.classList.contains("diet-daily-actions-overlay")) modal.remove();
     window.dispatchEvent(new CustomEvent('fittracker:home-refresh-eligibility'));
 }
 
-function closeAppModal(modal) {
+function closeAppModal(modal, options = {}) {
     if (!modal) return;
     if (modal.id === "dietModal" && window.DietEntryFlow?.canClose() === false) return false;
     if (modal.id === 'loginScreen' && !currentUser) pendingAuthIntent = null;
     const fluid = typeof Fluid !== "undefined" ? Fluid : null;
-    const content = modal.querySelector(".modal-content");
+    const content = modal.querySelector(".modal-content, .diet-daily-actions-sheet");
     const gen = modal._fluidGen || 0;
 
     modal._fluidClosing = true;
+    modal._restoreFocus = options.restoreFocus !== false;
     if (content) content.dataset.fluidMaterial = "true";
 
     const done = () => {
@@ -2665,22 +2670,21 @@ function closeAppModal(modal) {
         finalizeModalClose(modal);
     };
 
-    if (!fluid || !content || (typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches)) {
+    if (!fluid || !content || options.immediate) {
         done();
         return;
     }
 
-    fluid.animate(content, { y: 26, scale: 0.96, opacity: 0 }, {
-        response: 0.3,
-        damping: 1.0,
-        onComplete: done
+    fluid.animate(modal, { opacity: 0 }, { duration: 180 });
+    fluid.animate(content, { y: 16, scale: 1, opacity: 0 }, {
+        duration: 180, onComplete: done
     });
-    fluid.animate(modal, { opacity: 0 }, { response: 0.28, damping: 1.0 });
 }
 
 document.addEventListener("keydown", function(event) {
     if (!activeModal) return;
     if (event.key === "Escape" && activeModal.dataset.modalLocked !== "true") {
+        event.preventDefault();
         closeAppModal(activeModal);
         return;
     }
@@ -3229,7 +3233,6 @@ let dietDailyOptionsSlotKey = null;
 let dietDailyMutationSlotKey = null;
 let dietPlansLibraryLoaded = false;
 let dietDailySwipeGesture = null;
-let dietDailyActionsTrigger = null;
 
 function dietSurfaceView(surface) {
     return surface === 'home' ? todayDietDay : dietDailyView;
@@ -3327,13 +3330,14 @@ async function loadTodayCardapio(options = {}) {
         return { ok: false, skipped: true, reason: 'guest' };
     }
     if (!getElement('todayCardapioSection')) return { ok: false, skipped: true, reason: 'missing-surface' };
+    if (todayDietMutationSlotKey) return { ok: true, data: todayDietDay, source: "local" };
     const today = localDateInputValue();
     const owner = currentUser.id;
     const revision = ++homeRequestVersion;
     const key = dailyReadKey(today);
     const cached = window.AppReadCache.peek(key);
     cardapioDay = getStoredCardapioDay();
-    if (cached && cached.data !== todayDietDay) applyTodayDietDay(cached.data);
+    if (!options.force && cached && cached.data !== todayDietDay) applyTodayDietDay(cached.data);
     const body = getElement('todayCardapioBody');
     if (!cached && todayDietDay?.date !== today && body) body.innerHTML = '<div class="home-skeleton" aria-hidden="true"></div><p class="sr-only">Carregando alimentação</p>';
     const stale = !cached || Date.now() - cached.at >= 60_000 || options.force;
@@ -3415,7 +3419,44 @@ function renderTodayCardapio(dailyView, errorMessage) {
         return;
     }
     const complete = !allSlots.some(slot => slot.result === 'pending');
-    bodyEl.innerHTML = `${complete ? '<p class="today-meals-complete" role="status">As refeições previstas para hoje já foram tratadas.</p>' : ''}<div class="today-diet-slots">${slots.map(slot => renderDietDailySlot(slot, 'home')).join('')}</div>${register}`;
+    let list = bodyEl.querySelector('.today-diet-slots');
+    if (!list) {
+        bodyEl.innerHTML = `<div class="today-diet-slots"></div>${register}`;
+        list = bodyEl.querySelector('.today-diet-slots');
+    }
+    const completeNote = bodyEl.querySelector('.today-meals-complete');
+    if (!complete) completeNote?.remove();
+    else if (!completeNote) list.insertAdjacentHTML('beforebegin', '<p class="today-meals-complete" role="status">As refeições previstas para hoje já foram tratadas.</p>');
+    const visibleKeys = new Set(slots.map(slot => slot.slot_key));
+    for (const node of Array.from(list.children)) {
+        if (!visibleKeys.has(node.dataset.homeSlotKey) && !node._homeLeaving) node.remove();
+    }
+    slots.forEach((slot, index) => {
+        let node = Array.from(list.children).find(item => item.dataset.homeSlotKey === slot.slot_key);
+        if (!node) {
+            node = document.createElement('div');
+            node.dataset.homeSlotKey = slot.slot_key;
+            list.insertBefore(node, list.children[index] || null);
+        }
+        if (node._homeLeaving) {
+            window.Fluid?.stop(node);
+            node._homeLeaving = false;
+            node.style.transform = '';
+            node.style.opacity = '';
+            node.inert = false;
+        }
+        const markup = renderDietDailySlot(slot, 'home');
+        if (node._homeMarkup !== markup) {
+            const focused = node.contains(document.activeElement) ? document.activeElement : null;
+            const action = focused?.getAttribute('onclick');
+            node.innerHTML = markup;
+            node._homeMarkup = markup;
+            if (focused) {
+                const replacement = Array.from(node.querySelectorAll('button')).find(button => button.getAttribute('onclick') === action && !button.disabled);
+                (replacement || node.querySelector('button:not(:disabled)'))?.focus({ preventScroll: true });
+            }
+        }
+    });
     window.lucide?.createIcons?.();
 }
 
@@ -3548,28 +3589,16 @@ function renderDietDailyAlternatives(slot, selectedMeal, surface = 'diet') {
     return `<div class="diet-daily-options" aria-label="Alternativas de ${escapeHtml(slot.label)}">${(slot.alternatives || []).map(meal => `<button type="button" class="diet-daily-option${Number(meal.id) === Number(selectedMeal?.id) ? ' is-selected' : ''}" onclick="selectDietDailyOption('${slot.slot_key}', ${Number(meal.id)}, '${surface}')" aria-pressed="${Number(meal.id) === Number(selectedMeal?.id)}"><span><strong>Opção ${Number(meal.option) || 1}</strong><small>Dia ${Number(meal.option) || 1}</small></span><p>${escapeHtml(dietPlanItemsText(meal))}</p><i data-lucide="check" aria-hidden="true"></i></button>`).join('')}</div>`;
 }
 
-function closeDietDailyActions(restoreFocus = true) {
+function closeDietDailyActions(immediate = false) {
     const overlay = document.querySelector('.diet-daily-actions-overlay');
-    if (!overlay) return;
-    overlay.classList.remove('is-open');
-    overlay.setAttribute('aria-hidden', 'true');
-    document.removeEventListener('keydown', handleDietDailyActionsKeydown);
-    const trigger = dietDailyActionsTrigger;
-    dietDailyActionsTrigger = null;
-    setTimeout(() => overlay.remove(), reducedMotion() ? 0 : 180);
-    if (restoreFocus) trigger?.focus?.();
-}
-
-function handleDietDailyActionsKeydown(event) {
-    if (event.key === 'Escape') closeDietDailyActions();
+    if (overlay) closeAppModal(overlay, { immediate });
 }
 
 function openDietDailyActions(slotKey, trigger) {
     const surface = trigger?.closest('[data-diet-surface]')?.dataset.dietSurface || 'diet';
     const slot = findDietSurfaceSlot(slotKey, surface);
     if (!slot || slot.result !== 'pending') return;
-    closeDietDailyActions(false);
-    dietDailyActionsTrigger = trigger || null;
+    closeDietDailyActions(true);
 
     const overlay = document.createElement('div');
     overlay.className = 'diet-daily-actions-overlay';
@@ -3587,20 +3616,17 @@ function openDietDailyActions(slotKey, trigger) {
         }
         const action = event.target.closest('[data-action]')?.dataset.action;
         if (action === 'different') {
-            closeDietDailyActions(false);
+            closeDietDailyActions(true);
             openDietDailyDifferent(slotKey, surface);
         } else if (action === 'options') {
-            closeDietDailyActions(false);
+            closeDietDailyActions(true);
             toggleDietDailyOptions(slotKey, surface);
         }
     });
     document.body.appendChild(overlay);
-    document.addEventListener('keydown', handleDietDailyActionsKeydown);
-    requestAnimationFrame(() => {
-        overlay.classList.add('is-open');
-        overlay.setAttribute('aria-hidden', 'false');
-        overlay.querySelector('[data-action]')?.focus();
-    });
+    overlay.classList.add('is-open');
+    openAppModal(overlay);
+    overlay._modalTrigger = trigger || overlay._modalTrigger;
     window.lucide?.createIcons?.();
 }
 
@@ -3851,12 +3877,32 @@ function openDietDailyDifferent(slotKey, surface = 'diet') {
     syncChoiceCards();
 }
 
-async function animateHomeMealRemoval(slotKey) {
-    const card = Array.from(getElement('todayCardapioBody')?.querySelectorAll('[data-slot-key]') || [])
-        .find(node => node.dataset.slotKey === slotKey)?.closest('.diet-daily-swipe');
-    if (!card || reducedMotion()) return;
-    card.classList.add('is-removing');
-    await new Promise(resolve => setTimeout(resolve, 120));
+function animateHomeMealRemoval(slotKey) {
+    const card = Array.from(getElement('todayCardapioBody')?.querySelectorAll('[data-home-slot-key]') || [])
+        .find(node => node.dataset.homeSlotKey === slotKey);
+    if (!card || !window.Fluid || reducedMotion()) return;
+    const hadFocus = card.contains(document.activeElement);
+    card._homeLeaving = true;
+    card.inert = true;
+    window.Fluid.animate(card, { y: -8, opacity: 0 }, {
+        duration: 140,
+        onComplete() {
+            if (!card._homeLeaving) return;
+            card.remove();
+            if (hadFocus) focusHomeMeal();
+        }
+    });
+}
+
+function invalidateHomeMealReads() {
+    homeRequestVersion++;
+    dietScreenRequestVersion++;
+    window.AppReadCache.invalidate('diet:');
+}
+
+function refreshHomeMealsInBackground() {
+    // The write is already confirmed. Read failures must not turn it into a save error.
+    void refreshDietDailySurfaces(true).catch(() => {});
 }
 
 function applyHomeMealOutcome(slotKey, date, state) {
@@ -3870,7 +3916,31 @@ function applyHomeMealOutcome(slotKey, date, state) {
             - (Number(previous?.[key]) || 0) + (Number(entry?.[key]) || 0);
     }
     Object.assign(slot, state || { result: 'pending', entry: null });
+    dietEntries = dailyViewEntries(todayDietDay);
     updateDailySummary();
+    renderTodayRecentMeals();
+}
+
+function applyHomeDietEntry(entry) {
+    const slot = todayDietDay.slots?.find(item => item.entry?.id === entry.id);
+    if (slot && entry.date === todayDietDay.date) {
+        applyHomeMealOutcome(slot.slot_key, entry.date, { ...slot, entry });
+        return;
+    }
+    const entries = todayDietDay.manual_entries ||= [];
+    const index = entries.findIndex(item => item.id === entry.id);
+    const previous = index >= 0 ? entries[index] : slot?.entry;
+    if (index >= 0) entries.splice(index, 1);
+    if (slot) Object.assign(slot, { result: 'pending', entry: null });
+    const current = entry.date === todayDietDay.date ? entry : null;
+    if (current) entries.push(current);
+    for (const key of ['calories', 'protein', 'carbs', 'fat']) {
+        todayDietDay.totals[key] = (Number(todayDietDay.totals[key]) || 0)
+            - (Number(previous?.[key]) || 0) + (Number(current?.[key]) || 0);
+    }
+    dietEntries = dailyViewEntries(todayDietDay);
+    renderTodayCardapio(todayDietDay);
+    renderTodayRecentMeals();
 }
 
 function focusHomeMeal(slotKey) {
@@ -3887,8 +3957,10 @@ async function setDietDailyOutcome(slotKey, result, surface = 'diet') {
     if (!slot || !meal) return;
     const date = dietSurfaceDate(surface);
     const restoreFocus = surface === 'home' && getElement('todayCardapioBody')?.contains(document.activeElement);
+    const owner = currentUser?.id;
     let saved = false;
     setDietSurfaceMutationKey(surface, slotKey);
+    if (surface === 'home') invalidateHomeMealReads();
     renderDietSurface(surface);
     try {
         const response = await fetch(`${API_BASE}/diet/days/${encodeURIComponent(date)}/slots/${encodeURIComponent(slotKey)}/outcome`, {
@@ -3899,21 +3971,26 @@ async function setDietDailyOutcome(slotKey, result, surface = 'diet') {
             const data = await response.json().catch(() => ({}));
             throw new Error(data.error || 'Não foi possível atualizar a refeição.');
         }
-        saved = true;
+        if (owner !== currentUser?.id) return;
         if (surface === 'home') {
             const data = await response.json();
+            if (owner !== currentUser?.id) return;
+            if (data.state?.result !== result) throw new Error('Não foi possível confirmar a refeição. Tente atualizar o dia.');
             applyHomeMealOutcome(slotKey, date, data.state);
-            if (result === 'consumed_planned') await animateHomeMealRemoval(slotKey);
+            if (result === 'consumed_planned') animateHomeMealRemoval(slotKey);
         }
-        await refreshDietDailySurfaces(surface === 'home');
+        saved = true;
+        if (surface !== 'home') await refreshDietDailySurfaces();
     } catch (error) {
-        showToast(error.message, 'error');
+        if (owner === currentUser?.id) showToast(error.message, 'error');
     } finally {
+        if (owner !== currentUser?.id) return;
         setDietSurfaceMutationKey(surface, null);
         renderDietSurface(surface);
         if (restoreFocus) focusHomeMeal(slotKey);
     }
     if (saved) {
+        if (surface === 'home') refreshHomeMealsInBackground();
         showToast(result === 'skipped' ? 'Refeição marcada como pulada.' : 'Refeição registrada!', 'success',
             result === 'skipped' || surface === 'home' ? {
                 actionLabel: 'Desfazer', duration: 5000,
@@ -3924,7 +4001,10 @@ async function setDietDailyOutcome(slotKey, result, surface = 'diet') {
 
 async function resetDietDailySlot(slotKey, surface = 'diet', date = dietSurfaceDate(surface)) {
     if (dietSurfaceMutationKey(surface)) return;
+    const owner = currentUser?.id;
+    let saved = false;
     setDietSurfaceMutationKey(surface, slotKey);
+    if (surface === 'home') invalidateHomeMealReads();
     try {
         const response = await fetch(`${API_BASE}/diet/days/${encodeURIComponent(date)}/slots/${encodeURIComponent(slotKey)}/outcome`, {
             method: 'DELETE', credentials: 'include'
@@ -3933,18 +4013,23 @@ async function resetDietDailySlot(slotKey, surface = 'diet', date = dietSurfaceD
             const data = await response.json().catch(() => ({}));
             throw new Error(data.error || 'Não foi possível reabrir a refeição.');
         }
+        if (owner !== currentUser?.id) return;
         if (surface === 'home') {
             const data = response.status === 204 ? null : await response.json();
+            if (owner !== currentUser?.id) return;
             applyHomeMealOutcome(slotKey, date, data?.state);
         }
-        await refreshDietDailySurfaces(surface === 'home');
+        saved = true;
+        if (surface !== 'home') await refreshDietDailySurfaces();
     } catch (error) {
-        showToast(error.message, 'error');
+        if (owner === currentUser?.id) showToast(error.message, 'error');
     } finally {
+        if (owner !== currentUser?.id) return;
         setDietSurfaceMutationKey(surface, null);
         renderDietSurface(surface);
         if (surface === 'home') focusHomeMeal(slotKey);
     }
+    if (saved && surface === 'home') refreshHomeMealsInBackground();
 }
 
 async function refreshDietDailySurfaces(includeHome = false) {
@@ -4435,7 +4520,7 @@ async function loadPendingWorkoutSuggestions() {
 // Instant press feedback (pointer-down), bottom-sheet drag-to-dismiss with
 // momentum projection + velocity handoff, and reduced-motion awareness.
 function reducedMotion() {
-    return typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    return window.Fluid?.reducedMotion() ?? (typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches);
 }
 
 // --- 1. Press feedback: respond on pointer-down, cancel by dragging away ---
@@ -4494,7 +4579,8 @@ function bindSheetDrag(modal) {
         const fromHandle = e.target.closest && e.target.closest(".sheet-drag-handle, .modal-header");
         if (!fromHandle) return;
         if (e.target.closest && e.target.closest("button, input, select, textarea, a, .btn-close")) return;
-        if (reducedMotion()) return;
+        if (reducedMotion() || modal.dataset.modalLocked === "true") return;
+        window.Fluid?.stop(content);
 
         if (content.setPointerCapture) content.setPointerCapture(e.pointerId);
         baseY = e.clientY;
@@ -4506,6 +4592,7 @@ function bindSheetDrag(modal) {
 
         const onMove = (ev) => {
             if (ev.pointerId !== e.pointerId) return;
+            if (reducedMotion()) { onCancel(ev); return; }
             const dy = ev.clientY - baseY;
             if (dy > 0) moved = true;
             const now = performance.now();
@@ -4524,10 +4611,12 @@ function bindSheetDrag(modal) {
             window.removeEventListener("pointermove", onMove);
             window.removeEventListener("pointerup", onUp);
             window.removeEventListener("pointercancel", onCancel);
+            window.removeEventListener('fittracker:reduced-motion', cancelMotion);
+            modal._cancelDrag = null;
 
             const fluid = typeof Fluid !== "undefined" ? Fluid : null;
             if (!moved) {
-                if (fluid) fluid.animate(content, { y: 0, scale: 1 }, { response: 0.3, damping: 1.0 });
+                if (fluid) fluid.animate(content, { y: 0, scale: 1 }, { duration: 180 });
                 return;
             }
             if (!fluid) {
@@ -4539,27 +4628,10 @@ function bindSheetDrag(modal) {
             const finalDy = ev.clientY - baseY;
             const projected = finalDy + fluid.project(vel);
             const dismiss = projected > height * 0.3 || vel > 700;
-            if (dismiss) {
-                fluid.haptic.snap();
-                fluid.animate(content, { y: height }, {
-                    response: 0.34,
-                    damping: 0.8,
-                    velocity: { y: vel },
-                    from: { y: finalDy, scale: 1, opacity: 1 },
-                    onComplete() {
-                        if (modal._fluidGen !== undefined) modal._fluidGen += 1; // invalidate any close
-                        finalizeModalClose(modal);
-                    }
-                });
-            } else {
-                fluid.haptic.tap();
-                fluid.animate(content, { y: 0 }, {
-                    response: 0.3,
-                    damping: 1.0,
-                    velocity: { y: vel },
-                    from: { y: finalDy, scale: 1, opacity: 1 }
-                });
-            }
+            if (dismiss && closeAppModal(modal) !== false) return;
+            fluid.animate(content, { y: 0, scale: 1, opacity: 1 }, {
+                duration: 180, from: { y: finalDy, scale: 1, opacity: 1 }
+            });
         };
 
         const onCancel = (ev) => {
@@ -4568,6 +4640,9 @@ function bindSheetDrag(modal) {
             content.style.transform = '';
             onUp(ev);
         };
+        const cancelMotion = () => onCancel(e);
+        modal._cancelDrag = cancelMotion;
+        window.addEventListener('fittracker:reduced-motion', cancelMotion);
         window.addEventListener("pointermove", onMove);
         window.addEventListener("pointerup", onUp);
         window.addEventListener("pointercancel", onCancel);

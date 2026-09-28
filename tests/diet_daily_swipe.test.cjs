@@ -155,7 +155,7 @@ test('card pendente expõe menu e reaproveita os fluxos existentes', () => {
     assert.match(pendingTemplate, /openDietDailyActions/);
     assert.doesNotMatch(pendingTemplate, /diet-daily-primary/);
     assert.match(pendingTemplate, /data-diet-surface="\$\{surface\}"/);
-    assert.match(homeRenderer, /slots\.map\(slot => renderDietDailySlot\(slot, 'home'\)\)/);
+    assert.match(homeRenderer, /renderDietDailySlot\(slot, 'home'\)/);
     assert.match(dietRenderer, /slots\.map\(slot => renderDietDailySlot\(slot, 'diet'\)\)/);
     assert.match(gestureSource, /openDietDailyDifferent\(slotKey, surface\)/);
     assert.match(gestureSource, /toggleDietDailyOptions\(slotKey, surface\)/);

@@ -3127,7 +3127,7 @@
         }
 
         return `<section class="completed-workout-summary">
-            <header><span><i class="fas ${summary.completion_state === "partial" ? "fa-flag" : "fa-check"}" aria-hidden="true"></i></span><div><small>${summary.completion_state === "partial" ? "Treino finalizado parcialmente" : "Treino concluído"}</small><h3>${esc(summary.workout_name)}</h3><p>${summary.exercises_performed === summary.total_exercises ? "Sessão completa" : `${esc(summary.exercises_performed)} de ${esc(summary.total_exercises)} exercícios concluídos${summary.skipped_count ? ` · ${esc(summary.skipped_count)} pulado(s)` : ""}`}</p></div></header>
+            <header><span><i class="fas ${summary.completion_state === "partial" ? "fa-flag" : "fa-check"}" aria-hidden="true"></i></span><div><small>${summary.completion_state === "partial" ? "Treino finalizado parcialmente" : "Treino concluído"}</small><h3 id="completedWorkoutTitle" tabindex="-1">${esc(summary.workout_name)}</h3><p>${summary.exercises_performed === summary.total_exercises ? "Sessão completa" : `${esc(summary.exercises_performed)} de ${esc(summary.total_exercises)} exercícios concluídos${summary.skipped_count ? ` · ${esc(summary.skipped_count)} pulado(s)` : ""}`}</p></div></header>
             ${summary.sync_pending ? '<p class="completed-workout-sync" role="status"><i class="fas fa-cloud-arrow-up" aria-hidden="true"></i> Finalização salva neste dispositivo. O histórico será sincronizado quando a conexão voltar.</p>' : ""}
             <div class="completed-workout-metrics">
                 <article><i class="fas fa-stopwatch" aria-hidden="true"></i><strong>${esc(formatWorkoutElapsed(summary.duration_seconds))}</strong><span>duração</span></article>
@@ -3295,7 +3295,7 @@
             const result = await window.WorkoutShare.sharePrepared(summary, workoutView.shareDraft);
             const status = byId("workoutShareStatus");
             if (status) status.textContent = result.status === "shared" ? "Card compartilhado!" : result.status === "download-started"
-                ? "Download solicitado. Confira os downloads do navegador." : "Card pronto para compartilhar.";
+                ? "Download solicitado. Confira os downloads do navegador." : "Compartilhamento cancelado. Seu card foi mantido.";
             if (result.status === "download-started") showToast("Download solicitado. Confira os downloads do navegador.", "info");
         } catch (error) {
             if (byId("workoutShareStatus")) byId("workoutShareStatus").textContent = error.message;
@@ -3326,7 +3326,7 @@
         return `${node.tagName}:${node.id || node.dataset.workoutSetIndex || node.dataset.workoutAction || node.classList[0] || ""}`;
     }
 
-    // Reconcile only the active player so status, timers and polling keep input nodes alive.
+    // Keep existing input nodes alive when updating player or sharing controls.
     function patchWorkoutNode(current, next) {
         if (!current || !next) return;
         if (current.nodeType !== next.nodeType || workoutNodeKey(current) !== workoutNodeKey(next)) {
@@ -3410,7 +3410,13 @@
         if (workoutView.completedSummary) {
             const title = byId("viewWorkoutPlanTitle");
             if (title) title.textContent = workoutView.shareOpen ? "Workout Share" : "Resumo do treino";
-            details.innerHTML = renderCompletedWorkoutSummary();
+            const shareShell = details.querySelector('.workout-share-shell');
+            if (workoutView.shareOpen && shareShell) {
+                const template = document.createElement('template');
+                template.innerHTML = renderWorkoutShareEditor(workoutView.completedSummary);
+                patchWorkoutNode(shareShell.querySelector('.workout-share-options'), template.content.querySelector('.workout-share-options'));
+                shareShell.querySelector('.workout-share-preview__heading > small').textContent = template.content.querySelector('.workout-share-preview__heading > small').textContent;
+            } else details.innerHTML = renderCompletedWorkoutSummary();
             if (workoutView.shareOpen) {
                 details.querySelectorAll("[data-workout-share-section]").forEach((section) => {
                     if (window.matchMedia?.("(max-width: 768px)").matches) section.open = previousShareSections.has(section.dataset.workoutShareSection);
@@ -4131,7 +4137,8 @@
         const progressState = workoutExecutionProgress(exercises, completedIds);
         const finishState = workoutFinishState(exercises, completedIds);
         const provisionalSummary = workoutCompletionSnapshot(selectedWorkoutDay(), exercises, progressState, finishState);
-        await performSessionMutation("finish", `/workout_sessions/${apiSegment(session.id)}/finish`, {method: "POST"}, result => {
+        let completedSummary;
+        const succeeded = await performSessionMutation("finish", `/workout_sessions/${apiSegment(session.id)}/finish`, {method: "POST"}, result => {
             workoutView.session = null;
             workoutView.completedSummary = {
                 ...provisionalSummary,
@@ -4144,6 +4151,7 @@
                 exercise_goals_reached: asArray(result.exercise_goals_reached),
                 achievements_unlocked: asArray(result.achievements_unlocked),
             };
+            completedSummary = workoutView.completedSummary;
             workoutView.summaryOrigin = "workout";
             workoutView.shareOpen = false;
             workoutView.shareDraft = null;
@@ -4153,8 +4161,17 @@
             clearActiveWorkoutDock();
             workoutView.replacementPanels.clear();
             window.invalidateProgressOverview?.();
-            showToast(result.queued ? "Finalização salva. O histórico será sincronizado quando a conexão voltar." : "Treino finalizado. Excelente trabalho!", "success");
+            showToast(result.queued ? "Finalização salva. O histórico será sincronizado quando a conexão voltar." : "Treino finalizado. Excelente trabalho!", result.queued ? "info" : "success");
         });
+        if (!succeeded || workoutView.completedSummary !== completedSummary) return;
+        const title = byId('completedWorkoutTitle');
+        title?.focus({ preventScroll: true });
+        const summary = title?.closest('.completed-workout-summary');
+        if (summary && !completedSummary.sync_pending) {
+            window.Fluid?.animate(summary, { y: 0, opacity: 1 }, {
+                duration: 200, from: { y: 6, opacity: 0 }
+            });
+        }
     }
 
     async function cancelWorkoutSession() {
@@ -4698,6 +4715,7 @@
                 renderWorkoutDetail({ focusSelector: ".workout-share-header h3" });
             } else if (action === "back-to-summary") {
                 workoutView.shareOpen = false;
+                window.WorkoutShare?.reset();
                 renderWorkoutDetail({ focusSelector: '[data-workout-action="open-workout-share"]' });
             } else if (action === "set-share-mode") {
                 const draft = workoutShareDraft(workoutView.completedSummary);
@@ -4709,18 +4727,8 @@
             } else if (action === "set-share-panel") {
                 workoutShareDraft(workoutView.completedSummary).transparent = control.dataset.sharePanel === "transparent";
                 renderWorkoutDetail({ preserveScroll: true, focusSelector: `[data-workout-action="set-share-panel"][data-share-panel="${control.dataset.sharePanel}"]` });
-            } else if (action === "set-share-photo-scale") {
-                const draft = workoutShareDraft(workoutView.completedSummary);
-                draft.photoScale = Math.max(0.5, Math.min(2, Number(control.value) / 100));
-                renderWorkoutDetail({ preserveScroll: true, focusSelector: `[data-workout-action="set-share-photo-scale"]` });
-            } else if (action === "set-share-photo-offset-x") {
-                const draft = workoutShareDraft(workoutView.completedSummary);
-                draft.photoOffsetX = Math.max(-300, Math.min(300, Number(control.value)));
-                renderWorkoutDetail({ preserveScroll: true, focusSelector: `[data-workout-action="set-share-photo-offset-x"]` });
-            } else if (action === "set-share-photo-offset-y") {
-                const draft = workoutShareDraft(workoutView.completedSummary);
-                draft.photoOffsetY = Math.max(-300, Math.min(300, Number(control.value)));
-                renderWorkoutDetail({ preserveScroll: true, focusSelector: `[data-workout-action="set-share-photo-offset-y"]` });
+            } else if (["set-share-photo-scale", "set-share-photo-offset-x", "set-share-photo-offset-y"].includes(action)) {
+                // The input event already updates the preview without replacing the slider.
             } else if (action === "set-share-info-preset") {
                 const draft = workoutShareDraft(workoutView.completedSummary);
                 const preset = control.dataset.infoPreset;
@@ -4825,6 +4833,8 @@
             } else {
                 return;
             }
+            const label = event.target.closest('.workout-share-slider')?.querySelector('small');
+            if (label) label.textContent = action === 'set-share-photo-scale' ? `${draft.photoScale.toFixed(1)}x` : `${value}px`;
             syncWorkoutSharePreview();
         });
         byId("viewWorkoutPlanDetails")?.addEventListener("keydown", async (event) => {
