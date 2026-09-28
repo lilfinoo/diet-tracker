@@ -177,6 +177,7 @@
         session: null,
         sessionLoading: false,
         sessionError: "",
+        actionFeedback: "",
         pendingAction: "",
         completedSummary: null,
         summaryOrigin: "workout",
@@ -438,6 +439,7 @@
     }
 
     function resetWorkoutExecutionState() {
+        workoutView.actionFeedback = "";
         cancelWorkoutDraftTimers();
         workoutView.draftRevisions.clear();
         workoutView.lastField = null;
@@ -850,7 +852,7 @@
                 <div class="wizard-step-heading" tabindex="-1"><h4>Tempo e equipamentos</h4><p>Vamos adaptar seu treino à sua disponibilidade.</p></div>
                 <div class="wizard-field"><label for="wizard-session-duration">Duração por sessão</label><select id="wizard-session-duration" name="session_duration"${invalidAttributes("session_duration", state)}>${selectOptions({ 20: "20 minutos", 30: "30 minutos", 45: "45 minutos", 60: "60 minutos", 75: "75 minutos", 90: "90 minutos" }, answers.session_duration)}</select>${fieldError("session_duration", state)}</div>
                 <fieldset class="wizard-fieldset"><legend>Onde você vai treinar?</legend><p class="wizard-field-hint">Escolha uma opção ou personalize o que você tem disponível.</p>${workoutEquipmentPicker(state)}</fieldset>
-                <p class="workout-recommendation-status${state.recommendationStatus === "fallback" ? " is-warning" : ""}" role="status">${state.recommendationStatus === "loading" ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Ajustando a estrutura do seu treino...' : esc(state.recommendationMessage || "")}</p>`;
+                <p class="workout-recommendation-status${state.recommendationStatus === "fallback" ? " is-warning" : ""}" role="status">${state.recommendationStatus === "loading" ? '<i class="fas fa-hourglass-half" aria-hidden="true"></i> Ajustando a estrutura do seu treino...' : esc(state.recommendationMessage || "")}</p>`;
         }
         const advancedOpen = state.advancedOpen || Boolean(state.fieldErrors.split_type || state.fieldErrors.priorities || state.fieldErrors.avoid_exercises);
         const splitMode = state.splitMode === "manual" ? "manual" : "automatic";
@@ -899,7 +901,7 @@
         const checking = Boolean(state.pendingGenerationJob);
         return `
             <section class="workout-generation-state" role="status" aria-live="polite">
-                <span class="workout-generation-state__icon"><i class="fas ${checking ? "fa-rotate" : "fa-spinner fa-spin"}" aria-hidden="true"></i></span>
+                <span class="workout-generation-state__icon"><i class="fas ${checking ? "fa-rotate" : "fa-hourglass-half"}" aria-hidden="true"></i></span>
                 <h4>${checking ? "Seu treino ainda está sendo criado" : "Criando seu treino..."}</h4>
                 <p>${checking ? "Verifique o resultado para continuar de onde parou, sem gerar outro treino." : (state.generationStatus === "queued" ? "Seu pedido está na fila. Estamos preparando sua rotina." : "Estamos montando sua rotina com base nas suas escolhas.")}</p>
                 ${checking ? '<button type="button" class="btn-primary" data-wizard-action="check-generation">Verificar resultado</button>' : `<dl><div><dt>Objetivo</dt><dd>${esc(labelFor(WORKOUT_GOALS, state.answers.goal))}</dd></div><div><dt>Rotina</dt><dd>${esc(`${state.answers.days_per_week} dias · ${state.answers.session_duration} min`)}</dd></div></dl>`}
@@ -984,7 +986,7 @@
         const nextIcon = byId("planWizardNextIcon");
         if (state.generating) {
             nextLabel.textContent = isDiet ? "Criando plano..." : "Criando seu treino...";
-            nextIcon.className = "fas fa-spinner fa-spin";
+            nextIcon.className = isDiet ? "fas fa-spinner fa-spin" : "fas fa-hourglass-half";
         } else if (state.step === 2) {
             nextLabel.textContent = isDiet ? "Gerar plano alimentar" : "Gerar plano";
             nextIcon.className = "fas fa-wand-magic-sparkles";
@@ -1580,8 +1582,9 @@
         if (action.type === "open_workout_questionnaire") openPlanWizard("workout");
     }
 
-    function planLoadingMarkup(message) {
-        return `<div class="plans-loading" role="status"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>${esc(message)}</span></div>`;
+    function planLoadingMarkup(message, type) {
+        const icon = type === "workout" ? "fa-hourglass-half" : "fa-spinner fa-spin";
+        return `<div class="plans-loading" role="status"><i class="fas ${icon}" aria-hidden="true"></i><span>${esc(message)}</span></div>`;
     }
 
     function renderPlanList(type, plans) {
@@ -1794,7 +1797,7 @@
         const owner = workoutAccount();
         if (container) {
             container.setAttribute("aria-busy", "true");
-            if (!container.children.length) container.innerHTML = planLoadingMarkup("Carregando planos alimentares...");
+            if (!container.children.length) container.innerHTML = planLoadingMarkup("Carregando planos alimentares...", "diet");
         }
         try {
             const result = await apiRequest("/diet_plans");
@@ -1828,7 +1831,7 @@
         const owner = workoutAccount();
         if (container) {
             container.setAttribute("aria-busy", "true");
-            if (!container.children.length) container.innerHTML = planLoadingMarkup("Carregando planos de treino...");
+            if (!container.children.length) container.innerHTML = planLoadingMarkup("Carregando planos de treino...", "workout");
         }
         try {
             try {
@@ -1925,7 +1928,7 @@
         if (!workoutTodayState) {
             container.innerHTML = workoutTodayError
                 ? `<article class="workout-today-card__shell"><div><span class="content-kicker">Treino de hoje</span><h3>Não foi possível atualizar</h3><p>${esc(workoutTodayError)}</p></div><button type="button" class="btn-secondary" data-workout-today-action="retry">Tentar novamente</button></article>`
-                : '<article class="workout-today-card__shell"><div class="plans-loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Carregando seu treino...</span></div></article>';
+                : '<article class="workout-today-card__shell"><div class="plans-loading"><i class="fas fa-hourglass-half" aria-hidden="true"></i><span>Carregando seu treino...</span></div></article>';
             return;
         }
         const state = workoutTodayState.state || "unconfigured";
@@ -2548,7 +2551,7 @@
         const replacementOptions = asArray(panel.options);
         const visibleOptions = panel.expanded ? replacementOptions : replacementOptions.slice(0, 3);
         if (panel.loading) {
-            return `<section id="${panelId}" class="replacement-panel" tabindex="-1" aria-live="polite"><button type="button" class="replacement-close" data-workout-action="close-replacements" data-exercise-id="${esc(exercise.id)}" aria-label="Fechar alternativas">×</button><div class="replacement-panel__loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Buscando alternativas seguras...</span></div></section>`;
+            return `<section id="${panelId}" class="replacement-panel" tabindex="-1" aria-live="polite"><button type="button" class="replacement-close" data-workout-action="close-replacements" data-exercise-id="${esc(exercise.id)}" aria-label="Fechar alternativas">×</button><div class="replacement-panel__loading"><i class="fas fa-hourglass-half" aria-hidden="true"></i><span>Buscando alternativas seguras...</span></div></section>`;
         }
         return `
             <section id="${panelId}" class="replacement-panel" tabindex="-1" aria-labelledby="replacement-title-${esc(exercise.id)}">
@@ -2571,7 +2574,7 @@
                         <article class="replacement-option">
                             ${exerciseImageMarkup(option)}
                             <div class="replacement-option__body"><h6>${esc(option.name)}</h6><p>${esc(reason)}</p><div class="replacement-option__matches">${matches}</div><span class="replacement-option__equipment"><i class="fas fa-dumbbell" aria-hidden="true"></i> ${esc(equipmentLabel(option.equipment))}</span></div>
-                            <button type="button" class="replacement-apply" data-workout-action="${permanent ? "apply-permanent-replacement" : "apply-replacement"}" data-exercise-id="${esc(exercise.id)}" data-catalog-key="${esc(option.catalog_key)}"${panel.applying === option.catalog_key ? " disabled" : ""}>${panel.applying === option.catalog_key ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Aplicando' : permanent ? "Trocar no plano" : "Trocar por este"}</button>
+                            <button type="button" class="replacement-apply" data-workout-action="${permanent ? "apply-permanent-replacement" : "apply-replacement"}" data-exercise-id="${esc(exercise.id)}" data-catalog-key="${esc(option.catalog_key)}"${panel.applying === option.catalog_key ? " disabled" : ""}>${panel.applying === option.catalog_key ? '<i class="fas fa-hourglass-half" aria-hidden="true"></i> Aplicando' : permanent ? "Trocar no plano" : "Trocar por este"}</button>
                         </article>`;
                     }).join("")}
                 </div>
@@ -2614,7 +2617,7 @@
 
     function renderAddExercisePanel(day) {
         if (!workoutView.editMode || !workoutView.addExerciseOpen) return "";
-        if (workoutView.catalogLoading) return '<div class="workout-add-panel"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Carregando exercícios compatíveis...</div>';
+        if (workoutView.catalogLoading) return '<div class="workout-add-panel"><i class="fas fa-hourglass-half" aria-hidden="true"></i> Carregando exercícios compatíveis...</div>';
         const existingKeys = new Set(asArray(day.exercises).map((exercise) => exercise.catalog_key));
         const options = asArray(workoutView.exerciseCatalog).filter((item) => !existingKeys.has(item.key));
         return `<section class="workout-add-panel" aria-label="Adicionar exercício">
@@ -2671,6 +2674,7 @@
             ? (displayedExercise(exercise).exercise.weight ? '[data-workout-quick-load]' : '[data-workout-quick-repetitions]')
             : mode === 'review' ? '#workoutSetEntryTitle' : '.workout-sheet-handle';
         renderWorkoutDetail({ preserveScroll: true, focusSelector });
+        animateWorkoutAction(mode === 'quick' ? '#workoutQuickSetTitle' : mode === 'review' ? '#workoutSetEntryTitle' : '.workout-sheet-handle');
     }
 
     function updateWorkoutQuickSetDraft(field, value, exerciseId, index) {
@@ -2732,6 +2736,7 @@
         const index = workoutView.correctionSetIndex ?? workoutView.activeSetIndex;
         if (!Number.isInteger(index) || index < 0 || index >= setCount) return false;
         const draft = workoutSetDraftAt(exerciseId, index, setCount);
+        workoutView.actionFeedback = "";
         if (options.discardPartial) {
             draft.load_kg = "";
             draft.repetitions = "";
@@ -2756,6 +2761,7 @@
         }
         const correcting = workoutView.correctionSetIndex != null;
         draft.completed = true;
+        workoutView.actionFeedback = correcting ? "Série corrigida neste dispositivo." : "Série registrada neste dispositivo.";
         workoutView.setEntryError = "";
         if (!correcting) workoutView.lastConfirmedSet = { exerciseId: String(exerciseId), index };
         workoutView.correctionSetIndex = null;
@@ -2768,6 +2774,7 @@
         }
         persistWorkoutDraftLocally(workoutView.session?.id);
         renderWorkoutDetail({ preserveScroll: true, focusSelector: workoutView.activeSetIndex < setCount ? '[data-workout-quick-load], [data-workout-quick-repetitions]' : '#workoutQuickSetTitle' });
+        animateWorkoutAction('#workoutQuickSetTitle');
         return true;
     }
 
@@ -2808,7 +2815,13 @@
     }
 
     function workoutPlayerFeedbackMarkup() {
-        const message = workoutView.pendingAction ? "Salvando…" : workoutView.sessionError || workoutView.draftError || "";
+        const action = workoutView.pendingAction || (workoutView.completingExerciseIds.size ? "complete-exercise" : "");
+        const waiting = action === "start" ? "Iniciando treino…"
+            : action === "finish" ? "Finalizando treino…"
+            : action?.startsWith("replace-") ? "Trocando exercício…"
+            : action?.startsWith("restore-") ? "Restaurando exercício…"
+            : action?.startsWith("complete-") ? "Confirmando exercício…" : "Salvando…";
+        const message = action ? waiting : workoutView.sessionError || workoutView.draftError || workoutView.actionFeedback || "";
         return `<div class="workout-player-feedback" data-workout-feedback role="${workoutView.sessionError ? "alert" : "status"}"${message ? "" : " hidden"}>${esc(message)}${workoutView.sessionError && !workoutView.pendingAction ? '<button type="button" data-workout-action="retry-session">Verificar e tentar novamente</button>' : ""}</div>`;
     }
 
@@ -2997,7 +3010,7 @@
                                 <span><strong>${progressState.completedSets}</strong><small>Séries</small></span>
                             </div>
                             <div class="workout-finish-card__actions">
-                                <button type="button" class="finish-workout-button active-workout-finish" data-workout-action="confirm-finish-session"${workoutView.pendingAction === "finish" ? " disabled" : ""}>${workoutView.pendingAction === "finish" ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Finalizando...' : '<i class="fas fa-flag-checkered" aria-hidden="true"></i> Confirmar finalização'}</button>
+                                <button type="button" class="finish-workout-button active-workout-finish" data-workout-action="confirm-finish-session"${workoutView.pendingAction === "finish" ? " disabled" : ""}>${workoutView.pendingAction === "finish" ? '<i class="fas fa-hourglass-half" aria-hidden="true"></i> Finalizando...' : '<i class="fas fa-flag-checkered" aria-hidden="true"></i> Confirmar finalização'}</button>
                                 <button type="button" class="workout-finish-back" data-workout-action="return-from-finish"><i class="fas fa-arrow-left" aria-hidden="true"></i> Voltar ao último exercício</button>
                             </div>
                             <details class="active-workout-queue"><summary><span>Revisar sequência</span><strong>${resolvedCount}/${exercises.length}</strong></summary><ol>${queue}</ol></details>
@@ -3043,7 +3056,7 @@
             ? '<i class="fas fa-check-double" aria-hidden="true"></i> Séries concluídas'
             : `<i class="fas fa-check" aria-hidden="true"></i> Concluir série ${currentSetIndex + 1}`;
         const completeExerciseLabel = workoutView.pendingAction === `complete-${currentOriginal.id}`
-            ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Salvando...'
+            ? '<i class="fas fa-hourglass-half" aria-hidden="true"></i> Salvando...'
             : '<i class="fas fa-check" aria-hidden="true"></i> Salvar e concluir';
         const stateContent = exerciseDone
             ? `<div class="current-exercise-resolved is-complete"><i class="fas fa-circle-check" aria-hidden="true"></i><div><strong>Exercício concluído</strong><p>As séries registradas já foram salvas.</p></div></div>`
@@ -3398,9 +3411,19 @@
         });
     }
 
+    function animateWorkoutAction(selector) {
+        const element = byId("viewWorkoutPlanDetails")?.querySelector(selector);
+        if (!element || !window.Fluid || window.Fluid.reducedMotion()) return;
+        window.Fluid.animate(element, { y: 0, opacity: 1 }, {
+            from: { y: 4, opacity: 0.65 }, duration: 160,
+            onComplete() { element.style.removeProperty('transform'); element.style.removeProperty('opacity'); }
+        });
+    }
+
     function renderWorkoutDetail(options = {}) {
         const details = byId("viewWorkoutPlanDetails");
         if (!details) return;
+        details.setAttribute("aria-busy", String(Boolean(workoutView.pendingAction || workoutView.completingExerciseIds.size)));
         byId("viewWorkoutPlanModal")?.classList.toggle("workout-execution-mode", Boolean(workoutView.session && !workoutView.completedSummary));
         const previousScroll = options.preserveScroll ? details.scrollTop : 0;
         const previousSheetScroll = details.querySelector(".workout-session-sheet__scroll")?.scrollTop || 0;
@@ -3477,14 +3500,14 @@
         const sessionControls = editing
             ? '<span class="workout-edit-day-status"><i class="fas fa-pen-ruler" aria-hidden="true"></i> Editando este treino</span>'
             : workoutView.sessionLoading
-            ? '<div class="session-loading" role="status"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Verificando sessão...</div>'
+            ? '<div class="session-loading" role="status"><i class="fas fa-hourglass-half" aria-hidden="true"></i> Verificando sessão...</div>'
             : session
                 ? `<div class="active-session-bar"><div><span><i class="fas fa-circle" aria-hidden="true"></i> Treino em andamento</span><small>Iniciado em ${esc(formatDateTime(session.started_at))}</small></div><i class="fas fa-stopwatch" aria-hidden="true"></i></div>`
                 : day.id
-                    ? `<button type="button" class="start-workout-button" data-workout-action="start-session"${workoutView.pendingAction === "start" ? " disabled" : ""}>${workoutView.pendingAction === "start" ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Iniciando...' : '<i class="fas fa-play" aria-hidden="true"></i> Iniciar treino'}</button>`
+                    ? `<button type="button" class="start-workout-button" data-workout-action="start-session"${workoutView.pendingAction === "start" ? " disabled" : ""}>${workoutView.pendingAction === "start" ? '<i class="fas fa-hourglass-half" aria-hidden="true"></i> Iniciando...' : '<i class="fas fa-play" aria-hidden="true"></i> Iniciar treino'}</button>`
                     : '<span class="legacy-plan-badge"><i class="fas fa-box-archive" aria-hidden="true"></i> Plano anterior</span>';
         const sessionFooter = session
-            ? `<button type="button" class="finish-workout-button finish-workout-button--full" data-workout-action="finish-session"${workoutView.pendingAction === "finish" ? " disabled" : ""}>${workoutView.pendingAction === "finish" ? '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i>' : '<i class="fas fa-circle-check" aria-hidden="true"></i>'} Finalizar treino</button>`
+            ? `<button type="button" class="finish-workout-button finish-workout-button--full" data-workout-action="finish-session"${workoutView.pendingAction === "finish" ? " disabled" : ""}>${workoutView.pendingAction === "finish" ? '<i class="fas fa-hourglass-half" aria-hidden="true"></i>' : '<i class="fas fa-circle-check" aria-hidden="true"></i>'} Finalizar treino</button>`
             : "";
         const panel = session ? renderActiveWorkout(day) : `
             <section id="workout-day-panel" role="tabpanel" aria-labelledby="workout-day-tab-${workoutView.selectedDay}" class="workout-day-panel${editing ? " is-editing" : ""}">
@@ -3518,6 +3541,7 @@
         updateWorkoutTimer();
         updateWorkoutVisualViewport();
         if (options.focusSelector) requestAnimationFrame(() => details.querySelector(options.focusSelector)?.focus({ preventScroll: true }));
+        if (session && !samePlayerCard) animateWorkoutAction('#currentExerciseTitle, #workoutFinishCardTitle');
         if (session && !samePlayerCard && workoutView.playerScreen === "exercise") {
             const exercises = asArray(day.exercises);
             const next = exercises[exercises.findIndex((exercise) => String(exercise.id) === String(workoutView.activeExerciseId)) + 1];
@@ -3664,6 +3688,7 @@
         const lock = beginSessionMutation(action, sessionId);
         if (!lock) return false;
         workoutView.sessionError = "";
+        workoutView.actionFeedback = "";
         workoutView.mutationErrorStatus = null;
         workoutView.uncertainMutation = null;
         cancelWorkoutDraftTimers();
@@ -3689,6 +3714,9 @@
             });
             if (!workoutContextCurrent(account, version, sessionId)) return false;
             apply(result);
+            workoutView.actionFeedback = action.startsWith("replace-") ? "Exercício trocado."
+                : action.startsWith("restore-") ? "Exercício original restaurado."
+                : action.startsWith("complete-") ? "Exercício confirmado." : "";
             succeeded = true;
         } catch (error) {
             if (workoutContextCurrent(account, version, sessionId) && error.name !== "AbortError") {
@@ -3719,11 +3747,13 @@
         activeDockRequestToken += 1;
         workoutView.pendingAction = "start";
         workoutView.sessionError = "";
+        workoutView.actionFeedback = "";
         renderWorkoutDetail({ preserveScroll: true });
         try {
             const result = await apiRequest(`/workout_plans/${apiSegment(workoutView.plan.id)}/days/${apiSegment(day.id)}/sessions`, { method: "POST" });
             if (!workoutContextCurrent(account, viewVersion) || String(workoutView.plan?.id) !== String(planId) || String(selectedWorkoutDay()?.id) !== String(dayId)) return;
             workoutView.session = result.session;
+            workoutView.actionFeedback = "Treino iniciado.";
             workoutView.editMode = false;
             hydrateWorkoutDrafts(result.session);
             activeWorkoutSummary = {
@@ -3739,7 +3769,7 @@
             invalidateWorkoutReads();
             if (viewVersion === workoutView.viewVersion && workoutView.pendingAction === "start") {
                 workoutView.pendingAction = "";
-                renderWorkoutDetail({ preserveScroll: true });
+                renderWorkoutDetail({ preserveScroll: true, focusSelector: workoutView.session ? "#currentExerciseTitle" : null });
             }
         }
     }
@@ -3936,6 +3966,7 @@
         const currentId = document.querySelector("[data-workout-exercise-card]")?.dataset.exerciseId;
         if (currentId && workoutView.setEntryMode === "review" && !completedWorkoutExerciseIds().has(String(currentId))) captureWorkoutSetDraft(currentId);
         workoutView.activeExerciseId = String(exerciseId);
+        workoutView.actionFeedback = "";
         workoutView.playerScreen = "exercise";
         workoutView.sessionSheetExpanded = false;
         workoutView.setEntryMode = "closed";
@@ -4024,6 +4055,7 @@
             row.querySelector("[data-workout-set-repetitions]")?.focus();
             return;
         }
+        workoutView.actionFeedback = completed ? "Série registrada neste dispositivo." : "Série reaberta neste dispositivo.";
         row.dataset.workoutSetCompleted = String(completed);
         row.classList.toggle("is-complete", completed);
         captureWorkoutSetDraft(exerciseId);
@@ -4052,6 +4084,8 @@
         const exercise = findSelectedExercise(exerciseId), session = workoutView.session;
         const key = String(exerciseId);
         if (!exercise || !session || workoutView.pendingAction || workoutView.uncertainMutation || workoutView.completingExerciseIds.has(key) || completedWorkoutExerciseIds().has(key)) return false;
+        workoutView.actionFeedback = "";
+        workoutView.sessionError = "";
         let sets;
         try { sets = performedSetsFromView(exercise.id); }
         catch (error) {
@@ -4097,6 +4131,7 @@
                     completed_exercise_ids: [...new Set([...asArray(result.session.completed_exercise_ids).map(String), ...localIds])]
                 };
                 activeWorkoutSummary = { ...activeWorkoutSummary, session: workoutView.session };
+                workoutView.actionFeedback = "Exercício confirmado.";
             } else if (result.queued) {
                 workoutView.sessionError = "Concluído neste dispositivo. Aguardando sincronização.";
             }
@@ -4126,6 +4161,10 @@
             return false;
         } finally {
             workoutView.completingExerciseIds.delete(key);
+            if (workoutContextCurrent(account, version, session.id)) {
+                byId("viewWorkoutPlanDetails")?.setAttribute("aria-busy", String(Boolean(workoutView.pendingAction || workoutView.completingExerciseIds.size)));
+                updateWorkoutPlayerFeedback();
+            }
         }
     }
 

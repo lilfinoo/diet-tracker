@@ -3833,14 +3833,44 @@ function showAddDietModalForDailyDate() {
 }
 
 function toggleDietDailyOptions(slotKey, surface = 'diet') {
-    setDietSurfaceOptionsKey(surface, dietSurfaceOptionsKey(surface) === slotKey ? null : slotKey);
-    renderDietSurface(surface);
+    const opening = dietSurfaceOptionsKey(surface) !== slotKey;
+    const container = getElement(surface === 'home' ? 'todayCardapioBody' : 'dietDailyMealsBody');
+    const card = Array.from(container?.querySelectorAll('[data-slot-key]') || [])
+        .find(node => node.dataset.slotKey === slotKey);
+    setDietSurfaceOptionsKey(surface, opening ? slotKey : null);
+    if (!card) { renderDietSurface(surface); return; }
+    container.querySelectorAll('.diet-daily-options').forEach(panel => {
+        if (panel.contains(document.activeElement)) (panel._returnFocus || panel.closest('[data-slot-key]')?.querySelector('.diet-daily-more'))?.focus({ preventScroll: true });
+        panel.inert = true;
+        window.Fluid?.stop(panel);
+        if (window.Fluid && !reducedMotion()) {
+            window.Fluid.animate(panel, { y: -4, opacity: 0 }, { duration: 140, onComplete: () => panel.remove() });
+        } else panel.remove();
+    });
+    if (!opening) return;
+    const slot = findDietSurfaceSlot(slotKey, surface);
+    if (!slot) return;
+    const template = document.createElement('template');
+    template.innerHTML = renderDietDailyAlternatives(slot, dailySlotSelectedMeal(slot), surface);
+    const panel = template.content.firstElementChild;
+    panel._returnFocus = card.querySelector('.diet-daily-more');
+    panel.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        toggleDietDailyOptions(slotKey, surface);
+    });
+    card.appendChild(panel);
+    panel.querySelector('button')?.focus({ preventScroll: true });
+    window.Fluid?.animate(panel, { y: 0, opacity: 1 }, { from: { y: reducedMotion() ? 0 : 5, opacity: 0 }, duration: 160 });
+    window.lucide?.createIcons?.();
 }
 
 async function selectDietDailyOption(slotKey, mealId, surface = 'diet') {
     if (dietSurfaceMutationKey(surface)) return;
     const slot = findDietSurfaceSlot(slotKey, surface);
     if (!slot) return;
+    const returnFocus = Boolean(document.activeElement?.closest('.diet-daily-options'));
     setDietSurfaceMutationKey(surface, slotKey);
     renderDietSurface(surface);
     try {
@@ -3860,6 +3890,11 @@ async function selectDietDailyOption(slotKey, mealId, surface = 'diet') {
     } finally {
         setDietSurfaceMutationKey(surface, null);
         renderDietSurface(surface);
+        if (returnFocus && document.activeElement === document.body) {
+            const container = getElement(surface === 'home' ? 'todayCardapioBody' : 'dietDailyMealsBody');
+            Array.from(container?.querySelectorAll('[data-slot-key]') || [])
+                .find(node => node.dataset.slotKey === slotKey)?.querySelector('.diet-daily-more')?.focus({ preventScroll: true });
+        }
     }
 }
 
@@ -4526,21 +4561,25 @@ function reducedMotion() {
 // --- 1. Press feedback: respond on pointer-down, cancel by dragging away ---
 (function pressFeedback() {
     const PRESSABLE = ".btn, .nav-btn, .btn-close, .plan-card, .meal-card, .macro-card, .session-card, .exercise-card, .activity-card, .btn-view, .btn-add, .btn-edit, .btn-delete";
+    const SCOPE = "#dietTab, #diet_plansTab, #workout_plansTab, #dietModal, #viewWorkoutPlanModal, .diet-daily-actions-overlay";
 
     document.addEventListener("pointerdown", (e) => {
         if (e.button !== undefined && e.button !== 0) return;
         if (reducedMotion()) return;
         const target = e.target;
         if (!(target instanceof Element)) return;
-        const pressable = target.closest ? target.closest(PRESSABLE) : null;
-        if (!pressable) return;
+        const scoped = target.closest(SCOPE);
+        const pressable = target.closest(scoped ? 'button, a[href], summary' : PRESSABLE);
+        if (!pressable || (scoped && !scoped.contains(pressable)) || pressable.matches(':disabled, [aria-disabled="true"]')) return;
 
-        pressable.classList.add("is-pressed");
+        pressable.classList.add(scoped ? "is-action-pressed" : "is-pressed");
         const gx = e.clientX;
         const gy = e.clientY;
 
         const release = () => {
-            pressable.classList.remove("is-pressed");
+            pressable.classList.remove("is-pressed", "is-action-pressed");
+            window.removeEventListener("blur", release);
+            window.removeEventListener("fittracker:reduced-motion", release);
             window.removeEventListener("pointerup", release);
             window.removeEventListener("pointercancel", release);
             window.removeEventListener("pointermove", onMove);
@@ -4549,6 +4588,8 @@ function reducedMotion() {
             // hysteresis: a 12px drag means it was a scroll/gesture, not a tap
             if (Math.hypot(ev.clientX - gx, ev.clientY - gy) > 12) release();
         };
+        window.addEventListener("blur", release);
+        window.addEventListener("fittracker:reduced-motion", release);
         window.addEventListener("pointerup", release);
         window.addEventListener("pointercancel", release);
         window.addEventListener("pointermove", onMove);

@@ -17,7 +17,7 @@ function harness() {
     };
     vm.createContext(c);
     vm.runInContext(fs.readFileSync(path.join(__dirname,'../copilot/js/utils.js'),'utf8'),c);
-    const expose = `window.testPlayer = {state:workoutView, openReplacementOptions, closeReplacementPanel, applyReplacement, restoreExercise, completeWorkoutExercise, finishWorkoutSession, resetWorkoutAccount, hydrateWorkoutDrafts, persistWorkoutDraftLocally, saveWorkoutDraftToServer, scheduleWorkoutDraftSave, queueSessionWrite, setWorkoutSheetExpanded, setWorkoutEntryMode, confirmWorkoutQuickSet, openWorkoutFinishCard, returnFromWorkoutFinishCard, navigateSessionExercise, startWorkoutPlayerGesture, moveWorkoutPlayerGesture, endWorkoutPlayerGesture, cancelWorkoutPlayerGesture, loadWorkoutTodayCard, renderWorkoutTodayCard, displayedExercise, setAPI(fn){apiRequest=fn}, setRenderer(fn){renderWorkoutDetail=fn}, dock(){return activeWorkoutSummary}, gesture(){return workoutGesture}};\n    window.loadWorkoutTodayCard =`;
+    const expose = `window.testPlayer = {state:workoutView, workoutPlayerFeedbackMarkup, openReplacementOptions, closeReplacementPanel, applyReplacement, restoreExercise, completeWorkoutExercise, finishWorkoutSession, resetWorkoutAccount, hydrateWorkoutDrafts, persistWorkoutDraftLocally, saveWorkoutDraftToServer, scheduleWorkoutDraftSave, queueSessionWrite, setWorkoutSheetExpanded, setWorkoutEntryMode, confirmWorkoutQuickSet, openWorkoutFinishCard, returnFromWorkoutFinishCard, navigateSessionExercise, startWorkoutPlayerGesture, moveWorkoutPlayerGesture, endWorkoutPlayerGesture, cancelWorkoutPlayerGesture, loadWorkoutTodayCard, renderWorkoutTodayCard, displayedExercise, setAPI(fn){apiRequest=fn}, setRenderer(fn){renderWorkoutDetail=fn}, dock(){return activeWorkoutSummary}, gesture(){return workoutGesture}};\n    window.loadWorkoutTodayCard =`;
     vm.runInContext(source.replace('window.loadWorkoutTodayCard =',expose),c);
     const api=window.testPlayer, s=api.state;
     s.plan={id:1,title:'Treino A'}; s.days=[{id:10,title:'Peito',exercises:[{id:100,name:'Supino',sets:3,reps:'8-12',rest_seconds:60,equipment:['barbell'],catalog_key:'original'},{id:101,name:'Flexão',sets:3,rest_seconds:45}]}];
@@ -197,4 +197,50 @@ test('failed finish keeps the session and never animates a success', async () =>
     h.c.respond = async () => { throw Object.assign(new Error('Falhou'), { status: 500 }); };
     await h.api.finishWorkoutSession();
     assert.equal(h.s.session.id, 77); assert.equal(entered, false); assert.equal(h.s.completedSummary, null);
+});
+
+test('workout feedback names pending actions and reports success only after confirmation', async()=>{
+    const {api,s,c}=harness();
+    s.replacementPanels.set('100',{options:[{catalog_key:'new'}],payload:{},returnFocus:null});
+    let resolve;
+    c.respond=()=>new Promise(r=>resolve=r);
+    const pending=api.applyReplacement(100,'new');
+    await tick();
+    assert.match(api.workoutPlayerFeedbackMarkup(), /Trocando exercício/);
+    assert.equal(s.actionFeedback, '');
+    resolve({override:{workout_exercise_id:100,catalog_key:'new',name:'Novo exercício'}});
+    await pending;
+    assert.match(api.workoutPlayerFeedbackMarkup(), /Exercício trocado/);
+    c.respond=async()=>{throw Error('Falha ao restaurar')};
+    await api.restoreExercise(100);
+    assert.match(api.workoutPlayerFeedbackMarkup(), /Falha ao restaurar/);
+    assert.doesNotMatch(api.workoutPlayerFeedbackMarkup(), /Exercício original restaurado/);
+});
+
+test('quick set feedback describes a local draft and validation does not report success', ()=>{
+    const {api,s}=harness();
+    s.setEntryMode='quick';
+    s.activeSetIndex=0;
+    assert.equal(api.confirmWorkoutQuickSet(100),true);
+    assert.match(api.workoutPlayerFeedbackMarkup(), /Série registrada neste dispositivo/);
+    assert.equal(s.session.completed_exercise_ids.length,0);
+    s.activeSetIndex=1;
+    s.setDrafts.get('100')[1].load_kg='20';
+    s.setDrafts.get('100')[1].repetitions='';
+    assert.equal(api.confirmWorkoutQuickSet(100),false);
+    assert.match(s.setEntryError,/Informe as repetições/);
+    assert.doesNotMatch(api.workoutPlayerFeedbackMarkup(), /Série registrada/);
+});
+
+test('exercise completion shows pending feedback until the server confirms', async()=>{
+    const {api,s,c}=harness();
+    let resolve;
+    c.respond=()=>new Promise(r=>resolve=r);
+    const pending=api.completeWorkoutExercise(100);
+    await tick();
+    assert.match(api.workoutPlayerFeedbackMarkup(), /Confirmando exercício/);
+    assert.equal(s.actionFeedback,'');
+    resolve({session:{...s.session,completed_exercise_ids:[100]}});
+    await pending;
+    assert.match(api.workoutPlayerFeedbackMarkup(), /Exercício confirmado/);
 });
