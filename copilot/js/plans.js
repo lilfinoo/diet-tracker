@@ -2534,10 +2534,21 @@
                 ? exerciseFallbackImagePath(exercise?.catalog_key)
                 : "";
             const fallback = fallbackPath && fallbackPath !== imagePath ? ` data-fallback-src="${esc(fallbackPath)}"` : "";
-            return `<img class="exercise-demonstration-image" src="${esc(imagePath)}"${fallback} alt="Demonstração de ${esc(exercise?.name || "exercício")}" loading="${eager ? "eager" : "lazy"}" decoding="async" width="768" height="1024">`;
+            return `<img class="exercise-demonstration-image is-loading" data-catalog-key="${esc(exercise?.catalog_key || "")}" data-media-url="${esc(imagePath)}" src="${esc(imagePath)}"${fallback} alt="Demonstração de ${esc(exercise?.name || "exercício")}" loading="${eager ? "eager" : "lazy"}" decoding="async" width="768" height="1024">`;
         }
         return '<span class="exercise-image-placeholder" role="img" aria-label="Imagem não disponível"><i class="fas fa-dumbbell" aria-hidden="true"></i></span>';
     }
+
+    document.addEventListener("load", (event) => {
+        const image = event.target;
+        if (!image?.classList?.contains("exercise-demonstration-image") || !image.dataset.mediaUrl) return;
+        const current = byId("viewWorkoutPlanDetails")?.querySelector("[data-workout-player-card] .current-exercise-media img");
+        const exercise = displayedExercise(findSelectedExercise(workoutView.activeExerciseId) || {}).exercise;
+        if (image !== current || image.dataset.catalogKey !== exercise?.catalog_key
+            || image.dataset.mediaUrl !== exerciseImage(exercise)
+            || image.currentSrc !== new URL(image.src, document.baseURI).href) return;
+        image.classList.remove("is-loading");
+    }, true);
 
     function equipmentLabel(value) {
         return labelFor({ ...WORKOUT_EQUIPMENT, ...CATALOG_EQUIPMENT_LABELS }, value, value || "Equipamento livre");
@@ -3336,7 +3347,7 @@
 
     function workoutNodeKey(node) {
         if (node.nodeType !== 1) return node.nodeType;
-        return `${node.tagName}:${node.id || node.dataset.workoutSetIndex || node.dataset.workoutAction || node.classList[0] || ""}`;
+        return `${node.tagName}:${node.id || node.dataset.catalogKey || node.dataset.workoutSetIndex || node.dataset.workoutAction || node.classList[0] || ""}`;
     }
 
     // Keep existing input nodes alive when updating player or sharing controls.

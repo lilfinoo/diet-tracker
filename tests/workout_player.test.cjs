@@ -17,7 +17,8 @@ function harness() {
     };
     vm.createContext(c);
     vm.runInContext(fs.readFileSync(path.join(__dirname,'../copilot/js/utils.js'),'utf8'),c);
-    const expose = `window.testPlayer = {state:workoutView, workoutPlayerFeedbackMarkup, openReplacementOptions, closeReplacementPanel, applyReplacement, restoreExercise, completeWorkoutExercise, finishWorkoutSession, resetWorkoutAccount, hydrateWorkoutDrafts, persistWorkoutDraftLocally, saveWorkoutDraftToServer, scheduleWorkoutDraftSave, queueSessionWrite, setWorkoutSheetExpanded, setWorkoutEntryMode, confirmWorkoutQuickSet, openWorkoutFinishCard, returnFromWorkoutFinishCard, navigateSessionExercise, startWorkoutPlayerGesture, moveWorkoutPlayerGesture, endWorkoutPlayerGesture, cancelWorkoutPlayerGesture, loadWorkoutTodayCard, renderWorkoutTodayCard, displayedExercise, setAPI(fn){apiRequest=fn}, setRenderer(fn){renderWorkoutDetail=fn}, dock(){return activeWorkoutSummary}, gesture(){return workoutGesture}};\n    window.loadWorkoutTodayCard =`;
+    const expose = `window.testPlayer = {state:workoutView, workoutPlayerFeedbackMarkup, openReplacementOptions, closeReplacementPanel, applyReplacement, restoreExercise, completeWorkoutExercise, finishWorkoutSession, resetWorkoutAccount, hydrateWorkoutDrafts, persistWorkoutDraftLocally, saveWorkoutDraftToServer, scheduleWorkoutDraftSave, queueSessionWrite, setWorkoutSheetExpanded, setWorkoutEntryMode, confirmWorkoutQuickSet, openWorkoutFinishCard, returnFromWorkoutFinishCard, navigateSessionExercise, startWorkoutPlayerGesture, moveWorkoutPlayerGesture, endWorkoutPlayerGesture, cancelWorkoutPlayerGesture, loadWorkoutTodayCard, renderWorkoutTodayCard, displayedExercise, exerciseImageMarkup, setAPI(fn){apiRequest=fn}, setRenderer(fn){renderWorkoutDetail=fn}, dock(){return activeWorkoutSummary}, gesture(){return workoutGesture}};\n    window.loadWorkoutTodayCard =`;
+    c.exerciseImagePath=(_name,key)=>key?`/api/exercise-media/${encodeURIComponent(key)}`:'';
     vm.runInContext(source.replace('window.loadWorkoutTodayCard =',expose),c);
     const api=window.testPlayer, s=api.state;
     s.plan={id:1,title:'Treino A'}; s.days=[{id:10,title:'Peito',exercises:[{id:100,name:'Supino',sets:3,reps:'8-12',rest_seconds:60,equipment:['barbell'],catalog_key:'original'},{id:101,name:'Flexão',sets:3,rest_seconds:45}]}];
@@ -59,9 +60,16 @@ test('replacement confirmation runs once and preserves original ID, sets and res
     assert.equal(s.pendingAction,'replace-100');
     resolve({override:{workout_exercise_id:100,catalog_key:'alt',name:'Novo',weight:'Carga leve'}}); await applying;
     const shown=api.displayedExercise(s.days[0].exercises[0]).exercise;
-    assert.equal(shown.id,100); assert.equal(shown.weight,'Carga leve');
+    assert.equal(shown.id,100); assert.equal(shown.weight,'Carga leve'); assert.equal(shown.catalog_key,'alt');
     assert.equal(s.setDrafts.get('100')[0].load_kg,'42,5'); assert.equal(s.rest,rest);
     assert.equal(s.activeExerciseId,'100'); assert.equal(s.replacementPanels.size,0);
+});
+test('replacement media is associated with its catalog key and hidden until the resource loads',()=>{
+    const {api}=harness();
+    const markup=api.exerciseImageMarkup({name:'Supino',catalog_key:'workoutx:0033'},true);
+    assert.match(markup,/data-catalog-key="workoutx:0033"/);
+    assert.match(markup,/data-media-url="\/api\/exercise-media\/workoutx%3A0033"/);
+    assert.match(markup,/class="exercise-demonstration-image is-loading"/);
 });
 test('replacement cannot compete with completion; restore uses the same mutation lock', async()=>{
     const {api,s,c,calls}=harness(); s.pendingAction='complete-100';

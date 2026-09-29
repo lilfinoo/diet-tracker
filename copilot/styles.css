@@ -3310,6 +3310,10 @@ body.modal-open { overflow: hidden; }
     object-fit: contain;
 }
 
+.current-exercise-media > img.is-loading {
+    opacity: 0;
+}
+
 .current-exercise-content {
     min-width: 0;
     align-self: center;
