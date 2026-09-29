@@ -656,7 +656,7 @@ def import_exercises():
 
 
 @lru_cache(maxsize=512)
-def get_exercise(provider_id):
+def _cached_exercise(provider_id):
     provider_id = _provider_id(provider_id)
     try:
         data = json.loads(_request(f"{BASE_URL}/exercises/exercise/{provider_id}"))
@@ -664,6 +664,20 @@ def get_exercise(provider_id):
         raise WorkoutXServiceError("WorkoutX returned invalid exercise data") from error
     if not isinstance(data, dict) or not data.get("id") or not data.get("gifUrl"):
         raise WorkoutXServiceError("WorkoutX did not return a usable exercise")
+    return data
+
+
+def get_exercise(provider_id):
+    data = _cached_exercise(_provider_id(provider_id))
+    from src.models.user import WorkoutXExercise, db
+
+    provider_id = _provider_id(data["id"])
+    exercise = db.session.get(WorkoutXExercise, provider_id)
+    if exercise is None:
+        db.session.add(WorkoutXExercise(provider_id=provider_id, data=data))
+    else:
+        exercise.data = data
+    db.session.commit()
     return data
 
 

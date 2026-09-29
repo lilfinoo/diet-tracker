@@ -41,6 +41,31 @@ def test_workoutx_downloads_a_gif_once(app, tmp_path, monkeypatch):
     assert calls == ["https://api.workoutxapp.com/v1/gifs/0201.gif"]
 
 
+def test_get_exercise_persists_alternatives_for_media_resolution(app, client, tmp_path, monkeypatch):
+    import json
+    from pathlib import Path
+
+    exercises = {
+        "0033": {"id": "0033", "name": "Exercise 0033", "equipment": "Dumbbell", "gifUrl": "https://example.test/0033.gif"},
+        "3294": {"id": "3294", "name": "Exercise 3294", "equipment": "Body Weight", "gifUrl": "https://example.test/3294.gif"},
+        "0036": {"id": "0036", "name": "Exercise 0036", "equipment": "Cable", "gifUrl": "https://example.test/0036.gif"},
+    }
+    monkeypatch.setattr(workoutx, "_request", lambda url: json.dumps(exercises[url.rsplit("/", 1)[-1]]).encode())
+    media_path = tmp_path / "workoutx-test.gif"
+    media_path.write_bytes(b"GIF89atest")
+    monkeypatch.setattr("src.routes.profile_routes.get_cached_gif", lambda *_args: media_path)
+
+    with app.app_context():
+        assert client.post("/api/register", json=registration_payload("replacement-media")).status_code == 201
+        workoutx._cached_exercise.cache_clear()
+        for provider_id in exercises:
+            workoutx.get_exercise(provider_id)
+            assert workoutx.approved_media(f"workoutx:{provider_id}")["provider_id"] == provider_id
+            response = client.get(f"/api/public/exercise-media/workoutx:{provider_id}")
+            assert response.status_code == 200
+            assert response.data == b"GIF89atest"
+
+
 def test_examples_use_only_workoutx_gifs(app):
     with app.app_context():
         assert workoutx.approved_media("elevacao_lateral_cabo")["provider_id"] == "0178"
