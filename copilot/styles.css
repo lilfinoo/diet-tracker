@@ -3314,6 +3314,20 @@ body.modal-open { overflow: hidden; }
     opacity: 0;
 }
 
+.current-exercise-media > .exercise-media-loading {
+    display: none;
+    grid-area: 1 / 1;
+    color: #555;
+}
+
+.current-exercise-media > img {
+    grid-area: 1 / 1;
+}
+
+.current-exercise-media:has(> img.is-loading) > .exercise-media-loading {
+    display: block;
+}
+
 .current-exercise-content {
     min-width: 0;
     align-self: center;

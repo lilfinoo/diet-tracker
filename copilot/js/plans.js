@@ -178,6 +178,7 @@
         sessionLoading: false,
         sessionError: "",
         actionFeedback: "",
+        pendingReplacementMedia: null,
         pendingAction: "",
         completedSummary: null,
         summaryOrigin: "workout",
@@ -440,6 +441,7 @@
 
     function resetWorkoutExecutionState() {
         workoutView.actionFeedback = "";
+        workoutView.pendingReplacementMedia = null;
         cancelWorkoutDraftTimers();
         workoutView.draftRevisions.clear();
         workoutView.lastField = null;
@@ -2534,21 +2536,33 @@
                 ? exerciseFallbackImagePath(exercise?.catalog_key)
                 : "";
             const fallback = fallbackPath && fallbackPath !== imagePath ? ` data-fallback-src="${esc(fallbackPath)}"` : "";
-            return `<img class="exercise-demonstration-image is-loading" data-catalog-key="${esc(exercise?.catalog_key || "")}" data-media-url="${esc(imagePath)}" src="${esc(imagePath)}"${fallback} alt="Demonstração de ${esc(exercise?.name || "exercício")}" loading="${eager ? "eager" : "lazy"}" decoding="async" width="768" height="1024">`;
+            return `<img class="exercise-demonstration-image is-loading" data-exercise-id="${esc(exercise?.id || "")}" data-catalog-key="${esc(exercise?.catalog_key || "")}" data-media-url="${esc(imagePath)}" src="${esc(imagePath)}"${fallback} alt="Demonstração de ${esc(exercise?.name || "exercício")}" loading="${eager ? "eager" : "lazy"}" decoding="async" width="768" height="1024">`;
         }
         return '<span class="exercise-image-placeholder" role="img" aria-label="Imagem não disponível"><i class="fas fa-dumbbell" aria-hidden="true"></i></span>';
     }
 
-    document.addEventListener("load", (event) => {
-        const image = event.target;
-        if (!image?.classList?.contains("exercise-demonstration-image") || !image.dataset.mediaUrl) return;
+    function syncWorkoutExerciseImage(image) {
+        if (!image?.classList?.contains("exercise-demonstration-image") || !image.dataset.mediaUrl
+            || !image.complete || !image.naturalWidth
+            || image.currentSrc !== new URL(image.dataset.mediaUrl, document.baseURI).href) return;
         const current = byId("viewWorkoutPlanDetails")?.querySelector("[data-workout-player-card] .current-exercise-media img");
-        const exercise = displayedExercise(findSelectedExercise(workoutView.activeExerciseId) || {}).exercise;
-        if (image !== current || image.dataset.catalogKey !== exercise?.catalog_key
-            || image.dataset.mediaUrl !== exerciseImage(exercise)
-            || image.currentSrc !== new URL(image.src, document.baseURI).href) return;
+        if (image === current) {
+            const exercise = displayedExercise(findSelectedExercise(workoutView.activeExerciseId) || {}).exercise;
+            if (image.dataset.exerciseId !== String(exercise.id) || image.dataset.catalogKey !== exercise?.catalog_key
+                || image.dataset.mediaUrl !== exerciseImage(exercise)) return;
+            const pending = workoutView.pendingReplacementMedia;
+            if (pending && pending.sessionId === workoutView.session?.id
+                && pending.exerciseId === String(exercise.id)
+                && pending.catalogKey === exercise.catalog_key && pending.url === image.dataset.mediaUrl) {
+                workoutView.pendingReplacementMedia = null;
+                workoutView.actionFeedback = "Exercício trocado.";
+                renderWorkoutDetail({preserveScroll: true});
+            }
+        }
         image.classList.remove("is-loading");
-    }, true);
+    }
+
+    document.addEventListener("load", (event) => syncWorkoutExerciseImage(event.target), true);
 
     function equipmentLabel(value) {
         return labelFor({ ...WORKOUT_EQUIPMENT, ...CATALOG_EQUIPMENT_LABELS }, value, value || "Equipamento livre");
@@ -3082,7 +3096,7 @@
         return `
             <section class="active-workout-shell active-workout-shell--immersive">
                 <article class="current-exercise-stage current-exercise-stage--player${exerciseDone ? " is-completed-view" : exerciseSkipped ? " is-skipped-view" : ""}${workoutView.setEntryMode === 'quick' ? " has-quick-set" : ""}" data-workout-player-card data-workout-card-kind="exercise" data-workout-exercise-card data-exercise-id="${esc(currentOriginal.id)}">
-                    <figure class="current-exercise-media">${exerciseImageMarkup(exercise, true)}</figure>
+                    <figure class="current-exercise-media">${exerciseImageMarkup(exercise, true)}<span class="exercise-media-loading" role="status">Carregando demonstração…</span></figure>
                     ${previousExercise ? '<figure class="current-exercise-preview current-exercise-preview--previous" aria-hidden="true"></figure>' : ""}
                     ${nextExercise ? '<figure class="current-exercise-preview current-exercise-preview--next" aria-hidden="true"></figure>' : ""}
                     ${!nextExercise ? `<div class="current-exercise-preview current-exercise-preview--next workout-finish-preview" aria-hidden="true">${workoutFinishPreviewMarkup(finishState, progressState)}</div>` : ""}
@@ -3347,7 +3361,7 @@
 
     function workoutNodeKey(node) {
         if (node.nodeType !== 1) return node.nodeType;
-        return `${node.tagName}:${node.id || node.dataset.catalogKey || node.dataset.workoutSetIndex || node.dataset.workoutAction || node.classList[0] || ""}`;
+        return `${node.tagName}:${node.id || node.dataset.mediaUrl || node.dataset.catalogKey || node.dataset.workoutSetIndex || node.dataset.workoutAction || node.classList[0] || ""}`;
     }
 
     // Keep existing input nodes alive when updating player or sharing controls.
@@ -3361,6 +3375,9 @@
             if (current.nodeValue !== next.nodeValue) current.nodeValue = next.nodeValue;
             return;
         }
+        const loadedImage = current.tagName === "IMG" && current.getAttribute("src") === next.getAttribute("src")
+            && current.complete && current.naturalWidth && !current.classList.contains("is-loading");
+        if (loadedImage) next.classList.remove("is-loading");
         for (const attribute of Array.from(current.attributes)) {
             if (attribute.name === "open" || (current.tagName === "INPUT" && ["value", "checked"].includes(attribute.name))) continue;
             if (!next.hasAttribute(attribute.name)) current.removeAttribute(attribute.name);
@@ -3549,6 +3566,7 @@
             if (scroll) scroll.scrollTop = previousSheetScroll;
         }
         if (focused?.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true });
+        details.querySelectorAll(".exercise-demonstration-image").forEach(syncWorkoutExerciseImage);
         updateWorkoutTimer();
         updateWorkoutVisualViewport();
         if (options.focusSelector) requestAnimationFrame(() => details.querySelector(options.focusSelector)?.focus({ preventScroll: true }));
@@ -3700,6 +3718,7 @@
         if (!lock) return false;
         workoutView.sessionError = "";
         workoutView.actionFeedback = "";
+        workoutView.pendingReplacementMedia = null;
         workoutView.mutationErrorStatus = null;
         workoutView.uncertainMutation = null;
         cancelWorkoutDraftTimers();
@@ -3725,7 +3744,15 @@
             });
             if (!workoutContextCurrent(account, version, sessionId)) return false;
             apply(result);
-            workoutView.actionFeedback = action.startsWith("replace-") ? "Exercício trocado."
+            if (action.startsWith("replace-")) {
+                const exercise = displayedExercise(findSelectedExercise(action.slice(8)) || {}).exercise;
+                const url = exerciseImage(exercise);
+                workoutView.pendingReplacementMedia = url ? {
+                    sessionId, exerciseId: String(exercise.id), catalogKey: exercise.catalog_key, url
+                } : null;
+            }
+            workoutView.actionFeedback = action.startsWith("replace-")
+                ? workoutView.pendingReplacementMedia ? "Carregando demonstração…" : "Exercício trocado."
                 : action.startsWith("restore-") ? "Exercício original restaurado."
                 : action.startsWith("complete-") ? "Exercício confirmado." : "";
             succeeded = true;

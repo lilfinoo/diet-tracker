@@ -8,16 +8,16 @@ const tick = () => new Promise(resolve=>setImmediate(resolve));
 function harness() {
     const storage = new Map(), nodes = new Map(), calls = [], renders=[];
     const window = {currentUser:{id:'alice'}, setTimeout, clearTimeout, confirm:()=>true};
-    const c={window, console, setTimeout, clearTimeout, AbortController, DOMException, Intl,
+    const c={window, console, setTimeout, clearTimeout, AbortController, DOMException, Intl, URL,
         API_BASE:'/api', escapeHtml:v=>String(v??''), showToast(){}, closeAppModal(){},
         requestAnimationFrame:fn=>fn(), navigator:{onLine:true},
         localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
-        document:{readyState:'loading',addEventListener(){},getElementById:id=>nodes.get(id)||null,querySelector:()=>null,querySelectorAll:()=>[],visibilityState:'visible'},
+        document:{baseURI:'https://fit.test/',readyState:'loading',addEventListener(){},getElementById:id=>nodes.get(id)||null,querySelector:()=>null,querySelectorAll:()=>[],visibilityState:'visible'},
         getComputedStyle:()=>({getPropertyValue:()=>76}),
     };
     vm.createContext(c);
     vm.runInContext(fs.readFileSync(path.join(__dirname,'../copilot/js/utils.js'),'utf8'),c);
-    const expose = `window.testPlayer = {state:workoutView, workoutPlayerFeedbackMarkup, openReplacementOptions, closeReplacementPanel, applyReplacement, restoreExercise, completeWorkoutExercise, finishWorkoutSession, resetWorkoutAccount, hydrateWorkoutDrafts, persistWorkoutDraftLocally, saveWorkoutDraftToServer, scheduleWorkoutDraftSave, queueSessionWrite, setWorkoutSheetExpanded, setWorkoutEntryMode, confirmWorkoutQuickSet, openWorkoutFinishCard, returnFromWorkoutFinishCard, navigateSessionExercise, startWorkoutPlayerGesture, moveWorkoutPlayerGesture, endWorkoutPlayerGesture, cancelWorkoutPlayerGesture, loadWorkoutTodayCard, renderWorkoutTodayCard, displayedExercise, exerciseImageMarkup, setAPI(fn){apiRequest=fn}, setRenderer(fn){renderWorkoutDetail=fn}, dock(){return activeWorkoutSummary}, gesture(){return workoutGesture}};\n    window.loadWorkoutTodayCard =`;
+    const expose = `window.testPlayer = {state:workoutView, workoutPlayerFeedbackMarkup, syncWorkoutExerciseImage, patchWorkoutNode, openReplacementOptions, closeReplacementPanel, applyReplacement, restoreExercise, completeWorkoutExercise, finishWorkoutSession, resetWorkoutAccount, hydrateWorkoutDrafts, persistWorkoutDraftLocally, saveWorkoutDraftToServer, scheduleWorkoutDraftSave, queueSessionWrite, setWorkoutSheetExpanded, setWorkoutEntryMode, confirmWorkoutQuickSet, openWorkoutFinishCard, returnFromWorkoutFinishCard, navigateSessionExercise, startWorkoutPlayerGesture, moveWorkoutPlayerGesture, endWorkoutPlayerGesture, cancelWorkoutPlayerGesture, loadWorkoutTodayCard, renderWorkoutTodayCard, displayedExercise, exerciseImageMarkup, setAPI(fn){apiRequest=fn}, setRenderer(fn){renderWorkoutDetail=fn}, dock(){return activeWorkoutSummary}, gesture(){return workoutGesture}};\n    window.loadWorkoutTodayCard =`;
     c.exerciseImagePath=(_name,key)=>key?`/api/exercise-media/${encodeURIComponent(key)}`:'';
     vm.runInContext(source.replace('window.loadWorkoutTodayCard =',expose),c);
     const api=window.testPlayer, s=api.state;
@@ -208,7 +208,7 @@ test('failed finish keeps the session and never animates a success', async () =>
 });
 
 test('workout feedback names pending actions and reports success only after confirmation', async()=>{
-    const {api,s,c}=harness();
+    const {api,s,c,nodes}=harness();
     s.replacementPanels.set('100',{options:[{catalog_key:'new'}],payload:{},returnFocus:null});
     let resolve;
     c.respond=()=>new Promise(r=>resolve=r);
@@ -218,6 +218,8 @@ test('workout feedback names pending actions and reports success only after conf
     assert.equal(s.actionFeedback, '');
     resolve({override:{workout_exercise_id:100,catalog_key:'new',name:'Novo exercício'}});
     await pending;
+    assert.match(api.workoutPlayerFeedbackMarkup(), /Carregando demonstração/);
+    api.syncWorkoutExerciseImage(playerImage({api,s,nodes}));
     assert.match(api.workoutPlayerFeedbackMarkup(), /Exercício trocado/);
     c.respond=async()=>{throw Error('Falha ao restaurar')};
     await api.restoreExercise(100);
@@ -251,4 +253,75 @@ test('exercise completion shows pending feedback until the server confirms', asy
     resolve({session:{...s.session,completed_exercise_ids:[100]}});
     await pending;
     assert.match(api.workoutPlayerFeedbackMarkup(), /Exercício confirmado/);
+});
+
+function playerImage(h, loaded = true) {
+    const exercise = h.api.displayedExercise(h.s.days[0].exercises[0]).exercise;
+    const classes = new Set(['exercise-demonstration-image', 'is-loading']);
+    const url = `/api/exercise-media/${encodeURIComponent(exercise.catalog_key)}`;
+    const image = {dataset:{exerciseId:String(exercise.id), catalogKey:exercise.catalog_key, mediaUrl:url},
+        complete:loaded, naturalWidth:loaded ? 768 : 0, currentSrc:new URL(url,'https://fit.test/').href,
+        classList:{contains:value=>classes.has(value), remove:value=>classes.delete(value)}};
+    h.nodes.set('viewWorkoutPlanDetails',{querySelector:()=>image});
+    return image;
+}
+
+test('slow replacement waits for the current GIF resource and ignores an older load', async()=>{
+    const h = harness();
+    async function replace(key) {
+        h.s.replacementPanels.set('100',{options:[{catalog_key:key}],payload:{}});
+        h.c.respond=async()=>({override:{workout_exercise_id:100,catalog_key:key,name:key}});
+        await h.api.applyReplacement(100,key);
+    }
+    await replace('workoutx:0033');
+    const old = playerImage(h, false);
+    h.api.syncWorkoutExerciseImage(old);
+    assert.equal(old.classList.contains('is-loading'),true);
+    assert.equal(h.s.actionFeedback,'Carregando demonstração…');
+    await replace('workoutx:0044');
+    const current = playerImage(h, false);
+    old.complete=true; old.naturalWidth=768;
+    h.api.syncWorkoutExerciseImage(old);
+    assert.equal(current.classList.contains('is-loading'),true);
+    assert.equal(h.s.actionFeedback,'Carregando demonstração…');
+    current.complete=true; current.naturalWidth=768;
+    current.currentSrc=old.currentSrc;
+    h.api.syncWorkoutExerciseImage(current);
+    assert.equal(current.classList.contains('is-loading'),true);
+    current.currentSrc=new URL(current.dataset.mediaUrl,'https://fit.test/').href;
+    h.api.syncWorkoutExerciseImage(current);
+    assert.equal(current.classList.contains('is-loading'),false);
+    assert.equal(h.s.actionFeedback,'Exercício trocado.');
+});
+
+test('reopened session renders the persisted override and reveals an already cached GIF',()=>{
+    const h = harness();
+    h.s.session=JSON.parse(JSON.stringify({...h.s.session,overrides:[{
+        workout_exercise_id:100,catalog_key:'workoutx:0033',name:'Alternativa'
+    }]}));
+    h.api.persistWorkoutDraftLocally(h.s.session.id);
+    h.s.activeExerciseId=null;
+    h.api.hydrateWorkoutDrafts(h.s.session);
+    const exercise=h.api.displayedExercise(h.s.days[0].exercises[0]).exercise;
+    assert.equal(exercise.id,100);
+    assert.match(h.api.exerciseImageMarkup(exercise,true),/src="\/api\/exercise-media\/workoutx%3A0033"/);
+    const image=playerImage(h);
+    h.api.syncWorkoutExerciseImage(image);
+    assert.equal(image.classList.contains('is-loading'),false);
+});
+
+test('patching an unchanged loaded GIF does not hide it waiting for another load event',()=>{
+    const h=harness();
+    function node(loading) {
+        const attrs=new Map([['src','/api/exercise-media/workoutx%3A0033'],['class',`exercise-demonstration-image${loading?' is-loading':''}`]]);
+        return {nodeType:1,tagName:'IMG',dataset:{catalogKey:'workoutx:0033'},complete:true,naturalWidth:768,
+            classList:{0:'exercise-demonstration-image',contains:value=>attrs.get('class').split(' ').includes(value),
+                remove:value=>attrs.set('class',attrs.get('class').split(' ').filter(item=>item!==value).join(' '))},
+            get attributes(){return Array.from(attrs,([name,value])=>({name,value}));},
+            getAttribute:key=>attrs.get(key),hasAttribute:key=>attrs.has(key),
+            setAttribute:(key,value)=>attrs.set(key,value),removeAttribute:key=>attrs.delete(key),childNodes:[]};
+    }
+    const current=node(false);
+    h.api.patchWorkoutNode(current,node(true));
+    assert.equal(current.classList.contains('is-loading'),false);
 });
