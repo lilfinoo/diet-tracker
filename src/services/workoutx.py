@@ -23,7 +23,6 @@ SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 GIF_DOWNLOAD_LOCK = threading.Lock()
 LAST_GIF_DOWNLOAD_AT = 0.0
 GIF_DOWNLOAD_BLOCKED_UNTIL = 0.0
-PERSISTENT_CACHE_BLOCKED_UNTIL = 0.0
 
 REVIEW_QUEUE = (
     "puxada_com_elastico",
@@ -722,15 +721,9 @@ def get_cached_gif(catalog_key, provider_id):
     if cached:
         return cached
 
-    from src.services.media_storage import (
-        MediaStorageError,
-        configured as persistent_media_configured,
-        get_exercise_gif,
-        upload_exercise_gif,
-    )
     from src.models.user import WorkoutXGif, db
 
-    global GIF_DOWNLOAD_BLOCKED_UNTIL, LAST_GIF_DOWNLOAD_AT, PERSISTENT_CACHE_BLOCKED_UNTIL
+    global GIF_DOWNLOAD_BLOCKED_UNTIL, LAST_GIF_DOWNLOAD_AT
     # A single process may receive several image requests while the player is
     # rendered. Serialize only uncached provider calls, then recheck all caches.
     with GIF_DOWNLOAD_LOCK:
@@ -738,48 +731,31 @@ def get_cached_gif(catalog_key, provider_id):
         if cached:
             return cached
 
-        gif = None
         now = time.monotonic()
-        if persistent_media_configured() and now >= PERSISTENT_CACHE_BLOCKED_UNTIL:
-            try:
-                gif = get_exercise_gif(provider_id)
-            except MediaStorageError:
-                PERSISTENT_CACHE_BLOCKED_UNTIL = now + current_app.config["WORKOUTX_STORAGE_ERROR_COOLDOWN"]
-                current_app.logger.warning("Persistent WorkoutX GIF cache unavailable; temporarily bypassing it")
-
-        downloaded = gif is None
-        if downloaded:
-            now = time.monotonic()
-            if now < GIF_DOWNLOAD_BLOCKED_UNTIL:
-                raise WorkoutXServiceError(
-                    "WorkoutX GIF downloads are temporarily rate limited",
-                    retry_after=max(int(GIF_DOWNLOAD_BLOCKED_UNTIL - now), 1),
-                )
-            interval = max(float(current_app.config["WORKOUTX_GIF_REQUEST_INTERVAL"]), 0.0)
-            remaining = interval - (time.monotonic() - LAST_GIF_DOWNLOAD_AT)
-            if remaining > 0:
-                time.sleep(remaining)
-            try:
-                gif = _request(
-                    f"{BASE_URL}/gifs/{provider_id}.gif",
-                    max_bytes=current_app.config["WORKOUTX_MAX_RESPONSE_BYTES"],
-                )
-            except WorkoutXServiceError as error:
-                if error.retry_after:
-                    GIF_DOWNLOAD_BLOCKED_UNTIL = time.monotonic() + error.retry_after
-                raise
-            finally:
-                LAST_GIF_DOWNLOAD_AT = time.monotonic()
+        if now < GIF_DOWNLOAD_BLOCKED_UNTIL:
+            raise WorkoutXServiceError(
+                "WorkoutX GIF downloads are temporarily rate limited",
+                retry_after=max(int(GIF_DOWNLOAD_BLOCKED_UNTIL - now), 1),
+            )
+        interval = max(float(current_app.config["WORKOUTX_GIF_REQUEST_INTERVAL"]), 0.0)
+        remaining = interval - (time.monotonic() - LAST_GIF_DOWNLOAD_AT)
+        if remaining > 0:
+            time.sleep(remaining)
+        try:
+            gif = _request(
+                f"{BASE_URL}/gifs/{provider_id}.gif",
+                max_bytes=current_app.config["WORKOUTX_MAX_RESPONSE_BYTES"],
+            )
+        except WorkoutXServiceError as error:
+            if error.retry_after:
+                GIF_DOWNLOAD_BLOCKED_UNTIL = time.monotonic() + error.retry_after
+            raise
+        finally:
+            LAST_GIF_DOWNLOAD_AT = time.monotonic()
         if not gif.startswith((b"GIF87a", b"GIF89a")):
             raise WorkoutXServiceError("WorkoutX did not return a GIF")
-        if downloaded and persistent_media_configured():
-            try:
-                upload_exercise_gif(provider_id, gif)
-            except MediaStorageError:
-                current_app.logger.warning("Could not persist WorkoutX GIF in R2", exc_info=True)
-        if downloaded:
-            db.session.merge(WorkoutXGif(provider_id=provider_id, content=gif))
-            db.session.commit()
+        db.session.merge(WorkoutXGif(provider_id=provider_id, content=gif))
+        db.session.commit()
         return _write_gif_to_local_cache(
             Path(current_app.config["WORKOUTX_CACHE_DIR"]) / f"workoutx-{provider_id}.gif",
             provider_id,

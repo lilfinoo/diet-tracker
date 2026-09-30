@@ -101,18 +101,7 @@ def test_examples_use_only_workoutx_gifs(app):
         assert removed_keys.isdisjoint(catalog_by_key())
 
 
-def test_workoutx_restores_a_gif_from_persistent_cache(app, tmp_path, monkeypatch):
-    monkeypatch.setattr("src.services.media_storage.get_exercise_gif", lambda provider_id: b"GIF89apersistent")
-    monkeypatch.setattr("src.services.media_storage.configured", lambda: True)
-    monkeypatch.setattr(workoutx, "_request", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("API called")))
-    with app.app_context():
-        app.config["WORKOUTX_CACHE_DIR"] = tmp_path
-        path = workoutx.get_cached_gif("workoutx:0289", "0289")
-
-    assert path.read_bytes() == b"GIF89apersistent"
-
-
-def test_workoutx_persists_a_gif_in_the_database_cache(app, tmp_path, monkeypatch):
+def test_workoutx_persists_a_gif_in_the_database_cache_without_r2(app, tmp_path, monkeypatch):
     calls = []
 
     def fake_request(url, **_kwargs):
@@ -120,8 +109,15 @@ def test_workoutx_persists_a_gif_in_the_database_cache(app, tmp_path, monkeypatc
         return b"GIF89adatabase-cache"
 
     monkeypatch.setattr(workoutx, "_request", fake_request)
+    monkeypatch.setattr("src.services.media_storage._client", lambda: (_ for _ in ()).throw(AssertionError("R2 called")))
     with app.app_context():
-        app.config["WORKOUTX_CACHE_DIR"] = tmp_path
+        app.config.update(
+            WORKOUTX_CACHE_DIR=tmp_path,
+            MEDIA_R2_ENDPOINT_URL="https://unreachable.r2.cloudflarestorage.com",
+            MEDIA_R2_ACCESS_KEY_ID="unused",
+            MEDIA_R2_SECRET_ACCESS_KEY="unused",
+            MEDIA_R2_BUCKET="unused",
+        )
         first = workoutx.get_cached_gif("workoutx:0289", "0289")
         first.unlink()
         second = workoutx.get_cached_gif("workoutx:0289", "0289")
@@ -141,6 +137,27 @@ def test_workoutx_reads_a_stored_gif_without_an_api_request(app, tmp_path, monke
         path = workoutx.get_stored_gif("0289")
 
     assert path.read_bytes() == b"GIF89astored"
+
+
+def test_exercise_media_serves_a_database_gif_without_r2_or_workoutx(app, client, tmp_path, monkeypatch):
+    monkeypatch.setattr(workoutx, "_request", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("WorkoutX called")))
+    monkeypatch.setattr("src.services.media_storage._client", lambda: (_ for _ in ()).throw(AssertionError("R2 called")))
+    with app.app_context():
+        app.config.update(
+            WORKOUTX_CACHE_DIR=tmp_path,
+            MEDIA_R2_ENDPOINT_URL="https://unreachable.r2.cloudflarestorage.com",
+            MEDIA_R2_ACCESS_KEY_ID="unused",
+            MEDIA_R2_SECRET_ACCESS_KEY="unused",
+            MEDIA_R2_BUCKET="unused",
+        )
+        provider_id = workoutx.approved_media("agachamento_livre")["provider_id"]
+        db.session.add(WorkoutXGif(provider_id=provider_id, content=b"GIF89astored"))
+        db.session.commit()
+        response = client.get("/api/public/exercise-media/agachamento_livre")
+
+    assert response.status_code == 200
+    assert response.mimetype == "image/gif"
+    assert response.data == b"GIF89astored"
 
 
 def test_workoutx_429_starts_a_fast_failure_cooldown(app, tmp_path, monkeypatch):
@@ -315,6 +332,38 @@ def test_authenticated_user_can_serve_a_direct_workoutx_gif(app, client, tmp_pat
     response = client.get("/api/exercise-media/workoutx:0289")
     assert response.status_code == 200
     assert response.data == b"GIF89adirect"
+    assert response.cache_control.max_age == 31_536_000
+
+
+def test_exercise_media_transient_failure_is_not_cached_and_can_recover(app, client, tmp_path, monkeypatch):
+    assert client.post("/api/register", json=registration_payload("retry-media")).status_code == 201
+    media_path = tmp_path / "0289.gif"
+    media_path.write_bytes(b"GIF89arecovered")
+    calls = []
+
+    def get_cached_gif(*args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise workoutx.WorkoutXServiceError("Temporarily unavailable", retry_after=2)
+        return media_path
+
+    monkeypatch.setattr("src.routes.profile_routes.get_cached_gif", get_cached_gif)
+    with app.app_context():
+        db.session.add(WorkoutXExercise(provider_id="0289", data={
+            "id": "0289", "name": "Dumbbell Bench Press",
+            "equipment": "Dumbbell", "gifUrl": "https://example.test/0289.gif",
+        }))
+        db.session.commit()
+
+    failed = client.get("/api/exercise-media/workoutx:0289")
+    assert failed.status_code == 503
+    assert failed.cache_control.no_store
+    assert failed.headers["Retry-After"] == "2"
+
+    recovered = client.get("/api/exercise-media/workoutx:0289")
+    assert recovered.status_code == 200
+    assert recovered.data == b"GIF89arecovered"
+    assert recovered.cache_control.max_age == 31_536_000
 
 
 def test_exercise_media_downloads_a_mapped_gif_on_demand(app, client, tmp_path, monkeypatch):

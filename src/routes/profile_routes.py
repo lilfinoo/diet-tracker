@@ -366,7 +366,7 @@ def _serve_exercise_media(catalog_key):
         current_app.logger.warning("WorkoutX GIF unavailable for %s: %s", catalog_key, error)
         response = jsonify({"error": "A animação do exercício não está disponível agora."})
         response.status_code = 503
-        response.headers["Cache-Control"] = "private, max-age=60"
+        response.headers["Cache-Control"] = "no-store"
         if error.retry_after:
             response.headers["Retry-After"] = str(error.retry_after)
         return response
