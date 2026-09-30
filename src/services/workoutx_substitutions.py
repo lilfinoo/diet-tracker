@@ -14,6 +14,29 @@ def classify_exercise(exercise):
     return {"provider_id": str(exercise["id"]), **classify_workoutx_exercise(exercise)}
 
 
+def equipment_family(exercise):
+    equipment = _value(exercise, "equipment").replace("_", " ")
+    if equipment in {"body weight", "bodyweight", "pullup bar", "pull up bar", "bench"}:
+        return "bodyweight"
+    if equipment in {
+        "barbell", "dumbbell", "ez bar", "ez barbell", "kettlebell",
+        "olympic barbell", "trap bar", "weighted",
+    }:
+        return "free_weight"
+    if equipment == "cable" or "machine" in equipment:
+        return "machine"
+    if equipment in {"band", "resistance band"}:
+        return "band"
+    return None
+
+
+def prioritize_replacement_equipment(options):
+    preferred = {"free_weight", "machine", "bodyweight"}
+    if any(equipment_family(item) in preferred for item in options):
+        options = [item for item in options if equipment_family(item) != "band"]
+    return sorted(options, key=lambda item: equipment_family(item) not in preferred)
+
+
 def substitution_options(
     exercise,
     catalog,
@@ -76,4 +99,5 @@ def substitution_options(
         str(item[2].get("name", "")).lower(),
         str(item[2]["id"]),
     ))
-    return [candidate for _, _, candidate in options[:max(int(limit), 0)]]
+    candidates = prioritize_replacement_equipment([candidate for _, _, candidate in options])
+    return candidates[:max(int(limit), 0)]

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from flask import current_app
 from src.services.workoutx_classification import classify_workoutx_exercise
-from src.services.workoutx_substitutions import substitution_options
+from src.services.workoutx_substitutions import equipment_family, prioritize_replacement_equipment, substitution_options
 
 
 CATALOG_PATH = Path(__file__).resolve().parent.parent / "data" / "exercises.json"
@@ -1017,32 +1017,25 @@ def _active_workoutx_source(exercise, source, catalog):
 
 
 def _workoutx_equipment_available(exercise, blocked, available, full_gym):
-    equipment = str(exercise.get("equipment") or "").lower()
-    if any(value == equipment or (value == "machine" and "machine" in equipment) for value in blocked):
+    def matches(value):
+        value = str(value).strip().lower().replace("_", " ")
+        value = {"bodyweight": "body weight", "ez bar": "ez barbell"}.get(value, value)
+        return value == equipment or (value == "machine" and "machine" in equipment)
+
+    equipment = str(exercise.get("equipment") or "").strip().lower().replace("_", " ")
+    if any(matches(value) for value in blocked):
         return False
-    return full_gym or equipment in available or (equipment == "body weight" and "bodyweight" in available)
-
-
-def _replacement_equipment_family(exercise):
-    equipment = str(exercise.get("equipment") or "").strip().lower()
-    if equipment in {"body weight", "bodyweight"}:
-        return "bodyweight"
-    if equipment in {
-        "barbell", "dumbbell", "ez barbell", "kettlebell", "olympic barbell",
-        "trap bar", "weighted",
-    }:
-        return "free_weight"
-    return None
+    return full_gym or any(matches(value) for value in available)
 
 
 def _diversify_replacement_options(options, limit):
     selected = []
     selected_ids = set()
-    for family in ("bodyweight", "free_weight"):
+    for family in ("free_weight", "machine", "bodyweight"):
         candidate = next((
             item for item in options
             if str(item["id"]) not in selected_ids
-            and _replacement_equipment_family(item) == family
+            and equipment_family(item) == family
         ), None)
         if candidate:
             selected.append(candidate)
@@ -1104,8 +1097,8 @@ def _api_replacement_candidates(source_item, candidates, blocked, available, ful
             provider_scores=provider_scores,
         )
         if len(_diversify_replacement_options(evaluated, limit)) >= limit:
-            families = {_replacement_equipment_family(item) for item in evaluated}
-            if {"bodyweight", "free_weight"} <= families:
+            families = {equipment_family(item) for item in evaluated}
+            if {"free_weight", "machine", "bodyweight"} <= families:
                 break
     return extra_candidates, provider_scores
 
@@ -1221,6 +1214,7 @@ def replacement_options(exercise, unavailable_equipment=None, available_equipmen
         primary_muscle_distance = candidate["primary_muscle"] != source["primary_muscle"]
         candidates.append((primary_muscle_distance, difficulty_distance, -overlap, candidate["name"], candidate))
     candidates.sort(key=lambda item: item[:3])
+    candidates = prioritize_replacement_equipment([item[-1] for item in candidates])
     return [
         {
             "catalog_key": candidate["key"],
@@ -1238,5 +1232,5 @@ def replacement_options(exercise, unavailable_equipment=None, available_equipmen
             "notes": "Ajuste a carga e mantenha a execução controlada.",
             "rationale": f"Mantém o padrão {candidate['movement_pattern']} para {candidate['primary_muscle']}.",
         }
-        for _, _, _, _, candidate in candidates[:limit]
+        for candidate in candidates[:limit]
     ]

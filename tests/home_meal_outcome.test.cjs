@@ -37,7 +37,7 @@ function harness() {
         todayDietDay: { date: '2026-09-26', plan: {}, slots: [slot], totals: { calories: 0, protein: 0, carbs: 0, fat: 0 } },
         getElement: () => body, reducedMotion: () => false,
         updateDailySummary: () => events.push('summary'), renderPersonalizedHomeIntro: () => false,
-        escapeHtml: String, renderDietDailySlot: item => `<article>${item.result}</article>`,
+        escapeHtml: String, renderDietDailySlot: item => `<article>${item.result}${mutation === item.slot_key ? " Salvando refeição…" : ""}</article>`,
         dietSurfaceDate: () => c.todayDietDay.date,
         dietSurfaceMutationKey: () => mutation, setDietSurfaceMutationKey: (_, value) => { mutation = value; },
         findDietSurfaceSlot: () => slot, dailySlotSelectedMeal: () => ({ id: 7 }),
@@ -171,4 +171,47 @@ test('resposta de gravação de outra conta não altera Home nem mostra sucesso'
     h.c.currentUser = { id: 'new-owner' };
     resolve({ ok: true }); await pending;
     assert.equal(h.slot.result, 'pending'); assert.equal(h.toasts.length, 0);
+});
+
+
+test('rede lenta informa salvamento imediatamente e ignora outro gesto até confirmar', async () => {
+    const h = harness(); let respond;
+    const fetch = h.c.fetch;
+    h.c.fetch = (...args) => new Promise(resolve => { respond = () => resolve(fetch(...args)); });
+    const pending = h.c.setDietDailyOutcome('almoco', 'consumed_planned', 'home');
+    assert.match(h.body.innerHTML, /Salvando refeição/);
+    assert.equal(h.slot.result, 'pending');
+    assert.equal(h.c.todayDietDay.totals.calories, 0);
+    await h.c.setDietDailyOutcome('almoco', 'consumed_planned', 'home');
+    respond(); await pending;
+    assert.equal(h.requests.length, 1);
+    assert.equal(h.c.todayDietDay.totals.calories, 500);
+    await h.c.setDietDailyOutcome('almoco', 'consumed_planned', 'home');
+    assert.equal(h.requests.length, 1);
+});
+
+test('falha de transporte restaura card e libera tentativa sem alterar totais', async () => {
+    const h = harness(); const fetch = h.c.fetch;
+    h.c.fetch = async () => { throw Error('Sem conexão'); };
+    await h.c.setDietDailyOutcome('almoco', 'consumed_planned', 'home');
+    assert.doesNotMatch(h.body.innerHTML, /Salvando refeição/);
+    assert.equal(h.slot.result, 'pending');
+    assert.equal(h.c.todayDietDay.totals.calories, 0);
+    assert.equal(h.toasts[0].type, 'error');
+    assert.equal(h.mutation(), null);
+    h.c.fetch = fetch;
+    await h.c.setDietDailyOutcome('almoco', 'consumed_planned', 'home');
+    assert.equal(h.slot.result, 'consumed_planned');
+});
+
+test('resposta tardia de outro dia não anima nem retira a refeição do dia atual', async () => {
+    const h = harness(); let respond;
+    const fetch = h.c.fetch;
+    h.c.fetch = (...args) => new Promise(resolve => { respond = () => resolve(fetch(...args)); });
+    const pending = h.c.setDietDailyOutcome('almoco', 'consumed_planned', 'home');
+    h.c.todayDietDay.date = '2026-09-27';
+    respond(); await pending;
+    assert.ok(!h.events.includes('animate'));
+    assert.equal(h.slot.result, 'pending');
+    assert.equal(h.c.todayDietDay.totals.calories, 0);
 });

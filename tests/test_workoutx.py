@@ -43,7 +43,6 @@ def test_workoutx_downloads_a_gif_once(app, tmp_path, monkeypatch):
 
 def test_get_exercise_persists_alternatives_for_media_resolution(app, client, tmp_path, monkeypatch):
     import json
-    from pathlib import Path
 
     exercises = {
         "0033": {"id": "0033", "name": "Exercise 0033", "equipment": "Dumbbell", "gifUrl": "https://example.test/0033.gif"},

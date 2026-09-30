@@ -196,3 +196,77 @@ def test_legacy_replacement_keeps_the_movement_when_primary_muscle_labels_differ
 
     assert options
     assert all(option["movement_pattern"] == "biceps" for option in options)
+
+
+def test_substitution_omits_bands_when_a_compatible_preferred_option_exists():
+    source = exercise("1", "Band Seated Row", "Lats", "Resistance Band")
+    band = exercise("2", "Band One Arm Row", "Lats", "Resistance Band")
+    dumbbell = exercise("3", "Dumbbell One Arm Row", "Lats", "Dumbbell")
+
+    options = substitution_options(source, [band, dumbbell], provider_scores={"2": 100})
+
+    assert [item["id"] for item in options] == ["3"]
+
+
+def test_substitution_keeps_band_fallback_after_compatibility_and_availability_filters():
+    source = exercise("1", "Cable Seated Row", "Lats", "Cable")
+    band = exercise("2", "Band Seated Row", "Lats", "Resistance Band")
+    dumbbell = exercise("3", "Dumbbell One Arm Row", "Lats", "Dumbbell")
+    incompatible = exercise("4", "Cable Pulldown", "Lats", "Cable")
+
+    assert [item["id"] for item in substitution_options(source, [band, incompatible])] == ["2"]
+    assert [item["id"] for item in substitution_options(
+        source, [band, dumbbell], available_equipment={"Resistance Band"},
+    )] == ["2"]
+    assert [item["id"] for item in substitution_options(
+        source, [band, dumbbell], present_ids={"3"},
+    )] == ["2"]
+
+
+def test_active_catalog_prioritizes_free_weights_machines_and_bodyweight_without_bands(app):
+    source = workout_exercise("1", "Cable Seated Row")
+    with app.app_context():
+        db.session.add_all([
+            WorkoutXExercise(provider_id="1", data=active_exercise("1", "Cable Seated Row", "Lats", "Cable")),
+            WorkoutXExercise(provider_id="2", data=active_exercise("2", "Band Seated Row", "Lats", "Resistance Band")),
+            WorkoutXExercise(provider_id="3", data=active_exercise("3", "Dumbbell One Arm Row", "Lats", "Dumbbell")),
+            WorkoutXExercise(provider_id="4", data=active_exercise("4", "Lever Seated Row", "Lats", "Leverage Machine")),
+            WorkoutXExercise(provider_id="5", data=active_exercise("5", "Bodyweight Standing Row", "Lats", "Body Weight")),
+        ])
+        db.session.commit()
+
+        options = replacement_options(source, limit=5)
+        restricted = replacement_options(
+            source, unavailable_equipment=["dumbbell", "machine", "bodyweight", "cable"],
+        )
+
+    assert [option["equipment"] for option in options] == ["Dumbbell", "Leverage Machine", "Body Weight"]
+    assert [option["equipment"] for option in restricted] == ["Resistance Band"]
+
+
+def test_active_catalog_accepts_questionnaire_equipment_names_for_band_fallback(app):
+    source = workout_exercise("1", "Cable Pulldown")
+    with app.app_context():
+        db.session.add_all([
+            WorkoutXExercise(provider_id="1", data=active_exercise("1", "Cable Pulldown", "Lats", "Cable")),
+            WorkoutXExercise(provider_id="2", data=active_exercise("2", "Band Pulldown", "Lats", "Resistance Band")),
+            WorkoutXExercise(provider_id="3", data=active_exercise("3", "Lever Pulldown", "Lats", "Leverage Machine")),
+        ])
+        db.session.commit()
+
+        bands = replacement_options(source, available_equipment=["resistance_band"])
+        machines = replacement_options(source, available_equipment=["machine", "resistance_band"])
+
+    assert [option["equipment"] for option in bands] == ["Resistance Band"]
+    assert [option["equipment"] for option in machines] == ["Leverage Machine"]
+
+
+def test_legacy_catalog_uses_bands_only_when_preferred_equipment_is_unavailable(app):
+    source = workout_exercise("legacy", "Puxada alta pela frente", "puxada_alta_frente")
+    with app.app_context():
+        options = replacement_options(source, unavailable_equipment=[], limit=10)
+        fallback = replacement_options(source, available_equipment=["resistance_band"])
+
+    assert options
+    assert all(option["equipment"] != "resistance_band" for option in options)
+    assert [option["equipment"] for option in fallback] == ["resistance_band"]

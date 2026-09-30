@@ -5,6 +5,27 @@ const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname,'../copilot/js/plans.js'),'utf8');
 const tick = () => new Promise(resolve=>setImmediate(resolve));
+test('retry replaces the failed media placeholder before the player patches its content', () => {
+    const exercise = {id:100,catalog_key:'original'}, replacements = [];
+    const image = {tagName:'IMG'};
+    const mediaLoads = new Map([['alice:/gif', Promise.resolve(false)]]);
+    const context = {
+        workoutView:{activeExerciseId:'100'}, workoutMediaLoads:mediaLoads,
+        findSelectedExercise:()=>exercise, displayedExercise:()=>({exercise}),
+        exerciseImage:()=>'/gif', workoutAccount:()=>'alice',
+        byId:()=>({querySelector:()=>({replaceWith:node=>replacements.push(node)})}),
+        document:{createElement:()=>({content:{firstElementChild:image}})},
+        exerciseImageMarkup:()=>'<img src="/gif">',
+        renderWorkoutDetail:()=>assert.equal(replacements[0],image),
+        requestAnimationFrame:()=>{},
+    };
+    vm.createContext(context);
+    const start = source.indexOf('    function retryWorkoutExerciseMedia()');
+    const end = source.indexOf('\n    document.addEventListener("load"',start);
+    vm.runInContext(source.slice(start,end)+'\nretryWorkoutExerciseMedia();',context);
+    assert.equal(mediaLoads.size,0);
+    assert.equal(replacements.length,1);
+});
 function harness() {
     const storage = new Map(), nodes = new Map(), calls = [], renders=[];
     const window = {currentUser:{id:'alice'}, setTimeout, clearTimeout, confirm:()=>true};
@@ -28,6 +49,29 @@ function harness() {
     api.setAPI((url,options={})=>{calls.push({url,options});return c.respond(url,options);});
     return {api,s,c,window,storage,nodes,calls,renders};
 }
+test('final fallback failure clears replacement loading after the image error handlers run', () => {
+    let listener;
+    const deferred = [], feedback = {};
+    const state = {session:{id:77},pendingReplacementMedia:{sessionId:77,exerciseId:'100',catalogKey:'alt',url:'/gif'}};
+    const image = {isConnected:true,classList:{contains:()=>true},dataset:{exerciseId:'100',catalogKey:'alt',mediaUrl:'/gif',mediaFallback:'/fallback'}};
+    const context = {
+        document:{addEventListener:(_type,fn)=>{listener=fn}},
+        queueMicrotask:fn=>deferred.push(fn),workoutView:state,
+        byId:()=>({querySelector:()=>feedback}),
+    };
+    vm.createContext(context);
+    const start = source.indexOf('    document.addEventListener("error", (event) => {');
+    const end = source.indexOf('\n    function equipmentLabel',start);
+    vm.runInContext(source.slice(start,end),context);
+    listener({target:image});
+    deferred.shift()();
+    assert.ok(state.pendingReplacementMedia);
+    listener({target:image});
+    image.isConnected=false;
+    deferred.shift()();
+    assert.equal(state.pendingReplacementMedia,null);
+    assert.match(feedback.textContent,/Demonstração indisponível/);
+});
 function stage(ready=false) {
     return {dataset:{exerciseId:'100'},hasAttribute:()=>ready,querySelector:()=>null,
         setPointerCapture(){},hasPointerCapture:()=>false,style:{setProperty(){},removeProperty(){}},classList:{add(){},remove(){}}};

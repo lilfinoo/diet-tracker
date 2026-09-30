@@ -176,6 +176,7 @@
         completingExerciseIds: new Set(),
         session: null,
         sessionLoading: false,
+        openingExecution: false,
         sessionError: "",
         actionFeedback: "",
         pendingReplacementMedia: null,
@@ -216,6 +217,7 @@
     let activeDockRequestToken = 0;
     const sessionWrites = new Map();
     const sessionLocks = new Set();
+    const workoutMediaLoads = new Map();
     let workoutTodayOwner = "";
     let workoutTodayAt = 0;
     let workoutTodayPromise = null;
@@ -252,6 +254,7 @@
         workoutView.session = null;
         workoutView.plan = null;
         workoutView.days = [];
+        workoutMediaLoads.clear();
         workoutView.completedSummary = null;
         workoutView.shareOpen = false;
         workoutView.shareDraft = null;
@@ -1888,10 +1891,10 @@
         const operational = ['active', 'scheduled'].includes(state);
         if (operational) {
             const firstExercise = asArray(day?.exercises)[0];
-            const action = state === 'active' ? 'open-plan' : 'start-today';
+            const action = state === 'active' ? 'continue-today' : 'start-today';
             const actionLabel = state === 'active' ? 'Continuar treino' : 'Iniciar treino';
             const preview = firstExercise ? `<figure class="today-workout-preview" role="button" tabindex="0" data-workout-today-action="${action}" aria-label="${actionLabel}: ${esc(name)}">${exerciseImageMarkup(firstExercise, true)}<figcaption>${esc(firstExercise.name)}</figcaption></figure>` : "";
-            container.innerHTML = `<div class="today-workout">${preview}<div class="today-workout__head"><span class="today-workout__icon"><i data-lucide="dumbbell" aria-hidden="true"></i></span><div><span class="today-muted">${state === 'active' ? 'Treino em andamento' : 'Treino de hoje'}</span><h2>${esc(name)}</h2></div></div><button type="button" class="btn-primary" data-workout-today-action="${state === 'active' ? 'open-plan' : 'start-today'}">${state === 'active' ? 'Continuar treino' : 'Iniciar treino'} <i data-lucide="arrow-right" aria-hidden="true"></i></button></div>`;
+            container.innerHTML = `<div class="today-workout">${preview}<div class="today-workout__head"><span class="today-workout__icon"><i data-lucide="dumbbell" aria-hidden="true"></i></span><div><span class="today-muted">${state === 'active' ? 'Treino em andamento' : 'Treino de hoje'}</span><h2>${esc(name)}</h2></div></div><button type="button" class="btn-primary" data-workout-today-action="${action}">${actionLabel} <i data-lucide="arrow-right" aria-hidden="true"></i></button></div>`;
         } else {
             const label = { completed: 'Treino concluído', partial: 'Treino finalizado parcialmente', rest: 'Hoje é descanso', unconfigured: 'Seu treino ainda não está configurado. Acesse Treino.' }[state] || 'Treino indisponível';
             container.innerHTML = `<div class="today-workout-status"><span>${esc(label)}</span>${['completed', 'partial'].includes(state) ? '<button type="button" class="text-button" data-workout-today-action="open-activity">Ver resumo</button>' : ''}</div>`;
@@ -1956,6 +1959,8 @@
         }[state] || "Abrir treino";
         const action = state === "unconfigured"
             ? "create-workout"
+            : state === "scheduled" ? "start-today"
+            : state === "active" ? "continue-today"
             : (["completed", "partial"].includes(state) ? "open-activity" : "open-plan");
         const week = asArray(workoutTodayState.week);
         const dayTitle = day?.title || (state === "unconfigured" ? "Seu primeiro treino começa com um plano" : plan?.title || "Treino indisponível");
@@ -2032,6 +2037,19 @@
         }
         const dayId = state.current_day?.id || state.next_day?.id || null;
         await viewWorkoutPlan(state.current_plan_id, dayId);
+    }
+
+    async function openWorkoutTodayExecution() {
+        if (startingTodayWorkout) return;
+        startingTodayWorkout = true;
+        try {
+            const state = workoutTodayState || await loadWorkoutTodayCard(true);
+            if (!state?.current_plan_id || !state.current_day?.id || !['scheduled', 'active'].includes(state.state)) return;
+            await viewWorkoutPlan(state.current_plan_id, state.current_day.id, state.state === 'active' ? 'continue' : 'start');
+        } finally {
+            startingTodayWorkout = false;
+            loadWorkoutTodayCard(true);
+        }
     }
 
     async function deletePlan(type, id) {
@@ -2440,7 +2458,7 @@
     async function openActiveWorkout() {
         const summary = activeWorkoutSummary;
         if (!summary?.session || !summary.plan?.id) return;
-        await viewWorkoutPlan(summary.plan.id, summary.day?.id);
+        await viewWorkoutPlan(summary.plan.id, summary.day?.id, 'continue');
     }
 
     async function openWorkoutActivity(activityId) {
@@ -2482,6 +2500,7 @@
         workoutView.viewVersion += 1;
         workoutView.requestToken += 1;
         workoutView.pendingAction = "";
+        workoutView.openingExecution = false;
         workoutView.editMode = false;
         workoutView.addExerciseOpen = false;
         clearReplacementPanels();
@@ -2493,40 +2512,37 @@
             : "";
     }
 
+    function preloadExerciseImage(src, priority) {
+        if (!src) return Promise.resolve(false);
+        const key = `${workoutAccount()}:${src}`;
+        if (workoutMediaLoads.has(key)) return workoutMediaLoads.get(key);
+        const loading = new Promise((resolve) => {
+            const image = new Image();
+            image.fetchPriority = priority;
+            image.decoding = "async";
+            image.onload = () => resolve(true);
+            image.onerror = () => { workoutMediaLoads.delete(key); resolve(false); };
+            image.src = src;
+        });
+        if (workoutMediaLoads.size >= 6) workoutMediaLoads.delete(workoutMediaLoads.keys().next().value);
+        workoutMediaLoads.set(key, loading);
+        return loading;
+    }
+
     async function preloadWorkoutAssets(day) {
         const exercises = asArray(day?.exercises);
         const activeIndex = exercises.findIndex((exercise) => String(exercise.id) === String(workoutView.activeExerciseId));
         const start = workoutView.session ? Math.max(activeIndex, 0) : 0;
-        const preload = exercises.slice(start, start + 2);
-        await Promise.all(preload.map((original) => {
-            const exercise = displayedExercise(original).exercise;
-            const src = exerciseImage(exercise);
-            if (!src) return Promise.resolve();
-            return new Promise((resolve) => {
-                const image = new Image();
-                image.onload = () => {
-                    if (!image.decode) return resolve();
-                    image.decode().catch(() => {}).finally(resolve);
-                };
-                image.onerror = resolve;
-                image.src = src;
-            });
-        }));
-    }
-
-    async function preloadReplacementOptions(day, session) {
-        if (!session || navigator.onLine === false) return;
-        const account = workoutAccount();
-        const payload = replacementPayload();
-        await Promise.allSettled(asArray(day?.exercises).map(async (exercise) => {
-            const key = String(exercise.id);
-            const cacheKey = `workout:options:${account}:${session.id}:${key}:${JSON.stringify(session.overrides)}`;
-            const cached = window.AppReadCache?.peek(cacheKey);
-            if (cached && Date.now() - cached.at < 60000) return;
-            const path = `/workout_sessions/${apiSegment(session.id)}/exercises/${apiSegment(key)}/replacement_options`;
-            const result = await apiRequest(path, { method: "POST", body: payload, timeout: 30000 });
-            if (window.AppReadCache) await window.AppReadCache.read(cacheKey, () => result, { ttl: 60000, force: true });
-        }));
+        const current = exercises[start];
+        if (!current) return;
+        const account = workoutAccount(), version = workoutView.viewVersion;
+        const currentId = workoutView.activeExerciseId;
+        const loaded = await preloadExerciseImage(exerciseImage(displayedExercise(current).exercise), "high");
+        const connection = navigator.connection;
+        if (!loaded || !workoutContextCurrent(account, version) || workoutView.activeExerciseId !== currentId
+            || navigator.onLine === false || connection?.saveData || /(^|-)2g$/.test(connection?.effectiveType || "")) return;
+        const next = exercises[start + 1];
+        if (next) await preloadExerciseImage(exerciseImage(displayedExercise(next).exercise), "low");
     }
 
     function exerciseImageMarkup(exercise, eager = false) {
@@ -2536,7 +2552,7 @@
                 ? exerciseFallbackImagePath(exercise?.catalog_key)
                 : "";
             const fallback = fallbackPath && fallbackPath !== imagePath ? ` data-fallback-src="${esc(fallbackPath)}"` : "";
-            return `<img class="exercise-demonstration-image is-loading" data-exercise-id="${esc(exercise?.id || "")}" data-catalog-key="${esc(exercise?.catalog_key || "")}" data-media-url="${esc(imagePath)}" src="${esc(imagePath)}"${fallback} alt="Demonstração de ${esc(exercise?.name || "exercício")}" loading="${eager ? "eager" : "lazy"}" decoding="async" width="768" height="1024">`;
+            return `<img class="exercise-demonstration-image is-loading" data-exercise-id="${esc(exercise?.id || "")}" data-catalog-key="${esc(exercise?.catalog_key || "")}" data-media-url="${esc(imagePath)}" src="${esc(imagePath)}"${fallback} alt="Demonstração de ${esc(exercise?.name || "exercício")}" loading="${eager ? "eager" : "lazy"}" fetchpriority="${eager ? "high" : "low"}" decoding="async" width="768" height="1024">`;
         }
         return '<span class="exercise-image-placeholder" role="img" aria-label="Imagem não disponível"><i class="fas fa-dumbbell" aria-hidden="true"></i></span>';
     }
@@ -2544,7 +2560,7 @@
     function syncWorkoutExerciseImage(image) {
         if (!image?.classList?.contains("exercise-demonstration-image") || !image.dataset.mediaUrl
             || !image.complete || !image.naturalWidth
-            || image.currentSrc !== new URL(image.dataset.mediaUrl, document.baseURI).href) return;
+            || image.currentSrc !== new URL(image.dataset.mediaFallback || image.dataset.mediaUrl, document.baseURI).href) return;
         const current = byId("viewWorkoutPlanDetails")?.querySelector("[data-workout-player-card] .current-exercise-media img");
         if (image === current) {
             const exercise = displayedExercise(findSelectedExercise(workoutView.activeExerciseId) || {}).exercise;
@@ -2556,13 +2572,44 @@
                 && pending.catalogKey === exercise.catalog_key && pending.url === image.dataset.mediaUrl) {
                 workoutView.pendingReplacementMedia = null;
                 workoutView.actionFeedback = "Exercício trocado.";
-                renderWorkoutDetail({preserveScroll: true});
+                const feedback = byId("viewWorkoutPlanDetails")?.querySelector(".workout-player-feedback");
+                if (feedback) feedback.textContent = workoutView.actionFeedback;
             }
         }
         image.classList.remove("is-loading");
     }
 
+    function retryWorkoutExerciseMedia() {
+        const exercise = displayedExercise(findSelectedExercise(workoutView.activeExerciseId) || {}).exercise;
+        const source = exerciseImage(exercise);
+        if (source) workoutMediaLoads.delete(`${workoutAccount()}:${source}`);
+        const placeholder = byId("viewWorkoutPlanDetails")?.querySelector(".current-exercise-media .exercise-image-placeholder");
+        if (placeholder) {
+            const template = document.createElement("template");
+            template.innerHTML = exerciseImageMarkup(exercise, true);
+            placeholder.replaceWith(template.content.firstElementChild);
+        }
+        renderWorkoutDetail({ preserveScroll: true });
+        requestAnimationFrame(() => preloadWorkoutAssets(selectedWorkoutDay()).catch(() => {}));
+    }
+
     document.addEventListener("load", (event) => syncWorkoutExerciseImage(event.target), true);
+
+    document.addEventListener("error", (event) => {
+        const image = event.target;
+        if (!image?.classList?.contains("exercise-demonstration-image")) return;
+        queueMicrotask(() => {
+            const pending = workoutView.pendingReplacementMedia;
+            if (!pending || image.isConnected) return;
+            if (pending.sessionId === workoutView.session?.id && pending.exerciseId === image.dataset.exerciseId
+                && pending.catalogKey === image.dataset.catalogKey && pending.url === image.dataset.mediaUrl) {
+                workoutView.pendingReplacementMedia = null;
+                workoutView.actionFeedback = "Exercício trocado. Demonstração indisponível; tente novamente.";
+                const feedback = byId("viewWorkoutPlanDetails")?.querySelector(".workout-player-feedback");
+                if (feedback) feedback.textContent = workoutView.actionFeedback;
+            }
+        });
+    }, true);
 
     function equipmentLabel(value) {
         return labelFor({ ...WORKOUT_EQUIPMENT, ...CATALOG_EQUIPMENT_LABELS }, value, value || "Equipamento livre");
@@ -3361,12 +3408,21 @@
 
     function workoutNodeKey(node) {
         if (node.nodeType !== 1) return node.nodeType;
+        if (node.dataset.mediaUrl) return `MEDIA:${node.dataset.mediaUrl}`;
         return `${node.tagName}:${node.id || node.dataset.mediaUrl || node.dataset.catalogKey || node.dataset.workoutSetIndex || node.dataset.workoutAction || node.classList[0] || ""}`;
     }
 
     // Keep existing input nodes alive when updating player or sharing controls.
     function patchWorkoutNode(current, next) {
         if (!current || !next) return;
+        if (current.dataset?.mediaUrl && current.dataset.mediaUrl === next.dataset?.mediaUrl) {
+            if (current.classList.contains("exercise-image-placeholder")) return;
+            if (current.dataset.mediaFallback) {
+                next.setAttribute("src", current.dataset.mediaFallback);
+                next.dataset.mediaFallback = current.dataset.mediaFallback;
+                next.removeAttribute("data-fallback-src");
+            }
+        }
         if (current.nodeType !== next.nodeType || workoutNodeKey(current) !== workoutNodeKey(next)) {
             current.replaceWith(next);
             return;
@@ -3451,6 +3507,7 @@
     function renderWorkoutDetail(options = {}) {
         const details = byId("viewWorkoutPlanDetails");
         if (!details) return;
+        if (workoutView.openingExecution) return;
         details.setAttribute("aria-busy", String(Boolean(workoutView.pendingAction || workoutView.completingExerciseIds.size)));
         byId("viewWorkoutPlanModal")?.classList.toggle("workout-execution-mode", Boolean(workoutView.session && !workoutView.completedSummary));
         const previousScroll = options.preserveScroll ? details.scrollTop : 0;
@@ -3571,11 +3628,7 @@
         updateWorkoutVisualViewport();
         if (options.focusSelector) requestAnimationFrame(() => details.querySelector(options.focusSelector)?.focus({ preventScroll: true }));
         if (session && !samePlayerCard) animateWorkoutAction('#currentExerciseTitle, #workoutFinishCardTitle');
-        if (session && !samePlayerCard && workoutView.playerScreen === "exercise") {
-            const exercises = asArray(day.exercises);
-            const next = exercises[exercises.findIndex((exercise) => String(exercise.id) === String(workoutView.activeExerciseId)) + 1];
-            if (next) { const image = new Image(); image.src = exerciseImage(displayedExercise(next).exercise); }
-        }
+        if (session && workoutView.playerScreen === "exercise") preloadWorkoutAssets(day).catch(() => {});
     }
 
     async function loadActiveWorkoutSession() {
@@ -3622,14 +3675,16 @@
         }
     }
 
-    async function viewWorkoutPlan(id, preferredDayId = null) {
-        if (workoutView.pendingAction) return null;
+    async function viewWorkoutPlan(id, preferredDayId = null, intent = "plan") {
+        if (workoutView.pendingAction || workoutView.openingExecution) return null;
         invalidateWorkoutView();
         const version = workoutView.viewVersion;
         const account = workoutAccount();
         const details = byId("viewWorkoutPlanDetails");
+        const execution = intent === "start" || intent === "continue";
         const cachedPlan = String(workoutView.plan?.id) === String(id) ? workoutView.plan : null;
         const knownSession = String(activeWorkoutSummary?.plan?.id) === String(id) ? activeWorkoutSummary.session : null;
+        workoutView.openingExecution = execution;
         workoutView.completedSummary = null;
         workoutView.shareOpen = false;
         workoutView.shareDraft = null;
@@ -3638,7 +3693,9 @@
         workoutView.session = knownSession;
         workoutView.sessionError = "";
         workoutView.plan = cachedPlan;
-        if (cachedPlan) {
+        byId("viewWorkoutPlanTitle").textContent = execution ? "Seu treino" : "Plano de treino";
+        byId("viewWorkoutPlanModal")?.classList.remove("workout-execution-mode");
+        if (cachedPlan && !execution) {
             workoutView.days = normalizedWorkoutDays(cachedPlan);
             const target = preferredDayId || knownSession?.workout_day_id;
             workoutView.selectedDay = Math.max(0, workoutView.days.findIndex(day => String(day.id) === String(target)));
@@ -3646,8 +3703,8 @@
             renderWorkoutDetail();
         } else details.innerHTML = '<div class="workout-player-loading" role="status"><div class="home-skeleton" aria-hidden="true"></div>Preparando seu treino…</div>';
         openAppModal(byId("viewWorkoutPlanModal"));
-        const activeRead = apiRequest("/workout_sessions/active");
         try {
+            const activeRead = apiRequest("/workout_sessions/active");
             const key = `workout:plan:${account}:${id}`;
             const planRead = window.AppReadCache
                 ? window.AppReadCache.read(key, ({signal}) => apiRequest(`/workout_plans/${apiSegment(id)}`, {signal}), {ttl: 60000})
@@ -3661,16 +3718,20 @@
             workoutView.selectedDay = Math.max(0, workoutView.days.findIndex(day => String(day.id) === String(target)));
             workoutView.session = session;
             workoutView.sessionLoading = false;
-            preloadWorkoutAssets(workoutView.days[workoutView.selectedDay]).catch(() => {});
             if (session) {
                 hydrateWorkoutDrafts(session);
             }
             activeWorkoutSummary = active;
             renderActiveWorkoutDock();
-            byId("viewWorkoutPlanTitle").textContent = plan.title || "Plano de treino";
-            if (session) preloadReplacementOptions(workoutView.days[workoutView.selectedDay], session).catch(() => {});
-            renderWorkoutDetail({preserveScroll: true});
-            apiRequest(`/workout_plans/${apiSegment(id)}/professional-review`).then(result => {
+            if (execution && !session) {
+                if (intent === "continue") throw new Error("Este treino não está mais em andamento. Atualize a tela inicial.");
+                await startWorkoutSession();
+                if (!workoutContextCurrent(account, version)) return null;
+                if (!workoutView.session) throw new Error(workoutView.sessionError || "Não foi possível iniciar o treino.");
+            }
+            workoutView.openingExecution = false;
+            renderWorkoutDetail({preserveScroll: true, focusSelector: execution ? "#currentExerciseTitle" : null});
+            if (!execution) apiRequest(`/workout_plans/${apiSegment(id)}/professional-review`).then(result => {
                 if (!workoutContextCurrent(account, version)) return;
                 plan.professional_review = result.professional_review;
                 if (!workoutView.session) renderWorkoutDetail({preserveScroll: true});
@@ -3678,10 +3739,13 @@
             return plan;
         } catch (error) {
             if (workoutContextCurrent(account, version) && error.name !== "AbortError") {
-                if (cachedPlan) { workoutView.sessionError = error.message; renderWorkoutDetail({preserveScroll: true}); }
-                else details.innerHTML = `<div class="workout-player-loading" role="alert"><p>${esc(error.message)}</p><button type="button" data-workout-action="retry-open-plan" data-plan-id="${esc(id)}">Tentar novamente</button></div>`;
+                workoutView.openingExecution = false;
+                if (cachedPlan && !execution) { workoutView.sessionError = error.message; renderWorkoutDetail({preserveScroll: true}); }
+                else details.innerHTML = `<div class="workout-player-loading" role="alert"><p>${esc(error.message)}</p><button type="button" class="btn-secondary" data-workout-action="retry-open-plan" data-plan-id="${esc(id)}" data-day-id="${esc(preferredDayId || '')}" data-open-intent="${esc(intent)}">Tentar novamente</button></div>`;
             }
             return null;
+        } finally {
+            if (workoutContextCurrent(account, version)) workoutView.openingExecution = false;
         }
     }
 
@@ -3776,7 +3840,7 @@
 
     async function startWorkoutSession() {
         const day = selectedWorkoutDay();
-        if (!day?.id || !workoutView.plan?.id || workoutView.pendingAction) return;
+        if (!day?.id || !workoutView.plan?.id || workoutView.pendingAction || workoutView.session) return;
         const planId = workoutView.plan.id;
         const dayId = day.id;
         const viewVersion = workoutView.viewVersion;
@@ -3800,7 +3864,6 @@
                 day: { id: day.id, title: day.title }
             };
             renderActiveWorkoutDock();
-            showToast("Treino iniciado. Boa sessão!", "success");
         } catch (error) {
             if (viewVersion === workoutView.viewVersion) workoutView.sessionError = error.message;
         } finally {
@@ -4508,22 +4571,7 @@
             const workoutTodayAction = event.target.closest("[data-workout-today-action]");
             if (workoutTodayAction) {
                 const action = workoutTodayAction.dataset.workoutTodayAction;
-                if (action === 'start-today') {
-                    if (startingTodayWorkout) return;
-                    startingTodayWorkout = true;
-                    workoutTodayAction.disabled = true;
-                    try {
-                        const state = await loadWorkoutTodayCard(true);
-                        if (state?.state === 'scheduled' && state.current_day?.id) {
-                            const plan = await viewWorkoutPlan(state.current_plan_id, state.current_day.id);
-                            if (plan && byId("viewWorkoutPlanModal")?.classList.contains("show") && !workoutView.session && String(selectedWorkoutDay()?.id) === String(state.current_day.id)) await startWorkoutSession();
-                        } else if (state?.state === 'active') await openWorkoutTodayPlan();
-                    } finally {
-                        startingTodayWorkout = false;
-                        workoutTodayAction.disabled = false;
-                        await loadWorkoutTodayCard(true);
-                    }
-                }
+                if (action === 'start-today' || action === 'continue-today') await openWorkoutTodayExecution();
                 if (action === "open-plan") window.openWorkoutTodayPlan?.();
                 if (action === "open-activity" && workoutTodayState?.completed_session?.id) {
                     openWorkoutActivity(workoutTodayState.completed_session.id);
@@ -4656,7 +4704,8 @@
             if (!control) return;
             const action = control.dataset.workoutAction;
             if ((workoutView.pendingAction || workoutView.uncertainMutation) && !["retry-session", "close-active-workout"].includes(action)) return;
-            if (action === "retry-open-plan") { await viewWorkoutPlan(control.dataset.planId); return; }
+            if (action === "retry-open-plan") { await viewWorkoutPlan(control.dataset.planId, control.dataset.dayId || null, control.dataset.openIntent || "plan"); return; }
+            if (action === "retry-exercise-media") { retryWorkoutExerciseMedia(); return; }
             const exerciseId = control.dataset.exerciseId || control.closest("[data-exercise-id]")?.dataset.exerciseId;
             if (action === "select-day") {
                 const index = Number(control.dataset.dayIndex);
