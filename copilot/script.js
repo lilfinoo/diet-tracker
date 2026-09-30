@@ -1031,16 +1031,9 @@ function startAuthChoiceGoogle() {
         startNativeGoogleSignIn();
         return;
     }
-    if (window.google?.accounts?.id) {
-        try {
-            google.accounts.id.prompt();
-            return;
-        } catch (error) {
-            console.warn('Google prompt failed:', error);
-        }
-    }
     showLogin();
-    showAuthMessage('Use o botão do Google abaixo para continuar.', 'info');
+    getElement('googleSignInButton')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    showAuthMessage('Toque no botão oficial do Google abaixo para continuar.', 'info');
 }
 
 async function startNativeGoogleSignIn() {

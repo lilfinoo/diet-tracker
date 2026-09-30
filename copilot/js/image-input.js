@@ -117,6 +117,7 @@
             if (accepted !== false) notify("ready");
             return file;
         }
+        if (input) input.capture = source === "CAMERA" ? "environment" : "";
         notify(source === "CAMERA" ? "opening_camera" : "opening_photos");
         input?.click();
         return null;

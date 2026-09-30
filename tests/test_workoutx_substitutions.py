@@ -1,7 +1,9 @@
 from types import SimpleNamespace
 
+import pytest
+
 from src.models.user import WorkoutSessionExerciseOverride, WorkoutXExercise, db
-from src.services.workout_plans import replacement_options
+from src.services.workout_plans import replacement_options, workoutx_display_name
 from src.services.workoutx_substitutions import classify_exercise, substitution_options
 
 
@@ -17,6 +19,18 @@ def exercise(identifier, name, target, equipment, mechanic="compound", **extra):
         "secondaryMuscles": ["triceps"],
         **extra,
     }
+
+
+@pytest.fixture(autouse=True)
+def synthetic_workoutx_names(monkeypatch):
+    from src.services import workout_plans
+
+    actual_name = workout_plans.workoutx_display_name
+    monkeypatch.setattr(
+        workout_plans,
+        "workoutx_display_name",
+        lambda provider_id: f"Exercício {provider_id}" if str(provider_id) in {"1", "2", "3", "4", "5", "6"} else actual_name(provider_id),
+    )
 
 
 def test_classification_preserves_substitution_attributes():
@@ -103,6 +117,39 @@ def test_active_catalog_excludes_self_and_exercises_already_in_the_workout(app):
         options = replacement_options(source, present_exercises=[source, present])
 
     assert [item["catalog_key"] for item in options] == ["workoutx:3"]
+
+
+def test_workoutx_replacement_uses_brazilian_name_and_preserves_gif_key(app):
+    source = workout_exercise("0201", "Cable Pushdown")
+    with app.app_context():
+        db.session.add_all([
+            WorkoutXExercise(provider_id="0201", data=active_exercise("0201", "Cable Pushdown", "Triceps", "Cable", "isolation")),
+            WorkoutXExercise(provider_id="0241", data=active_exercise("0241", "Cable Triceps Pushdown (v-bar)", "Triceps", "Cable", "isolation")),
+        ])
+        db.session.commit()
+
+        options = replacement_options(source, present_exercises=[source])
+
+    assert [(item["catalog_key"], item["name"]) for item in options] == [
+        ("workoutx:0241", "Tríceps na polia com barra V")
+    ]
+    assert workoutx_display_name("999999") is None
+
+
+def test_untranslated_workoutx_candidate_falls_back_to_local_catalog(app):
+    source = workout_exercise("0025", "Supino reto com barra", "supino_reto_barra")
+    with app.app_context():
+        db.session.add_all([
+            WorkoutXExercise(provider_id="0025", data=active_exercise("0025", "Barbell Bench Press", "Pectorals", "Barbell")),
+            WorkoutXExercise(provider_id="999999", data=active_exercise("999999", "Cable Bench Press", "Pectorals", "Cable")),
+        ])
+        db.session.commit()
+
+        options = replacement_options(source, present_exercises=[source])
+
+    assert options
+    assert all(not item["catalog_key"].startswith("workoutx:") for item in options)
+    assert all(item["name"] for item in options)
 
 
 def test_active_catalog_maps_legacy_exercises_through_catalog_aliases(app):
