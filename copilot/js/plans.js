@@ -81,7 +81,15 @@
         jump_rope: "Corda",
         ez_bar: "Barra EZ",
         sliders: "Discos deslizantes",
-        stability_ball: "Bola suíça"
+        stability_ball: "Bola suíça",
+        Barbell: "Barra e anilhas",
+        Cable: "Cabos",
+        Dumbbell: "Halteres",
+        "Body Weight": "Peso corporal",
+        Band: "Faixas elásticas",
+        Kettlebell: "Kettlebell",
+        Weighted: "Carga adicional",
+        "Skierg Machine": "Ergômetro de esqui"
     };
     const WIZARD_STEPS = {
         diet: ["Base", "Cuidados", "Revisão"],

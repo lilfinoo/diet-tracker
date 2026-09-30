@@ -10,6 +10,7 @@ from src.services.workoutx_substitutions import equipment_family, prioritize_rep
 
 
 CATALOG_PATH = Path(__file__).resolve().parent.parent / "data" / "exercises.json"
+WORKOUTX_NAMES_PATH = CATALOG_PATH.with_name("workoutx_names_pt_br.json")
 GOALS = {"hypertrophy", "strength", "conditioning", "fat_loss", "mobility"}
 EXPERIENCE_LEVELS = {"beginner", "intermediate", "advanced"}
 SPLITS_BY_DAYS = {
@@ -96,6 +97,16 @@ def _normalized(value):
 def exercise_catalog():
     with CATALOG_PATH.open(encoding="utf-8") as catalog_file:
         return json.load(catalog_file)
+
+
+@lru_cache(maxsize=1)
+def workoutx_names_pt_br():
+    with WORKOUTX_NAMES_PATH.open(encoding="utf-8") as names_file:
+        return json.load(names_file)
+
+
+def workoutx_display_name(provider_id):
+    return workoutx_names_pt_br().get(str(provider_id))
 
 
 @lru_cache(maxsize=1)
@@ -979,7 +990,7 @@ def _workoutx_catalog_item(exercise):
     classification = classify_workoutx_exercise(exercise)
     return {
         "key": f"workoutx:{exercise['id']}",
-        "name": exercise["name"],
+        "name": workoutx_display_name(exercise["id"]) or exercise["name"],
         "aliases": [exercise["name"]],
         "movement_pattern": classification["movement_pattern"],
         "primary_muscle": classification["primary_muscle"],
@@ -1127,7 +1138,8 @@ def _workoutx_replacement_options(exercise, source, unavailable_equipment, avail
     full_gym = not available or "full_gym" in available
     candidates = [
         item for item in catalog
-        if _workoutx_equipment_available(item, blocked, available, full_gym)
+        if workoutx_display_name(item["id"])
+        and _workoutx_equipment_available(item, blocked, available, full_gym)
     ]
     present_ids = set()
     for present in present_exercises or []:
@@ -1148,7 +1160,8 @@ def _workoutx_replacement_options(exercise, source, unavailable_equipment, avail
         )
         candidates.extend(
             item for item in extra_candidates
-            if _workoutx_equipment_available(item, blocked, available, full_gym)
+            if workoutx_display_name(item["id"])
+            and _workoutx_equipment_available(item, blocked, available, full_gym)
         )
     options = substitution_options(
         source_item,
@@ -1158,10 +1171,10 @@ def _workoutx_replacement_options(exercise, source, unavailable_equipment, avail
         provider_scores=provider_scores,
     )
     options = _diversify_replacement_options(options, limit)
-    return [
+    localized_options = [
         {
             "catalog_key": f"workoutx:{candidate['id']}",
-            "name": candidate["name"],
+            "name": workoutx_display_name(candidate["id"]),
             "movement_pattern": classify_workoutx_exercise(candidate)["movement_pattern"],
             "primary_muscle": classify_workoutx_exercise(candidate)["primary_muscle"],
             "equipment": candidate.get("equipment") or "",
@@ -1173,10 +1186,12 @@ def _workoutx_replacement_options(exercise, source, unavailable_equipment, avail
             "rest_seconds": exercise.rest_seconds,
             "effort_guidance": exercise.effort_guidance or "Termine com 2 repetições em reserva",
             "notes": "Ajuste a carga e mantenha a execução controlada.",
-            "rationale": f"Mantém o padrão {classify_workoutx_exercise(candidate)['movement_pattern']} para {classify_workoutx_exercise(candidate)['primary_muscle']}.",
+            "rationale": "Alternativa compatível para este treino.",
         }
         for candidate in options
+        if workoutx_display_name(candidate["id"])
     ]
+    return localized_options or None
 
 
 def replacement_options(exercise, unavailable_equipment=None, available_equipment=None, limit=3, present_exercises=None):
