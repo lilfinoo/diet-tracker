@@ -575,60 +575,96 @@ def _admin_summary_counts(from_date, to_date):
     }
 
 
+def _signup_cohort(from_date, to_date):
+    period_start = datetime.combine(from_date, datetime.min.time())
+    period_end = datetime.combine(to_date, datetime.max.time())
+    users = User.query.with_entities(
+        User.analytics_subject_id, User.created_at
+    ).filter(
+        User.is_admin.is_(False),
+        User.created_at >= period_start,
+        User.created_at <= period_end,
+    ).all()
+    now = datetime.utcnow()
+    eligible = {subject_id for subject_id, created_at in users if created_at <= now - timedelta(days=7)}
+    created_by_subject = {subject_id: created_at for subject_id, created_at in users}
+    activated = 0
+    returned = 0
+    value_events = {"profile_completed", "plan_generation_succeeded", "meal_logged", "workout_finished"}
+    if users:
+        events = db.session.query(
+            AnalyticsEvent.subject_id,
+            func.min(case((AnalyticsEvent.event_name.in_(value_events), AnalyticsEvent.created_at))).label("first_value"),
+            func.max(AnalyticsEvent.created_at).label("last_return_or_value"),
+        ).filter(
+            AnalyticsEvent.subject_id.in_(created_by_subject),
+            AnalyticsEvent.created_at >= period_start,
+            AnalyticsEvent.created_at <= now,
+            AnalyticsEvent.event_name.in_(value_events | {"returned_d7"}),
+        ).group_by(AnalyticsEvent.subject_id).all()
+        for subject_id, first_value, last_return_or_value in events:
+            created_at = created_by_subject[subject_id]
+            if first_value and timedelta(0) <= first_value - created_at < timedelta(days=7):
+                activated += 1
+            if subject_id in eligible and last_return_or_value >= created_at + timedelta(days=7):
+                returned += 1
+    return {
+        "signups": len(users),
+        "activated": activated,
+        "eligible_d7": len(eligible),
+        "returned_d7": returned,
+    }
+
+
 def _build_admin_analytics_payload(from_date, to_date, bucket):
     summary = _admin_summary_counts(from_date, to_date)
     period_start = datetime.combine(from_date, datetime.min.time())
     period_end = datetime.combine(to_date, datetime.max.time())
-    funnel_events = AnalyticsEvent.query.filter(
+    funnel_filter = (
         AnalyticsEvent.created_at >= period_start,
         AnalyticsEvent.created_at <= period_end,
-        AnalyticsEvent.event_name.in_((
-            "app_viewed", "signup_started", "signup_completed", "profile_completed",
-            "plan_generation_succeeded", "meal_logged", "workout_finished",
-            "returned_d7", "checkout_started", "subscription_activated",
-        )),
-    ).all()
-    funnel_identities = defaultdict(set)
+    )
+    anonymous_stages = {"app_viewed", "signup_started"}
+    subject_stages = {"signup_completed", "returned_d7", "checkout_started", "subscription_activated"}
+    stage_counts = dict(db.session.query(
+        AnalyticsEvent.event_name, func.count(func.distinct(AnalyticsEvent.subject_id))
+    ).filter(*funnel_filter, AnalyticsEvent.event_name.in_(subject_stages)).group_by(
+        AnalyticsEvent.event_name
+    ).all())
+    stage_counts.update(db.session.query(
+        AnalyticsEvent.event_name, func.count(func.distinct(AnalyticsEvent.anonymous_id))
+    ).filter(*funnel_filter, AnalyticsEvent.event_name.in_(anonymous_stages)).group_by(
+        AnalyticsEvent.event_name
+    ).all())
     source_signups = defaultdict(set)
     source_activations = defaultdict(set)
-    activated_subjects = set()
     activation_events = {"profile_completed", "plan_generation_succeeded", "meal_logged", "workout_finished"}
-    for event in funnel_events:
-        identity = str(event.subject_id) if event.subject_id else None
-        if event.event_name in {"app_viewed", "signup_started"} and event.anonymous_id:
-            funnel_identities[event.event_name].add(event.anonymous_id)
-        elif identity:
-            funnel_identities[event.event_name].add(identity)
-        if event.event_name in activation_events and identity:
-            activated_subjects.add(identity)
-        if event.event_name == "signup_completed" and identity:
-            properties = event.properties or {}
-            source = properties.get("utm_source") or "Direto / sem UTM"
-            medium = properties.get("utm_medium") or ""
-            campaign = properties.get("utm_campaign") or ""
-            label = " / ".join(value for value in (source, medium, campaign) if value)
-            source_signups[label].add(identity)
-    for event in funnel_events:
-        if event.event_name != "signup_completed" or not event.subject_id:
-            continue
-        identity = str(event.subject_id)
-        if identity not in activated_subjects:
-            continue
-        properties = event.properties or {}
+    activated_subjects = {subject_id for (subject_id,) in db.session.query(
+        AnalyticsEvent.subject_id
+    ).filter(*funnel_filter, AnalyticsEvent.subject_id.isnot(None),
+             AnalyticsEvent.event_name.in_(activation_events)).distinct().all()}
+    signups_with_source = db.session.query(
+        AnalyticsEvent.subject_id, AnalyticsEvent.properties
+    ).filter(*funnel_filter, AnalyticsEvent.event_name == "signup_completed",
+             AnalyticsEvent.subject_id.isnot(None)).all()
+    for subject_id, properties in signups_with_source:
+        properties = properties or {}
         source = properties.get("utm_source") or "Direto / sem UTM"
         medium = properties.get("utm_medium") or ""
         campaign = properties.get("utm_campaign") or ""
         label = " / ".join(value for value in (source, medium, campaign) if value)
-        source_activations[label].add(identity)
+        source_signups[label].add(subject_id)
+        if subject_id in activated_subjects:
+            source_activations[label].add(subject_id)
     funnel = {
         "stages": [
-            {"key": "app_viewed", "label": "Visitaram o app", "users": len(funnel_identities["app_viewed"])},
-            {"key": "signup_started", "label": "Começaram cadastro", "users": len(funnel_identities["signup_started"])},
-            {"key": "signup_completed", "label": "Concluíram cadastro", "users": len(funnel_identities["signup_completed"])},
+            {"key": "app_viewed", "label": "Visitaram o app", "users": stage_counts.get("app_viewed", 0)},
+            {"key": "signup_started", "label": "Começaram cadastro", "users": stage_counts.get("signup_started", 0)},
+            {"key": "signup_completed", "label": "Concluíram cadastro", "users": stage_counts.get("signup_completed", 0)},
             {"key": "activated", "label": "Fizeram ação de valor", "users": len(activated_subjects)},
-            {"key": "returned_d7", "label": "Voltaram após 7 dias", "users": len(funnel_identities["returned_d7"])},
-            {"key": "checkout_started", "label": "Iniciaram pagamento", "users": len(funnel_identities["checkout_started"])},
-            {"key": "subscription_activated", "label": "Assinaram", "users": len(funnel_identities["subscription_activated"])},
+            {"key": "returned_d7", "label": "Voltaram após 7 dias", "users": stage_counts.get("returned_d7", 0)},
+            {"key": "checkout_started", "label": "Iniciaram pagamento", "users": stage_counts.get("checkout_started", 0)},
+            {"key": "subscription_activated", "label": "Assinaram", "users": stage_counts.get("subscription_activated", 0)},
         ],
         "sources": [
             {"source": source, "signups": len(users), "activated": len(source_activations[source])}
@@ -739,6 +775,7 @@ def _build_admin_analytics_payload(from_date, to_date, bucket):
     return {
         "range": {"from": from_date.isoformat(), "to": to_date.isoformat(), "bucket": bucket},
         "summary": summary,
+        "cohort": _signup_cohort(from_date, to_date),
         "funnel": funnel,
         "series": {
             "labels": labels,
@@ -765,6 +802,98 @@ def _build_admin_analytics_payload(from_date, to_date, bucket):
 def admin_analytics():
     from_date, to_date, bucket = _parse_admin_period()
     return jsonify(_build_admin_analytics_payload(from_date, to_date, bucket)), 200
+
+
+@admin_bp.route("/admin/user_activity", methods=["GET"])
+@admin_required
+def admin_user_activity():
+    from_date, to_date, _ = _parse_admin_period()
+    try:
+        limit = min(50, max(1, int(request.args.get("limit", 20))))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except ValueError:
+        abort(400, description="Paginação inválida.")
+    period_start = datetime.combine(from_date, datetime.min.time())
+    period_end = datetime.combine(to_date, datetime.max.time())
+    metric_names = {
+        "meal_logged": "diet_entries",
+        "workout_finished": "workout_sessions",
+        "measurement_logged": "measurements",
+        "ai_chat_completed": "chat_messages",
+    }
+    activity = db.session.query(
+        AnalyticsEvent.subject_id.label("subject_id"),
+        func.max(AnalyticsEvent.created_at).label("last_active_at"),
+        func.count(func.distinct(func.date(AnalyticsEvent.created_at))).label("active_days"),
+        *[
+            func.sum(case((AnalyticsEvent.event_name == name, 1), else_=0)).label(column)
+            for name, column in metric_names.items()
+        ],
+    ).filter(
+        AnalyticsEvent.subject_id.isnot(None),
+        AnalyticsEvent.created_at >= period_start,
+        AnalyticsEvent.created_at <= period_end,
+        AnalyticsEvent.event_name.in_(metric_names),
+    ).group_by(AnalyticsEvent.subject_id).subquery()
+    accounts = User.query.filter(User.is_admin.is_(False), User.created_at <= period_end)
+    total = accounts.count()
+    rows = db.session.query(User, activity).outerjoin(
+        activity, User.analytics_subject_id == activity.c.subject_id
+    ).filter(
+        User.is_admin.is_(False), User.created_at <= period_end
+    ).order_by(
+        (func.coalesce(activity.c.diet_entries, 0) + func.coalesce(activity.c.workout_sessions, 0)
+         + func.coalesce(activity.c.measurements, 0) + func.coalesce(activity.c.chat_messages, 0)).desc(),
+        User.created_at.desc(), User.id.desc(),
+    ).limit(limit).offset(offset).all()
+    return jsonify({
+        "total": total,
+        "items": [{
+            "user_id": str(user.id),
+            "name": user.name,
+            "username": user.username,
+            "created_at": user.created_at.isoformat(),
+            "last_active_at": last_active_at.isoformat() if last_active_at else None,
+            "active_days": active_days or 0,
+            "diet_entries": diet_entries or 0,
+            "workout_sessions": workout_sessions or 0,
+            "measurements": measurements or 0,
+            "chat_messages": chat_messages or 0,
+        } for user, subject_id, last_active_at, active_days, diet_entries,
+               workout_sessions, measurements, chat_messages in rows],
+    }), 200
+
+
+@admin_bp.route("/admin/user_activity/<uuid:user_id>/series", methods=["GET"])
+@admin_required
+def admin_user_activity_series(user_id):
+    from_date, to_date, bucket = _parse_admin_period()
+    user = User.query.filter_by(id=user_id, is_admin=False).first_or_404()
+    event_metrics = {
+        "meal_logged": "diet_entries",
+        "workout_finished": "workout_sessions",
+        "measurement_logged": "measurements",
+        "ai_chat_completed": "chat_messages",
+    }
+    dates = _date_series(from_date, to_date, bucket)
+    activity = {day: {metric: 0 for metric in event_metrics.values()} for day in dates}
+    rows = db.session.query(
+        AnalyticsEvent.event_name, func.date(AnalyticsEvent.created_at), func.count(AnalyticsEvent.id)
+    ).filter(
+        AnalyticsEvent.subject_id == user.analytics_subject_id,
+        AnalyticsEvent.created_at >= datetime.combine(from_date, datetime.min.time()),
+        AnalyticsEvent.created_at <= datetime.combine(to_date, datetime.max.time()),
+        AnalyticsEvent.event_name.in_(event_metrics),
+    ).group_by(AnalyticsEvent.event_name, func.date(AnalyticsEvent.created_at)).all()
+    for event_name, event_day, count in rows:
+        event_day = datetime.fromisoformat(event_day).date() if isinstance(event_day, str) else event_day
+        activity[_bucket_key(event_day, bucket)][event_metrics[event_name]] += count
+    return jsonify({
+        "user_id": str(user.id),
+        "name": user.name or user.username,
+        "labels": [_bucket_label(day, bucket) for day in dates],
+        "activity": [activity[day] for day in dates],
+    }), 200
 
 
 @admin_bp.route("/admin/analytics.csv", methods=["GET"])

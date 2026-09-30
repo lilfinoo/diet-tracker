@@ -90,15 +90,12 @@
     .section-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
     .section-head h2, .section-head h3 { margin: 0; }
     .section-head p { margin: 4px 0 0; color: var(--muted); }
-    .chart {
-      display: grid; gap: 10px; align-items: end; min-height: 260px;
-      grid-template-columns: repeat(auto-fit, minmax(22px, 1fr));
-    }
-    .bar-wrap { display: grid; gap: 8px; align-items: end; justify-items: center; }
-    .bar { width: 100%; min-height: 14px; border-radius: 16px 16px 8px 8px; background: linear-gradient(180deg, #38bdf8, #7c3aed); }
-    .bar.secondary { background: linear-gradient(180deg, #f59e0b, #ef4444); }
-    .bar-label { color: var(--muted); font-size: .78rem; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; }
-    .bar-value { font-size: .8rem; color: #e2e8f0; }
+    .line-chart { display: block; min-height: 0; overflow-x: auto; }
+    .line-chart svg { display: block; width: 100%; min-width: 520px; height: auto; }
+    .chart-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 10px; color: var(--muted); font-size: .82rem; }
+    .chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .chart-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+    .chart-note { color: var(--muted); font-size: .82rem; margin: 8px 0 0; }
     .mini-stats { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .mini { border: 1px solid var(--line); border-radius: 18px; padding: 12px; background: rgba(15, 23, 42, .4); }
     .mini .k { color: var(--muted); font-size: .82rem; }
@@ -214,6 +211,15 @@
           <table><thead><tr><th>Origem / mídia</th><th>Cadastros</th><th>Ativados</th></tr></thead><tbody id="funnelSources"></tbody></table>
         </div>
       </article>
+      <article class="card" style="margin-top:16px;">
+        <div class="section-head">
+          <div>
+            <h3>Ativação e retorno da coorte</h3>
+            <p>Usuários cadastrados no período selecionado. Ativação em até 7 dias ainda pode subir para cadastros recentes; retorno considera apenas quem já completou sete dias.</p>
+          </div>
+        </div>
+        <div class="mini-stats" id="cohortStats"></div>
+      </article>
       <div class="grid" style="margin-top:16px; grid-template-columns: repeat(12, 1fr);">
         <article class="card span-8">
           <div class="section-head">
@@ -236,8 +242,8 @@
         <article class="card span-6">
           <div class="section-head">
             <div>
-              <h3>Atividade diária</h3>
-              <p>Dietas, medições, chats e treinos concluídos.</p>
+              <h3>Ações no período</h3>
+              <p>Refeições, medições, chats e treinos concluídos por dia ou semana.</p>
             </div>
           </div>
           <div class="chart" id="activityChart"></div>
@@ -245,8 +251,8 @@
         <article class="card span-6">
           <div class="section-head">
             <div>
-              <h3>Assinaturas</h3>
-              <p>Plano Premium e profissionais ativos.</p>
+              <h3>Novas assinaturas ainda ativas</h3>
+              <p>Assinaturas pagas criadas em cada data e ainda ativas hoje.</p>
             </div>
           </div>
           <div class="chart" id="subscriptionChart"></div>
@@ -258,9 +264,28 @@
               <p>Sem expor conteúdo sensível.</p>
             </div>
           </div>
-          <div class="list" id="recentActivity"></div>
+          <div class="list" id="recentActivity"><div class="empty">Carregando atividade recente…</div></div>
         </article>
       </div>
+      <article class="card" style="margin-top:16px;">
+        <div class="section-head">
+          <div>
+            <h3>Atividade por usuário</h3>
+            <p>Contagens no período selecionado. A tabela é carregada em páginas de 20 usuários.</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Usuário</th><th>Cadastro</th><th>Última ação</th><th>Dias com ações</th><th>Refeições</th><th>Treinos</th><th>Medições</th><th>Chats</th><th>Evolução</th></tr></thead>
+            <tbody id="userActivityTable"><tr><td colspan="9">Carregando atividade…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="pagination" id="userActivityPagination"></div>
+        <div id="userActivityDetail" hidden style="border-top:1px solid var(--line); margin-top:18px; padding-top:18px;">
+          <div class="section-head"><h3 id="userActivityDetailTitle"></h3></div>
+          <div class="chart" id="userActivityChart" aria-live="polite"></div>
+        </div>
+      </article>
     </section>
 
     <section class="section" id="users" role="tabpanel" aria-labelledby="adminTabUsers" hidden>
@@ -446,6 +471,15 @@
     const API = '/api';
     const state = {
       analytics: null,
+      userActivity: [],
+      userActivityTotal: 0,
+      userActivityOffset: 0,
+      userActivityLimit: 20,
+      userActivityRange: '',
+      userActivityRequestId: 0,
+      userSeriesRequestId: 0,
+      analyticsRequestId: 0,
+      recentActivitiesLoaded: false,
       users: [],
       usersTotal: 0,
       usersOffset: 0,
@@ -470,10 +504,16 @@
       usageChart: document.getElementById('usageChart'),
       funnelStats: document.getElementById('funnelStats'),
       funnelSources: document.getElementById('funnelSources'),
+      cohortStats: document.getElementById('cohortStats'),
       activityChart: document.getElementById('activityChart'),
       subscriptionChart: document.getElementById('subscriptionChart'),
       distributionStats: document.getElementById('distributionStats'),
       recentActivity: document.getElementById('recentActivity'),
+      userActivityTable: document.getElementById('userActivityTable'),
+      userActivityPagination: document.getElementById('userActivityPagination'),
+      userActivityDetail: document.getElementById('userActivityDetail'),
+      userActivityDetailTitle: document.getElementById('userActivityDetailTitle'),
+      userActivityChart: document.getElementById('userActivityChart'),
       usersTable: document.getElementById('usersTable'),
       usersPagination: document.getElementById('usersPagination'),
       userSearch: document.getElementById('userSearch'),
@@ -599,22 +639,29 @@
       `;
     }
 
-    function renderBars(container, labels, values, colorClass = '') {
-      const numericValues = values.map(item => typeof item === 'object' ? Number(item.value || 0) : Number(item || 0));
-      const max = Math.max(1, ...numericValues);
-      container.innerHTML = labels.map((label, i) => {
-        const item = values[i];
-        const numeric = typeof item === 'object' ? Number(item.value || 0) : Number(item || 0);
-        const display = typeof item === 'object' && item.value_label ? item.value_label : numeric;
-        const height = Math.max(10, Math.round((numeric / max) * 180));
-        return `
-          <div class="bar-wrap">
-            <div class="bar-value">${escapeHtml(display)}</div>
-            <div class="bar ${colorClass}" style="height:${height}px"></div>
-            <div class="bar-label">${escapeHtml(label)}</div>
-          </div>
-        `;
+    function renderLines(container, labels, series) {
+      if (!labels.length) {
+        container.innerHTML = '<div class="empty">Sem dados no período.</div>';
+        return;
+      }
+      const left = 38, right = 12, top = 15, bottom = 31, width = 720, height = 220;
+      const plotWidth = width - left - right, plotHeight = height - top - bottom;
+      const max = Math.max(1, ...series.flatMap(line => line.values.map(value => Number(value) || 0)));
+      const x = index => left + (labels.length === 1 ? plotWidth / 2 : index * plotWidth / (labels.length - 1));
+      const y = value => top + plotHeight * (1 - (Number(value) || 0) / max);
+      const ticks = [...new Set([0, Math.floor((labels.length - 1) / 2), labels.length - 1])];
+      const grid = [0, .5, 1].map(fraction => {
+        const py = top + plotHeight * fraction;
+        return `<line x1="${left}" y1="${py}" x2="${width - right}" y2="${py}" stroke="rgba(148,163,184,.2)"/><text x="${left - 8}" y="${py + 4}" fill="#94a3b8" text-anchor="end" font-size="11">${Math.round(max * (1 - fraction))}</text>`;
       }).join('');
+      const paths = series.map(line => {
+        const points = line.values.map((value, index) => `${x(index)},${y(value)}`).join(' ');
+        const dots = line.values.map((value, index) => `<circle cx="${x(index)}" cy="${y(value)}" r="3" fill="${line.color}"><title>${escapeHtml(`${line.label}: ${value} · ${labels[index]}`)}</title></circle>`).join('');
+        return `<polyline points="${points}" fill="none" stroke="${line.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${dots}`;
+      }).join('');
+      const axis = ticks.map(index => `<text x="${x(index)}" y="${height - 8}" fill="#94a3b8" text-anchor="middle" font-size="11">${escapeHtml(labels[index])}</text>`).join('');
+      container.classList.add('line-chart');
+      container.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(series.map(line => line.label).join(', '))}">${grid}${paths}${axis}</svg><div class="chart-legend">${series.map(line => `<span><i style="background:${line.color}"></i>${escapeHtml(line.label)}</span>`).join('')}</div>`;
     }
 
     function renderOverview() {
@@ -622,12 +669,21 @@
       const a = state.analytics;
       const s = a.summary;
       const funnel = a.funnel || { stages: [], sources: [] };
+      const cohort = a.cohort || { signups: 0, activated: 0, eligible_d7: 0, returned_d7: 0 };
       els.funnelStats.innerHTML = funnel.stages.map(stage =>
         `<div class="mini"><div class="k">${escapeHtml(stage.label)}</div><div class="v">${escapeHtml(stage.users)}</div></div>`
       ).join('');
       els.funnelSources.innerHTML = funnel.sources.length ? funnel.sources.map(row =>
         `<tr><td>${escapeHtml(row.source)}</td><td>${escapeHtml(row.signups)}</td><td>${escapeHtml(row.activated)}</td></tr>`
       ).join('') : '<tr><td colspan="3">Sem cadastros com origem no período.</td></tr>';
+      const activationRate = cohort.signups ? `${Math.round(100 * cohort.activated / cohort.signups)}%` : '—';
+      const returnRate = cohort.eligible_d7 ? `${Math.round(100 * cohort.returned_d7 / cohort.eligible_d7)}%` : '—';
+      els.cohortStats.innerHTML = [
+        ['Cadastros', cohort.signups, 'Contas criadas no período'],
+        ['Ativados em até 7 dias', `${cohort.activated} · ${activationRate}`, 'Fizeram uma ação de valor'],
+        ['Elegíveis para D7', cohort.eligible_d7, 'Cadastrados há pelo menos 7 dias'],
+        ['Retornaram após D7', `${cohort.returned_d7} · ${returnRate}`, 'Entre os elegíveis'],
+      ].map(([label, value, note]) => `<div class="mini"><div class="k">${escapeHtml(label)}</div><div class="v">${escapeHtml(value)}</div><div class="chart-note">${escapeHtml(note)}</div></div>`).join('');
       els.metricsGrid.innerHTML = [
         metricCard('Usuários', s.total_users, `+${s.new_users} novos no período`, 'fa-users'),
         metricCard('Ativos', s.active_users, 'Uso recente de dietas, medições, chats e treinos', 'fa-chart-line'),
@@ -635,9 +691,21 @@
         metricCard('Profissionais', s.professional_users, `${a.breakdowns.applications.pending} solicitações pendentes`, 'fa-user-doctor'),
       ].join('');
 
-      renderBars(els.usageChart, a.series.labels, a.series.new_users.map((n, i) => ({ value: n, value_label: `${n} novos · ${a.series.active_users[i]} ativos` })), '');
-      renderBars(els.activityChart, a.series.labels, a.series.activity.map(x => x.diet_entries + x.measurements + x.chat_messages + x.workout_sessions), 'secondary');
-      renderBars(els.subscriptionChart, a.series.labels, a.series.subscriptions.map(x => x.premium_student + x.professional_single + x.professional_complete), '');
+      renderLines(els.usageChart, a.series.labels, [
+        { label: 'Novos usuários', values: a.series.new_users, color: '#60a5fa' },
+        { label: 'Usuários ativos', values: a.series.active_users, color: '#2dd4bf' },
+      ]);
+      renderLines(els.activityChart, a.series.labels, [
+        { label: 'Refeições', values: a.series.activity.map(x => x.diet_entries), color: '#2dd4bf' },
+        { label: 'Treinos', values: a.series.activity.map(x => x.workout_sessions), color: '#60a5fa' },
+        { label: 'Medições', values: a.series.activity.map(x => x.measurements), color: '#f59e0b' },
+        { label: 'Chats', values: a.series.activity.map(x => x.chat_messages), color: '#c084fc' },
+      ]);
+      renderLines(els.subscriptionChart, a.series.labels, [
+        { label: 'Premium', values: a.series.subscriptions.map(x => x.premium_student), color: '#60a5fa' },
+        { label: 'Profissional individual', values: a.series.subscriptions.map(x => x.professional_single), color: '#2dd4bf' },
+        { label: 'Profissional completo', values: a.series.subscriptions.map(x => x.professional_complete), color: '#f59e0b' },
+      ]);
 
       els.distributionStats.innerHTML = [
         ['Admins', s.admin_users],
@@ -645,16 +713,6 @@
         ['Assinaturas', s.active_subscriptions],
         ['Pendentes', a.breakdowns.applications.pending],
       ].map(([k, v]) => `<div class="mini"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(v)}</div></div>`).join('');
-
-      els.recentActivity.innerHTML = a.recent_activities?.length ? a.recent_activities.map(item => `
-        <div class="item">
-          <div>
-            <strong>${escapeHtml(item.type)}</strong>
-            <div class="meta">Evento agregado, sem identificação da conta</div>
-          </div>
-          <div class="meta">${escapeHtml(fmt.format(new Date(item.created_at)))}</div>
-        </div>
-      `).join('') : '<div class="empty">Sem atividade recente.</div>';
 
       els.reportStats.innerHTML = [
         ['Novos usuários', s.new_users],
@@ -664,6 +722,83 @@
         ['Apps pendentes', a.breakdowns.applications.pending],
         ['Apps aprovadas', a.breakdowns.applications.approved],
       ].map(([k, v]) => `<div class="mini"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(v)}</div></div>`).join('');
+    }
+
+    function renderRecentActivity(items) {
+      els.recentActivity.innerHTML = items.length ? items.map(item => `
+        <div class="item">
+          <div>
+            <strong>${escapeHtml(item.type)}</strong>
+            <div class="meta">Evento agregado, sem identificação da conta</div>
+          </div>
+          <div class="meta">${escapeHtml(fmt.format(new Date(item.created_at)))}</div>
+        </div>
+      `).join('') : '<div class="empty">Sem atividade recente.</div>';
+    }
+
+    function renderUserActivity() {
+      els.userActivityTable.innerHTML = state.userActivity.length ? state.userActivity.map(user => `
+        <tr>
+          <td><strong>${escapeHtml(user.name || user.username)}</strong><div class="muted">@${escapeHtml(user.username)}</div></td>
+          <td>${escapeHtml(user.created_at ? fmt.format(new Date(user.created_at)) : '—')}</td>
+          <td>${escapeHtml(user.last_active_at ? fmt.format(new Date(user.last_active_at)) : '—')}</td>
+          <td>${escapeHtml(user.active_days)}</td>
+          <td>${escapeHtml(user.diet_entries)}</td>
+          <td>${escapeHtml(user.workout_sessions)}</td>
+          <td>${escapeHtml(user.measurements)}</td>
+          <td>${escapeHtml(user.chat_messages)}</td>
+          <td><button type="button" class="action small" data-activity-user="${escapeHtml(user.user_id)}" data-activity-name="${escapeHtml(user.name || user.username)}" aria-controls="userActivityDetail">Ver evolução</button></td>
+        </tr>
+      `).join('') : '<tr><td colspan="9">Nenhum usuário encontrado.</td></tr>';
+      const page = Math.floor(state.userActivityOffset / state.userActivityLimit) + 1;
+      const pages = Math.max(1, Math.ceil(state.userActivityTotal / state.userActivityLimit));
+      els.userActivityPagination.innerHTML = `<button class="action small" id="activityPrevious"${state.userActivityOffset <= 0 ? ' disabled' : ''}>Anterior</button><span class="meta">Página ${page} de ${pages} · ${state.userActivityTotal} usuários</span><button class="action small" id="activityNext"${state.userActivityOffset + state.userActivityLimit >= state.userActivityTotal ? ' disabled' : ''}>Próxima</button>`;
+      document.getElementById('activityPrevious').addEventListener('click', () => { state.userActivityOffset -= state.userActivityLimit; loadUserActivity().catch(error => showToast(error.message)); });
+      document.getElementById('activityNext').addEventListener('click', () => { state.userActivityOffset += state.userActivityLimit; loadUserActivity().catch(error => showToast(error.message)); });
+    }
+
+    async function loadUserActivity() {
+      hideUserSeries();
+      const requestId = ++state.userActivityRequestId;
+      const { from, to } = currentRange();
+      const range = `${from}:${to}`;
+      const offset = state.userActivityOffset;
+      els.userActivityTable.innerHTML = '<tr><td colspan="9">Carregando atividade…</td></tr>';
+      const params = new URLSearchParams({ from, to, limit: String(state.userActivityLimit), offset: String(offset) });
+      const data = await api(`/admin/user_activity?${params}`);
+      if (requestId !== state.userActivityRequestId || range !== `${els.fromDate.value}:${els.toDate.value}` || offset !== state.userActivityOffset) return;
+      state.userActivity = data.items || [];
+      state.userActivityTotal = data.total || 0;
+      state.userActivityRange = range;
+      renderUserActivity();
+    }
+
+    function hideUserSeries() {
+      state.userSeriesRequestId += 1;
+      els.userActivityDetail.hidden = true;
+    }
+
+    async function loadUserSeries(userId, name) {
+      const requestId = ++state.userSeriesRequestId;
+      const { from, to } = currentRange();
+      const params = new URLSearchParams({ from, to, bucket: currentBucket() });
+      els.userActivityDetail.hidden = false;
+      els.userActivityDetailTitle.textContent = `Evolução de ${name}`;
+      els.userActivityChart.innerHTML = '<div class="empty">Carregando evolução…</div>';
+      try {
+        const data = await api(`/admin/user_activity/${encodeURIComponent(userId)}/series?${params}`);
+        if (requestId !== state.userSeriesRequestId || from !== els.fromDate.value || to !== els.toDate.value) return;
+        renderLines(els.userActivityChart, data.labels, [
+          { label: 'Refeições', values: data.activity.map(x => x.diet_entries), color: '#2dd4bf' },
+          { label: 'Treinos', values: data.activity.map(x => x.workout_sessions), color: '#60a5fa' },
+          { label: 'Medições', values: data.activity.map(x => x.measurements), color: '#f59e0b' },
+          { label: 'Chats', values: data.activity.map(x => x.chat_messages), color: '#c084fc' },
+        ]);
+      } catch (error) {
+        if (requestId === state.userSeriesRequestId) {
+          els.userActivityChart.innerHTML = `<div class="empty">${escapeHtml(error.message || 'Falha ao carregar evolução')}</div>`;
+        }
+      }
     }
 
     function userChips(user) {
@@ -843,18 +978,36 @@
     }
 
     async function loadAnalytics() {
+      hideUserSeries();
       const { from, to } = currentRange();
       const bucket = currentBucket();
-      const [analytics, recentActivities] = await Promise.all([api(`/admin/analytics?from=${from}&to=${to}&bucket=${bucket}`), api('/admin/recent_activity')]);
+      const requestId = ++state.analyticsRequestId;
+      const analytics = await api(`/admin/analytics?from=${from}&to=${to}&bucket=${bucket}`);
+      if (requestId !== state.analyticsRequestId) return;
       state.analytics = analytics;
-      state.analytics.recent_activities = recentActivities;
+      state.userActivityRange = '';
       updateCsvLink();
       renderOverview();
+      if (document.getElementById('overview').classList.contains('active')) {
+        state.userActivityOffset = 0;
+        loadUserActivity().catch(error => {
+          els.userActivityTable.innerHTML = `<tr><td colspan="9">${escapeHtml(error.message || 'Falha ao carregar atividade por usuário')}</td></tr>`;
+        });
+        if (!state.recentActivitiesLoaded) {
+          api('/admin/recent_activity').then(items => {
+            state.recentActivitiesLoaded = true;
+            renderRecentActivity(items);
+          }).catch(error => {
+            els.recentActivity.innerHTML = `<div class="empty">${escapeHtml(error.message || 'Falha ao carregar atividade recente')}</div>`;
+          });
+        }
+      }
     }
 
     async function loadAll() {
       const button = document.getElementById('refreshBtn');
       if (button) button.disabled = true;
+      state.recentActivitiesLoaded = false;
       const activeSection = document.querySelector('.section.active')?.id || 'overview';
       const pending = [loadAnalytics()];
       if (state.usersLoaded || activeSection === 'users') pending.push(loadUsers());
@@ -972,6 +1125,15 @@
           const panel = document.getElementById(btn.dataset.section);
           panel.hidden = false;
           panel.classList.add('active');
+          if (btn.dataset.section === 'overview' && state.analytics && state.userActivityRange !== `${els.fromDate.value}:${els.toDate.value}`) {
+            loadUserActivity().catch(error => showToast(error.message || 'Falha ao carregar atividade por usuário'));
+          }
+          if (btn.dataset.section === 'overview' && state.analytics && !state.recentActivitiesLoaded) {
+            api('/admin/recent_activity').then(items => {
+              state.recentActivitiesLoaded = true;
+              renderRecentActivity(items);
+            }).catch(error => showToast(error.message || 'Falha ao carregar atividade recente'));
+          }
           if (btn.dataset.section === 'users' && !state.usersLoaded) loadUsers().catch(error => showToast(error.message || 'Falha ao carregar usuários'));
           if (btn.dataset.section === 'reviews') {
             const pending = [];
@@ -996,16 +1158,20 @@
     }
 
     function wireControls() {
+      els.userActivityTable.addEventListener('click', event => {
+        const button = event.target.closest('[data-activity-user]');
+        if (button) loadUserSeries(button.dataset.activityUser, button.dataset.activityName);
+      });
       document.querySelectorAll('[data-period]').forEach(btn => {
         btn.addEventListener('click', async () => {
           setPeriod(Number(btn.dataset.period));
-          await loadAnalytics();
+          await loadAnalytics().catch(error => showToast(error.message || 'Falha ao carregar a visão geral'));
         });
       });
       els.refreshBtn = document.getElementById('refreshBtn');
       els.refreshBtn.addEventListener('click', loadAll);
-      els.fromDate.addEventListener('change', loadAnalytics);
-      els.toDate.addEventListener('change', loadAnalytics);
+      els.fromDate.addEventListener('change', () => loadAnalytics().catch(error => showToast(error.message || 'Falha ao carregar a visão geral')));
+      els.toDate.addEventListener('change', () => loadAnalytics().catch(error => showToast(error.message || 'Falha ao carregar a visão geral')));
       let userSearchTimer;
       els.userSearch.addEventListener('input', () => {
         clearTimeout(userSearchTimer);

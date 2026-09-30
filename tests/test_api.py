@@ -127,6 +127,44 @@ def test_admin_analytics_aggregates_events_and_csv(app, client):
     assert "01/08,1,1,2" in csv_response.get_data(as_text=True)
 
 
+def test_admin_cohort_and_user_activity_use_signup_age_and_action_counts(app, client):
+    register(client, "admin")
+    now = datetime.utcnow()
+    with app.app_context():
+        User.query.filter_by(username="admin").one().is_admin = True
+        returning = User(username="returning", created_at=now - timedelta(days=20))
+        inactive = User(username="inactive", created_at=now - timedelta(days=10))
+        new = User(username="new", created_at=now - timedelta(days=2))
+        db.session.add_all([returning, inactive, new])
+        db.session.flush()
+        returning_id = returning.id
+        db.session.add_all([
+            AnalyticsEvent(event_name="meal_logged", subject_id=returning.analytics_subject_id,
+                           created_at=returning.created_at + timedelta(days=1)),
+            AnalyticsEvent(event_name="meal_logged", subject_id=returning.analytics_subject_id,
+                           created_at=returning.created_at + timedelta(days=8)),
+            AnalyticsEvent(event_name="workout_finished", subject_id=returning.analytics_subject_id,
+                           created_at=returning.created_at + timedelta(days=8, hours=1)),
+            AnalyticsEvent(event_name="profile_completed", subject_id=new.analytics_subject_id,
+                           created_at=new.created_at + timedelta(hours=1)),
+        ])
+        db.session.commit()
+
+    params = f"from={(now - timedelta(days=25)).date()}&to={now.date()}"
+    cohort = client.get(f"/api/admin/analytics?{params}").get_json()["cohort"]
+    assert cohort == {"signups": 3, "activated": 2, "eligible_d7": 2, "returned_d7": 1}
+    page = client.get(f"/api/admin/user_activity?{params}&limit=2").get_json()
+    assert page["total"] == 3
+    assert [(item["username"], item["diet_entries"], item["workout_sessions"], item["active_days"])
+            for item in page["items"]] == [("returning", 2, 1, 2), ("new", 0, 0, 0)]
+    last = client.get(f"/api/admin/user_activity?{params}&limit=2&offset=2").get_json()["items"]
+    assert last[0]["username"] == "inactive"
+    assert last[0]["last_active_at"] is None
+    series = client.get(f"/api/admin/user_activity/{returning_id}/series?{params}").get_json()
+    assert sum(day["diet_entries"] for day in series["activity"]) == 2
+    assert sum(day["workout_sessions"] for day in series["activity"]) == 1
+
+
 def test_admin_can_grant_and_revoke_premium(app, client):
     register(client, "admin")
     with app.app_context():
