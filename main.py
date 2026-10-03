@@ -30,9 +30,7 @@ from src.routes.social_routes import social_bp
 from src.routes.progress_routes import progress_bp
 from src.routes.workout_routes import workout_bp
 from src.routes.profile_routes import profile_bp
-from src.routes.review_routes import review_bp
 from src.routes.user_routes import user_bp
-from src.routes.professional_routes import professional_bp
 from src.services.badges import backfill_historical_badges, grant_signup_badges
 from src.metrics import init_metrics
 from src.services.privacy_cleanup import cleanup_expired_private_data
@@ -110,13 +108,11 @@ def create_app(config_class=None):
     app.register_blueprint(adherence_bp, url_prefix="/api")
     app.register_blueprint(diet_daily_bp, url_prefix="/api")
     app.register_blueprint(social_bp, url_prefix="/api")
-    app.register_blueprint(review_bp, url_prefix="/api")
     app.register_blueprint(session_bp, url_prefix="/api")
     app.register_blueprint(progress_bp, url_prefix="/api")
     app.register_blueprint(workout_bp, url_prefix="/api")
     app.register_blueprint(profile_bp, url_prefix="/api")
     app.register_blueprint(user_bp, url_prefix="/api")
-    app.register_blueprint(professional_bp, url_prefix="/api")
 
     admin_page_paths = {
         "/admin",
@@ -192,7 +188,6 @@ def create_app(config_class=None):
         user.set_password(password)
         user.is_admin = True
         user.is_premium = True
-        user.is_professional = True
         user.is_banned = False
         user.banned_at = None
         db.session.commit()

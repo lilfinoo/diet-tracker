@@ -2,16 +2,12 @@ from datetime import datetime
 import hashlib
 import json
 
-from sqlalchemy import or_
-
 from src.models.user import (
-    DelegatedActionAudit,
     DietPlan,
     DietPlanMeal,
     WorkoutDay,
     WorkoutExercise,
     WorkoutPlan,
-    ProfessionalReviewRequest,
     db,
 )
 
@@ -61,92 +57,6 @@ def snapshot_fingerprint(snapshot):
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def clone_plan_for_review(plan, owner, professional):
-    snapshot = plan_snapshot(plan)
-    if isinstance(plan, WorkoutPlan):
-        return create_workout_plan(
-            owner,
-            professional,
-            snapshot["questionnaire"],
-            {
-                "title": snapshot["title"],
-                "description": snapshot["description"],
-                "days": snapshot["days"],
-            },
-            status="draft",
-            source="manual",
-            supersedes_plan_id=plan.id,
-        )
-    return create_diet_plan(
-        owner,
-        professional,
-        snapshot["questionnaire"],
-        snapshot["nutrition_targets"],
-        {"title": snapshot["title"], "description": snapshot["description"], "meals": snapshot["meals"]},
-        snapshot["profile_snapshot"],
-        status="draft",
-        source="manual",
-        supersedes_plan_id=plan.id,
-    )
-
-
-def professional_review_for_plan(plan):
-    if isinstance(plan, WorkoutPlan):
-        source_field = ProfessionalReviewRequest.source_workout_plan_id
-        proposal_field = ProfessionalReviewRequest.proposal_workout_plan_id
-    else:
-        source_field = ProfessionalReviewRequest.source_diet_plan_id
-        proposal_field = ProfessionalReviewRequest.proposal_diet_plan_id
-    reviews = ProfessionalReviewRequest.query.filter(
-        ProfessionalReviewRequest.status == "completed",
-        or_(source_field == plan.id, proposal_field == plan.id),
-    ).order_by(ProfessionalReviewRequest.completed_at.desc()).all()
-    fingerprint = snapshot_fingerprint(plan_snapshot(plan))
-    for review in reviews:
-        approved_source = review.outcome == "approved_as_is" and getattr(review, source_field.key) == plan.id
-        applied_proposal = (
-            review.outcome == "changes_proposed"
-            and review.student_decision == "applied"
-            and getattr(review, proposal_field.key) == plan.id
-        )
-        expected = review.source_fingerprint if approved_source else review.proposal_fingerprint
-        if (approved_source or applied_proposal) and expected == fingerprint:
-            professional = review.assigned_professional
-            return {
-                "review_id": review.id,
-                "professional": {
-                    "id": professional.id,
-                    "username": professional.username,
-                    "avatar_url": (
-                        f"/api/profiles/by-id/{professional.id}/avatar"
-                        if professional.profile and professional.profile.avatar_object_key
-                        else None
-                    ),
-                } if professional else None,
-                "reviewed_at": review.completed_at.isoformat() if review.completed_at else None,
-            }
-    if (
-        plan.author
-        and plan.author_user_id != plan.user_id
-        and plan.published_by_user_id == plan.author_user_id
-        and plan.professional_verified_fingerprint == fingerprint
-    ):
-        return {
-            "review_id": None,
-            "professional": {
-                "id": plan.author.id,
-                "username": plan.author.username,
-                "avatar_url": (
-                    f"/api/profiles/by-id/{plan.author.id}/avatar"
-                    if plan.author.profile and plan.author.profile.avatar_object_key
-                    else None
-                ),
-            },
-            "reviewed_at": plan.published_at.isoformat() if plan.published_at else None,
-        }
-    return None
-
-
 def create_workout_plan(
     owner,
     author,
@@ -155,13 +65,10 @@ def create_workout_plan(
     *,
     status="published",
     source="manual",
-    relationship=None,
-    roster_relationship=None,
     supersedes_plan_id=None,
 ):
     plan = WorkoutPlan(
         user_id=owner.id if owner else None,
-        professional_student_relationship_id=roster_relationship.id if roster_relationship else None,
         author_user_id=author.id,
         published_by_user_id=author.id if status == "published" else None,
         published_at=datetime.utcnow() if status == "published" else None,
@@ -180,11 +87,6 @@ def create_workout_plan(
     db.session.add(plan)
     db.session.flush()
     _replace_workout_days(plan, plan_data["days"])
-    if relationship:
-        add_audit(author, owner, relationship, "workout_plan.created", "workout_plan", plan.id, {
-            "source": source,
-            "status": status,
-        })
     return plan
 
 
@@ -235,13 +137,10 @@ def create_diet_plan(
     *,
     status="published",
     source="manual",
-    relationship=None,
-    roster_relationship=None,
     supersedes_plan_id=None,
 ):
     plan = DietPlan(
         user_id=owner.id if owner else None,
-        professional_student_relationship_id=roster_relationship.id if roster_relationship else None,
         author_user_id=author.id,
         published_by_user_id=author.id if status == "published" else None,
         published_at=datetime.utcnow() if status == "published" else None,
@@ -263,11 +162,6 @@ def create_diet_plan(
     db.session.add(plan)
     db.session.flush()
     _replace_diet_meals(plan, plan_data["meals"])
-    if relationship:
-        add_audit(author, owner, relationship, "diet_plan.created", "diet_plan", plan.id, {
-            "source": source,
-            "status": status,
-        })
     return plan
 
 
@@ -308,29 +202,3 @@ def _replace_diet_meals(plan, meals):
             diet_plan_id=plan.id,
             **{key: meal[key] for key in DIET_MEAL_FIELDS if key in meal},
         ))
-
-
-def publish_plan(plan, actor, owner, relationship, resource_type):
-    plan.status = "published"
-    plan.published_at = datetime.utcnow()
-    plan.published_by_user_id = actor.id
-    plan.professional_verified_fingerprint = snapshot_fingerprint(plan_snapshot(plan))
-    if plan.supersedes_plan_id:
-        model = WorkoutPlan if resource_type == "workout_plan" else DietPlan
-        previous = db.session.get(model, plan.supersedes_plan_id)
-        if previous and previous.user_id == owner.id:
-            previous.status = "archived"
-    add_audit(actor, owner, relationship, f"{resource_type}.published", resource_type, plan.id)
-    return plan
-
-
-def add_audit(actor, subject, relationship, action, resource_type=None, resource_id=None, details=None):
-    db.session.add(DelegatedActionAudit(
-        actor_user_id=actor.id,
-        subject_user_id=subject.id,
-        relationship_id=relationship.id if relationship else None,
-        action=action,
-        resource_type=resource_type,
-        resource_id=str(resource_id) if resource_id is not None else None,
-        details=details,
-    ))

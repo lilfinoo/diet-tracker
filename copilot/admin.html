@@ -193,7 +193,7 @@
     <nav class="nav" role="tablist" aria-label="Seções administrativas">
       <button class="tab active" id="adminTabOverview" role="tab" aria-selected="true" aria-controls="overview" data-section="overview">Visão geral</button>
       <button class="tab" id="adminTabUsers" role="tab" aria-selected="false" aria-controls="users" tabindex="-1" data-section="users">Usuários</button>
-      <button class="tab" id="adminTabReviews" role="tab" aria-selected="false" aria-controls="reviews" tabindex="-1" data-section="reviews">Revisões</button>
+      <button class="tab" id="adminTabReviews" role="tab" aria-selected="false" aria-controls="reviews" tabindex="-1" data-section="reviews">Revisão de mídia</button>
       <button class="tab" id="adminTabReports" role="tab" aria-selected="false" aria-controls="reports" tabindex="-1" data-section="reports">Relatórios</button>
     </nav>
 
@@ -293,7 +293,7 @@
         <div class="section-head">
           <div>
             <h3>Usuários</h3>
-            <p>Operações reais: banir, premium, profissional e admin.</p>
+            <p>Operações reais: banir, conceder Premium e administrar contas.</p>
           </div>
         </div>
         <div class="filters">
@@ -302,7 +302,6 @@
             <option value="all">Todos</option>
             <option value="admins">Admins</option>
             <option value="premium">Premium</option>
-            <option value="professional">Profissionais</option>
             <option value="banned">Banidos</option>
           </select>
         </div>
@@ -322,21 +321,6 @@
 
     <section class="section" id="reviews" role="tabpanel" aria-labelledby="adminTabReviews" hidden>
       <div class="grid" style="grid-template-columns: repeat(12, 1fr);">
-        <article class="card span-6">
-          <div class="section-head">
-            <div>
-              <h3>Solicitações profissionais</h3>
-              <p>Aprovar ou rejeitar com nota.</p>
-            </div>
-            <select id="applicationStatusFilter" class="control" style="min-width: 150px;">
-              <option value="pending">Pendentes</option>
-              <option value="approved">Aprovadas</option>
-              <option value="rejected">Rejeitadas</option>
-              <option value="all">Todas</option>
-            </select>
-          </div>
-          <div class="list" id="applicationsList"></div>
-        </article>
         <article class="card span-6">
           <div class="section-head">
             <div>
@@ -412,40 +396,6 @@
     </div>
   </div>
 
-  <div class="modal" id="professionalModal">
-    <div class="modal-card">
-      <div class="modal-head">
-        <div>
-          <h3 style="margin:0;">Ativar profissional</h3>
-          <p class="muted" style="margin:4px 0 0;">Escolha a especialidade permitida.</p>
-        </div>
-        <button class="action small" id="closeProfessionalModal">Fechar</button>
-      </div>
-      <div class="modal-body">
-        <label for="professionalScopeSelect">Permissões profissionais</label>
-        <select id="professionalScopeSelect">
-          <option value="diet">Dietas</option>
-          <option value="workout">Treinos</option>
-          <option value="both">Dietas e treinos</option>
-        </select>
-        <label for="professionalDurationSelect">Duração da concessão</label>
-        <select id="professionalDurationSelect" required>
-          <option value="">Selecione a duração</option>
-          <option value="7">7 dias</option>
-          <option value="30">30 dias</option>
-          <option value="90">90 dias</option>
-          <option value="180">180 dias</option>
-          <option value="365">365 dias</option>
-          <option value="permanent">Sem prazo, até revogação</option>
-        </select>
-      </div>
-      <div class="modal-actions">
-        <button class="action" id="cancelProfessional">Cancelar</button>
-        <button class="action primary" id="confirmProfessional">Salvar</button>
-      </div>
-    </div>
-  </div>
-
   <div class="modal" id="noteModal">
     <div class="modal-card">
       <div class="modal-head">
@@ -485,12 +435,9 @@
       usersOffset: 0,
       usersLimit: 30,
       usersLoaded: false,
-      applications: [],
-      applicationsLoaded: false,
       mediaQueue: [],
       mediaQueueLoaded: false,
       currentPremiumUser: null,
-      currentProfessionalUser: null,
       currentReview: null,
       periodDays: 30,
     };
@@ -518,8 +465,6 @@
       usersPagination: document.getElementById('usersPagination'),
       userSearch: document.getElementById('userSearch'),
       userRoleFilter: document.getElementById('userRoleFilter'),
-      applicationStatusFilter: document.getElementById('applicationStatusFilter'),
-      applicationsList: document.getElementById('applicationsList'),
       mediaQueue: document.getElementById('mediaQueue'),
       mediaCacheImportBtn: document.getElementById('mediaCacheImportBtn'),
       mediaCacheImportInput: document.getElementById('mediaCacheImportInput'),
@@ -529,10 +474,6 @@
       premiumModal: document.getElementById('premiumModal'),
       premiumDurationSelect: document.getElementById('premiumDurationSelect'),
       confirmPremium: document.getElementById('confirmPremium'),
-      professionalModal: document.getElementById('professionalModal'),
-      professionalScopeSelect: document.getElementById('professionalScopeSelect'),
-      professionalDurationSelect: document.getElementById('professionalDurationSelect'),
-      confirmProfessional: document.getElementById('confirmProfessional'),
       noteModal: document.getElementById('noteModal'),
       noteTitle: document.getElementById('noteTitle'),
       noteInput: document.getElementById('noteInput'),
@@ -688,7 +629,6 @@
         metricCard('Usuários', s.total_users, `+${s.new_users} novos no período`, 'fa-users'),
         metricCard('Ativos', s.active_users, 'Uso recente de dietas, medições, chats e treinos', 'fa-chart-line'),
         metricCard('Premium', s.premium_users, `${s.active_subscriptions} assinaturas ativas`, 'fa-crown'),
-        metricCard('Profissionais', s.professional_users, `${a.breakdowns.applications.pending} solicitações pendentes`, 'fa-user-doctor'),
       ].join('');
 
       renderLines(els.usageChart, a.series.labels, [
@@ -703,24 +643,18 @@
       ]);
       renderLines(els.subscriptionChart, a.series.labels, [
         { label: 'Premium', values: a.series.subscriptions.map(x => x.premium_student), color: '#60a5fa' },
-        { label: 'Profissional individual', values: a.series.subscriptions.map(x => x.professional_single), color: '#2dd4bf' },
-        { label: 'Profissional completo', values: a.series.subscriptions.map(x => x.professional_complete), color: '#f59e0b' },
       ]);
 
       els.distributionStats.innerHTML = [
         ['Admins', s.admin_users],
         ['Banidos', s.banned_users],
         ['Assinaturas', s.active_subscriptions],
-        ['Pendentes', a.breakdowns.applications.pending],
       ].map(([k, v]) => `<div class="mini"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(v)}</div></div>`).join('');
 
       els.reportStats.innerHTML = [
         ['Novos usuários', s.new_users],
         ['Ativos', s.active_users],
         ['Premium', s.premium_users],
-        ['Profissionais', s.professional_users],
-        ['Apps pendentes', a.breakdowns.applications.pending],
-        ['Apps aprovadas', a.breakdowns.applications.approved],
       ].map(([k, v]) => `<div class="mini"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(v)}</div></div>`).join('');
     }
 
@@ -805,23 +739,19 @@
       const chips = [];
       if (user.is_admin) chips.push('<span class="chip">Admin</span>');
       if (user.is_premium) chips.push('<span class="chip good">Premium</span>');
-      if (user.is_professional) chips.push(`<span class="chip warn">Prof ${escapeHtml(user.professional_scope || '')}</span>`);
       if (user.is_banned) chips.push('<span class="chip bad">Banido</span>');
       return chips.join(' ');
     }
 
     function adminGrant(user, type) {
-      const expectedPlan = type === 'premium' ? 'premium_student' : ['professional_single', 'professional_complete'];
-      return (user.admin_grants || []).find(grant => Array.isArray(expectedPlan)
-        ? expectedPlan.includes(grant.plan_code)
-        : grant.plan_code === expectedPlan);
+      return (user.admin_grants || []).find(grant => grant.plan_code === 'premium_student');
     }
 
     function grantSummary(user) {
       const grants = user.admin_grants || [];
       if (!grants.length && !user.legacy_premium_grant) return '';
       const labels = grants.map(grant => {
-        const access = grant.plan_code === 'premium_student' ? 'Premium' : 'Profissional';
+        const access = 'Premium';
         const expiry = grant.current_period_end ? `até ${fmt.format(new Date(grant.current_period_end))}` : 'sem prazo';
         return `${access} Admin ${expiry}`;
       });
@@ -833,7 +763,6 @@
       const premiumGrant = adminGrant(user, 'premium');
       const canGrantPremium = !user.is_premium;
       const premiumLabel = premiumGrant || user.legacy_premium_grant ? 'Revogar Premium Admin' : (canGrantPremium ? 'Conceder Premium' : 'Premium pago');
-      const professionalActive = Boolean(user.professional_entitled);
       return `
         <tr>
           <td>
@@ -856,7 +785,6 @@
             <div class="row-actions">
               <button class="action small" data-action="${escapeHtml(user.is_banned ? 'unban' : 'ban')}" data-user="${escapeHtml(user.id)}">${escapeHtml(user.is_banned ? 'Desbanir' : 'Banir')}</button>
               <button class="action small" data-action="premium" data-user="${escapeHtml(user.id)}" data-value="${escapeHtml(!(premiumGrant || user.legacy_premium_grant))}"${!canGrantPremium && !premiumGrant && !user.legacy_premium_grant ? ' disabled' : ''}>${escapeHtml(premiumLabel)}</button>
-              <button class="action small" data-action="professional" data-user="${escapeHtml(user.id)}" data-value="${escapeHtml(!professionalActive)}">${escapeHtml(professionalActive ? 'Revogar Prof.' : (user.is_professional ? 'Conceder acesso Prof.' : 'Conceder Prof.'))}</button>
               <button class="action small" data-action="admin" data-user="${escapeHtml(user.id)}">${escapeHtml(user.is_admin ? 'Remover Admin' : 'Tornar Admin')}</button>
             </div>
           </td>
@@ -870,28 +798,6 @@
       els.usersPagination.innerHTML = `<button class="action small" id="usersPrevious"${state.usersOffset <= 0 ? ' disabled' : ''}>Anterior</button><span class="meta">Página ${page} de ${pages} · ${state.usersTotal} usuários</span><button class="action small" id="usersNext"${state.usersOffset + state.usersLimit >= state.usersTotal ? ' disabled' : ''}>Próxima</button>`;
       document.getElementById('usersPrevious').addEventListener('click', () => { state.usersOffset = Math.max(0, state.usersOffset - state.usersLimit); loadUsers(); });
       document.getElementById('usersNext').addEventListener('click', () => { state.usersOffset += state.usersLimit; loadUsers(); });
-    }
-
-    function renderApplications() {
-      const items = state.applications;
-      els.applicationsList.innerHTML = items.length ? items.map(app => `
-        <div class="item" style="align-items:flex-start;">
-          <div>
-            <strong>@${escapeHtml(app.username)}</strong>
-            <div class="meta">${escapeHtml(app.full_name)} · ${escapeHtml(app.profession)} · ${escapeHtml(app.plan_code)}</div>
-            <div class="meta">Registro: ${escapeHtml(app.registration_number)}</div>
-            <div class="meta">${escapeHtml(app.created_at ? fmt.format(new Date(app.created_at)) : '')}</div>
-            ${app.admin_note ? `<div class="meta">Nota: ${escapeHtml(app.admin_note)}</div>` : ''}
-          </div>
-          ${app.status === 'pending' ? `
-            <div class="row-actions" style="flex-direction:column; align-items:stretch;">
-              <textarea placeholder="Nota opcional" data-note-for="${escapeHtml(app.id)}"></textarea>
-              <button class="action small" data-review="approve" data-application="${escapeHtml(app.id)}">Aprovar</button>
-              <button class="action small" data-review="reject" data-application="${escapeHtml(app.id)}">Rejeitar</button>
-            </div>
-          ` : `<span class="chip ${app.status === 'approved' ? 'good' : 'bad'}">${escapeHtml(app.status)}</span>`}
-        </div>
-      `).join('') : '<div class="empty">Nenhuma solicitação nessa visão.</div>';
     }
 
     function renderMediaQueue() {
@@ -923,15 +829,6 @@
       state.usersTotal = data.total || 0;
       state.usersLoaded = true;
       renderUsers();
-    }
-
-    async function loadApplications() {
-      els.applicationsList.innerHTML = '<div class="empty">Carregando solicitações…</div>';
-      const status = els.applicationStatusFilter.value;
-      const qs = status === 'all' ? '' : `?status=${encodeURIComponent(status)}`;
-      state.applications = await api(`/admin/professional-applications${qs}`);
-      state.applicationsLoaded = true;
-      renderApplications();
     }
 
     async function loadMediaQueue() {
@@ -1011,7 +908,6 @@
       const activeSection = document.querySelector('.section.active')?.id || 'overview';
       const pending = [loadAnalytics()];
       if (state.usersLoaded || activeSection === 'users') pending.push(loadUsers());
-      if (state.applicationsLoaded || activeSection === 'reviews') pending.push(loadApplications());
       if (state.mediaQueueLoaded || activeSection === 'reviews') pending.push(loadMediaQueue());
       try {
         const results = await Promise.allSettled(pending);
@@ -1054,16 +950,7 @@
         }
         path = `/admin/users/${userId}/premium`;
         options = { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_premium: false }) };
-      } else if (action === 'professional') {
-        if (value === 'true') {
-          state.currentProfessionalUser = userId;
-          els.professionalScopeSelect.value = 'diet';
-          els.professionalDurationSelect.value = '';
-          els.professionalModal.classList.add('show');
-          return;
-        }
-        path = `/admin/users/${userId}/professional`;
-        options = { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_professional: false }) };
+
       }
       await api(path, options);
       showToast('Usuário atualizado');
@@ -1076,21 +963,10 @@
       const messages = {
         ban: 'Banir este usuário e bloquear seu acesso?',
         premium: value === 'false' ? 'Remover o acesso Premium deste usuário?' : '',
-        professional: value === 'false' ? 'Revogar o perfil profissional e encerrar vínculos ativos ou pendentes?' : '',
         admin: user?.is_admin ? 'Remover os privilégios administrativos deste usuário?' : '',
       };
       const message = messages[action];
       return !message || window.confirm(message);
-    }
-
-    async function reviewApplication(applicationId, decision, note) {
-      await api(`/admin/professional-applications/${applicationId}/review`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision, note })
-      });
-      showToast(decision === 'approve' ? 'Solicitação aprovada' : 'Solicitação rejeitada');
-      const pending = [loadApplications(), loadAnalytics()];
-      if (state.usersLoaded) pending.push(loadUsers());
-      await Promise.all(pending);
     }
 
     async function loadMediaCandidates(catalogKey, query, replace = false) {
@@ -1136,13 +1012,7 @@
           }
           if (btn.dataset.section === 'users' && !state.usersLoaded) loadUsers().catch(error => showToast(error.message || 'Falha ao carregar usuários'));
           if (btn.dataset.section === 'reviews') {
-            const pending = [];
-            if (!state.applicationsLoaded) pending.push(loadApplications());
-            if (!state.mediaQueueLoaded) pending.push(loadMediaQueue());
-            Promise.allSettled(pending).then(results => {
-              const failure = results.find(result => result.status === 'rejected');
-              if (failure) showToast(failure.reason.message || 'Falha ao carregar revisões');
-            });
+            if (!state.mediaQueueLoaded) loadMediaQueue().catch(error => showToast(error.message || 'Falha ao carregar a fila de mídia'));
           }
         });
         btn.addEventListener('keydown', event => {
@@ -1178,7 +1048,6 @@
         userSearchTimer = setTimeout(() => { state.usersOffset = 0; loadUsers().catch(error => showToast(error.message || 'Falha ao carregar usuários')); }, 250);
       });
       els.userRoleFilter.addEventListener('change', () => { state.usersOffset = 0; loadUsers().catch(error => showToast(error.message || 'Falha ao carregar usuários')); });
-      els.applicationStatusFilter.addEventListener('change', loadApplications);
       els.mediaCacheImportBtn.addEventListener('click', () => els.mediaCacheImportInput.click());
       els.mediaCacheImportInput.addEventListener('change', () => importWorkoutXGifCache(els.mediaCacheImportInput.files));
       document.body.addEventListener('click', async (event) => {
@@ -1186,15 +1055,6 @@
         if (btn) {
           if (!confirmDestructiveUserAction(btn.dataset.user, btn.dataset.action, btn.dataset.value)) return;
           await runAdminAction(btn, () => doUserAction(btn.dataset.user, btn.dataset.action, btn.dataset.value));
-          return;
-        }
-        const reviewBtn = event.target.closest('[data-review]');
-        if (reviewBtn) {
-          const applicationId = reviewBtn.dataset.application;
-          const decision = reviewBtn.dataset.review;
-          if (decision === 'reject' && !window.confirm('Rejeitar esta solicitação profissional?')) return;
-          const noteField = document.querySelector(`[data-note-for="${applicationId}"]`);
-          await runAdminAction(reviewBtn, () => reviewApplication(applicationId, decision, noteField ? noteField.value.trim() : ''));
           return;
         }
         const mediaSearchBtn = event.target.closest('[data-media-search-btn]');
@@ -1252,30 +1112,11 @@
         if (state.usersLoaded) pending.push(loadUsers());
         await Promise.all(pending);
       });
-      document.getElementById('closeProfessionalModal').addEventListener('click', () => els.professionalModal.classList.remove('show'));
-      document.getElementById('cancelProfessional').addEventListener('click', () => els.professionalModal.classList.remove('show'));
-      els.confirmProfessional.addEventListener('click', async () => {
-        if (!els.professionalDurationSelect.value) {
-          showToast('Escolha por quanto tempo o acesso profissional ficará ativo');
-          return;
-        }
-        const scope = els.professionalScopeSelect.value;
-        const saved = await runAdminAction(els.confirmProfessional, () => api(`/admin/users/${state.currentProfessionalUser}/professional`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_professional: true, professional_scope: scope, duration_days: selectedDuration(els.professionalDurationSelect) })
-        }));
-        if (!saved) return;
-        els.professionalModal.classList.remove('show');
-        showToast('Profissional ativado');
-        const pending = [loadAnalytics()];
-        if (state.usersLoaded) pending.push(loadUsers());
-        await Promise.all(pending);
-      });
       document.getElementById('closeNoteModal').addEventListener('click', () => els.noteModal.classList.remove('show'));
       document.getElementById('cancelNote').addEventListener('click', () => els.noteModal.classList.remove('show'));
       els.confirmNote.addEventListener('click', () => els.noteModal.classList.remove('show'));
       els.noteModal.addEventListener('click', (event) => { if (event.target === els.noteModal) els.noteModal.classList.remove('show'); });
       els.premiumModal.addEventListener('click', (event) => { if (event.target === els.premiumModal) closePremiumModal(); });
-      els.professionalModal.addEventListener('click', (event) => { if (event.target === els.professionalModal) els.professionalModal.classList.remove('show'); });
     }
 
     async function init() {

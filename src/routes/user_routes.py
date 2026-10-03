@@ -149,8 +149,6 @@ user_bp = Blueprint("user", __name__)
 PLANS = (
     {"code": "free", "name": "Gratuito", "price_brl": 0, "features": ["Diário alimentar", "Medidas e progresso", "3 usos da IA"]},
     {"code": "premium_student", "name": "Premium Aluno", "price_brl": 20, "features": ["IA sem limite de teste", "Dietas personalizadas", "Treinos personalizados"]},
-    {"code": "professional_single", "name": "Profissional Especialista", "price_brl": 50, "student_limit": 5, "features": ["Até 5 alunos", "Escolha entre dietas ou treinos", "Aprovação obrigatória"]},
-    {"code": "professional_complete", "name": "Profissional Completo", "price_brl": 70, "student_limit": 5, "features": ["Até 5 alunos", "Dietas e treinos", "Aprovação obrigatória"]},
 )
 
 

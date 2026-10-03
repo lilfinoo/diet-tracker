@@ -1,12 +1,10 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from io import BytesIO
 
 from flask import Blueprint, g, jsonify, request, send_file
-from sqlalchemy import and_, or_
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 
-from src.legal import PROFESSIONAL_SHARING_VERSION
-from src.models.user import ProfessionalStudentRelationship, User, UserProfile, db
+from src.models.user import User, UserProfile, db
 from src.routes.common import idempotent_mutation, json_body, login_required, page_query
 from src.services.badges import serialize_profile_highlights
 from src.services.media_storage import (
@@ -16,7 +14,6 @@ from src.services.media_storage import (
     prepare_avatar,
     upload_avatar,
 )
-from src.services.plan_management import add_audit
 from src.services.rate_limit import rate_limit
 
 
@@ -52,14 +49,6 @@ def _public_user(user):
     return {
         "id": user.id,
         "username": user.username,
-        "is_professional": user.has_entitlement("professional"),
-        "professional_scope": user.professional_scope if user.has_entitlement("professional") else None,
-        "accepts_external_workout_reviews": bool(
-            profile and profile.accepts_external_workout_reviews and user.has_entitlement("workout")
-        ),
-        "accepts_external_diet_reviews": bool(
-            profile and profile.accepts_external_diet_reviews and user.has_entitlement("diet")
-        ),
         "avatar_url": f"/api/profiles/by-id/{user.id}/avatar" if profile and profile.avatar_object_key else None,
         "profile_highlights": highlights,
     }
@@ -114,18 +103,6 @@ def update_public_profile():
         if not isinstance(data["is_public"], bool):
             return jsonify({"error": "Visibilidade inválida."}), 400
         profile.is_public = data["is_public"]
-    if "accepts_external_workout_reviews" in data:
-        if not isinstance(data["accepts_external_workout_reviews"], bool):
-            return jsonify({"error": "Preferência de revisão inválida."}), 400
-        if data["accepts_external_workout_reviews"] and not g.user.has_entitlement("workout"):
-            return jsonify({"error": "Somente profissionais habilitados para treino podem receber revisões."}), 403
-        profile.accepts_external_workout_reviews = data["accepts_external_workout_reviews"]
-    if "accepts_external_diet_reviews" in data:
-        if not isinstance(data["accepts_external_diet_reviews"], bool):
-            return jsonify({"error": "Preferência de revisão inválida."}), 400
-        if data["accepts_external_diet_reviews"] and not g.user.has_entitlement("diet"):
-            return jsonify({"error": "Somente profissionais habilitados para dieta podem receber revisões."}), 403
-        profile.accepts_external_diet_reviews = data["accepts_external_diet_reviews"]
     db.session.commit()
     return jsonify({"message": "Perfil público atualizado.", "profile": profile.to_dict()}), 200
 
@@ -196,22 +173,6 @@ def profile_avatar(username=None, user_id=None):
         return jsonify({"error": "Foto não encontrada."}), 404
     allowed = user.id == g.user.id or user.profile.is_public
     if not allowed:
-        allowed = ProfessionalStudentRelationship.query.filter(
-            ProfessionalStudentRelationship.status == "active",
-            ProfessionalStudentRelationship.data_sharing_consent_version == PROFESSIONAL_SHARING_VERSION,
-            ProfessionalStudentRelationship.data_sharing_consented_at.isnot(None),
-            or_(
-                and_(
-                    ProfessionalStudentRelationship.professional_user_id == user.id,
-                    ProfessionalStudentRelationship.student_user_id == g.user.id,
-                ),
-                and_(
-                    ProfessionalStudentRelationship.professional_user_id == g.user.id,
-                    ProfessionalStudentRelationship.student_user_id == user.id,
-                ),
-            ),
-        ).first() is not None
-    if not allowed:
         return jsonify({"error": "Foto não encontrada."}), 404
     try:
         content = get_avatar(user.profile.avatar_object_key)
@@ -220,168 +181,3 @@ def profile_avatar(username=None, user_id=None):
     response = send_file(BytesIO(content), mimetype="image/webp", max_age=0)
     response.headers["Cache-Control"] = "private, no-store"
     return response
-
-
-@social_bp.route("/connections", methods=["GET", "POST"])
-@login_required
-@rate_limit("connections", 30, 60)
-def connections():
-    if request.method == "GET":
-        ProfessionalStudentRelationship.query.filter(
-            ProfessionalStudentRelationship.status == "pending",
-            ProfessionalStudentRelationship.invite_expires_at <= datetime.utcnow(),
-            or_(
-                ProfessionalStudentRelationship.professional_user_id == g.user.id,
-                ProfessionalStudentRelationship.student_user_id == g.user.id,
-            ),
-        ).update({"status": "expired"}, synchronize_session=False)
-        db.session.commit()
-        items = ProfessionalStudentRelationship.query.filter(
-            ProfessionalStudentRelationship.student_user_id.isnot(None),
-            or_(
-                ProfessionalStudentRelationship.professional_user_id == g.user.id,
-                ProfessionalStudentRelationship.student_user_id == g.user.id,
-            ),
-        ).order_by(ProfessionalStudentRelationship.created_at.desc()).all()
-        return jsonify({"items": [item.to_dict() for item in items]}), 200
-
-    data = json_body()
-    target = User.query.filter_by(username=str(data.get("username", "")).strip(), is_banned=False).first()
-    direction = str(data.get("direction", ""))
-    if not target or target.id == g.user.id or not target.profile or not target.profile.is_public:
-        return jsonify({"error": "Usuário não encontrado."}), 404
-    if direction == "request_professional":
-        professional, student = target, g.user
-        if not professional.has_entitlement("professional"):
-            return jsonify({"error": "Este usuário não é um profissional disponível."}), 400
-        if data.get("data_sharing_consent") is not True:
-            return jsonify({"error": "Confirme o compartilhamento de dados."}), 400
-        if data.get("sharing_consent_version") != PROFESSIONAL_SHARING_VERSION:
-            return jsonify({"error": "Atualize e confirme o consentimento de compartilhamento."}), 409
-    elif direction == "invite_student":
-        professional, student = g.user, target
-        if not professional.has_entitlement("professional"):
-            return jsonify({"error": "Apenas profissionais podem convidar alunos."}), 403
-    else:
-        return jsonify({"error": "Tipo de solicitação inválido."}), 400
-    if ProfessionalStudentRelationship.query.filter_by(
-        professional_user_id=professional.id,
-        status="active",
-    ).count() >= 5:
-        return jsonify({"error": "Este profissional já atingiu o limite de 5 alunos."}), 409
-    existing = ProfessionalStudentRelationship.query.filter(
-        ProfessionalStudentRelationship.professional_user_id == professional.id,
-        ProfessionalStudentRelationship.student_user_id == student.id,
-        ProfessionalStudentRelationship.status.in_(("pending", "active")),
-    ).first()
-    if existing:
-        return jsonify({"error": "Já existe uma solicitação ou vínculo entre vocês."}), 409
-    relationship = ProfessionalStudentRelationship(
-        professional_user_id=professional.id,
-        student_user_id=student.id,
-        status="pending",
-        invite_expires_at=datetime.utcnow() + timedelta(days=7),
-        initiated_by_user_id=g.user.id,
-        request_message=str(data.get("message", "")).strip()[:500] or None,
-    )
-    if student.id == g.user.id:
-        relationship.data_sharing_consent_version = PROFESSIONAL_SHARING_VERSION
-        relationship.data_sharing_consented_at = datetime.utcnow()
-    db.session.add(relationship)
-    try:
-        db.session.commit()
-    except IntegrityError:
-        db.session.rollback()
-        return jsonify({"error": "Já existe uma solicitação ou vínculo entre vocês."}), 409
-    return jsonify({"message": "Solicitação enviada.", "connection": relationship.to_dict()}), 201
-
-
-def _pending_connection(connection_id):
-    return ProfessionalStudentRelationship.query.filter_by(id=connection_id, status="pending").with_for_update().first()
-
-
-@social_bp.route("/connections/<int:connection_id>/accept", methods=["POST"])
-@login_required
-def accept_connection(connection_id):
-    data = json_body()
-    relationship = _pending_connection(connection_id)
-    if not relationship or relationship.initiated_by_user_id == g.user.id or g.user.id not in {
-        relationship.professional_user_id,
-        relationship.student_user_id,
-    }:
-        return jsonify({"error": "Solicitação não encontrada."}), 404
-    if relationship.invite_expires_at <= datetime.utcnow():
-        relationship.status = "expired"
-        db.session.commit()
-        return jsonify({"error": "Solicitação expirada."}), 409
-    if not relationship.professional or not relationship.professional.has_entitlement("professional"):
-        return jsonify({"error": "Profissional indisponível."}), 409
-    if g.user.id == relationship.student_user_id:
-        if data.get("data_sharing_consent") is not True:
-            return jsonify({"error": "Confirme o compartilhamento de dados."}), 400
-        if data.get("sharing_consent_version") != PROFESSIONAL_SHARING_VERSION:
-            return jsonify({"error": "Atualize e confirme o consentimento de compartilhamento."}), 409
-        relationship.data_sharing_consent_version = PROFESSIONAL_SHARING_VERSION
-        relationship.data_sharing_consented_at = datetime.utcnow()
-    if (
-        not relationship.data_sharing_consented_at
-        or relationship.data_sharing_consent_version != PROFESSIONAL_SHARING_VERSION
-    ):
-        return jsonify({"error": "O aluno precisa autorizar o compartilhamento de dados."}), 409
-    if ProfessionalStudentRelationship.query.filter_by(
-        student_user_id=relationship.student_user_id,
-        status="active",
-    ).first():
-        return jsonify({"error": "O aluno já possui um profissional ativo."}), 409
-    db.session.get(User, relationship.professional_user_id, with_for_update=True)
-    active_students = ProfessionalStudentRelationship.query.filter_by(
-        professional_user_id=relationship.professional_user_id,
-        status="active",
-    ).count()
-    if active_students >= 5:
-        return jsonify({"error": "Este profissional já atingiu o limite de 5 alunos."}), 409
-    relationship.status = "active"
-    relationship.accepted_at = datetime.utcnow()
-    add_audit(
-        g.user,
-        relationship.student,
-        relationship,
-        "professional_student.request_accepted",
-        "professional_student_relationship",
-        relationship.id,
-    )
-    try:
-        db.session.commit()
-    except IntegrityError:
-        db.session.rollback()
-        return jsonify({"error": "Este vínculo não pode mais ser aceito."}), 409
-    return jsonify({"message": "Vínculo profissional criado.", "connection": relationship.to_dict()}), 200
-
-
-@social_bp.route("/connections/<int:connection_id>/decline", methods=["POST"])
-@login_required
-def decline_connection(connection_id):
-    relationship = _pending_connection(connection_id)
-    if not relationship or relationship.initiated_by_user_id == g.user.id or g.user.id not in {
-        relationship.professional_user_id,
-        relationship.student_user_id,
-    }:
-        return jsonify({"error": "Solicitação não encontrada."}), 404
-    relationship.status = "declined"
-    db.session.commit()
-    return jsonify({"message": "Solicitação recusada."}), 200
-
-
-@social_bp.route("/connections/<int:connection_id>", methods=["DELETE"])
-@login_required
-def cancel_connection(connection_id):
-    relationship = ProfessionalStudentRelationship.query.filter_by(
-        id=connection_id,
-        status="pending",
-        initiated_by_user_id=g.user.id,
-    ).first_or_404()
-    relationship.status = "revoked"
-    relationship.revoked_at = datetime.utcnow()
-    relationship.revoked_by_user_id = g.user.id
-    db.session.commit()
-    return jsonify({"message": "Solicitação cancelada."}), 200

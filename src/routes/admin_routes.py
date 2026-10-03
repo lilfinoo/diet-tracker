@@ -10,8 +10,6 @@ from src.models.user import (
     AdminActionAudit,
     AnalyticsEvent,
     ExerciseMediaReview,
-    ProfessionalApplication,
-    ProfessionalStudentRelationship,
     Subscription,
     User,
     WorkoutXExercise,
@@ -134,15 +132,12 @@ def list_users():
                 User.email.ilike(pattern),
                 User.username.ilike(pattern),
                 User.id.cast(db.String).ilike(pattern),
-                User.professional_scope.ilike(pattern),
             )
         )
     if role == "admins":
         query = query.filter(User.is_admin.is_(True))
     elif role == "banned":
         query = query.filter(User.is_banned.is_(True))
-    elif role == "professional":
-        query = query.filter(User.is_professional.is_(True))
     elif role == "premium":
         premium_subscription = db.session.query(Subscription.user_id).filter(
             Subscription.user_id == User.id,
@@ -179,7 +174,7 @@ def list_users():
     serialized_users = []
     for user in users:
         subscriptions = subscriptions_by_user.get(user.id, [])
-        plan_rank = {"free": 0, "premium_student": 1, "professional_single": 2, "professional_complete": 3}
+        plan_rank = {"free": 0, "premium_student": 1, "premium_student_annual": 1}
         subscription = max(
             subscriptions,
             key=lambda item: (plan_rank.get(item.plan_code, 0), item.created_at or datetime.min),
@@ -193,13 +188,10 @@ def list_users():
             "email": user.email,
             "created_at": user.created_at.isoformat() if user.created_at else None,
             "account_status": "banned" if user.is_banned else "active",
-            "account_type": "admin" if user.is_admin else ("professional" if user.is_professional else "standard"),
+            "account_type": "admin" if user.is_admin else "standard",
             "is_banned": user.is_banned,
             "is_admin": user.is_admin,
             "is_premium": user.is_premium or plan_code != "free",
-            "is_professional": user.is_professional,
-            "professional_entitled": user.is_professional and plan_code in {"professional_single", "professional_complete"},
-            "professional_scope": user.professional_scope,
             "plan_code": plan_code,
             "subscription_status": subscription.status if subscription else "none",
         }
@@ -394,60 +386,6 @@ def update_premium_status(user_id):
     }), 200
 
 
-@admin_bp.route("/admin/users/<uuid:user_id>/professional", methods=["PATCH"])
-@admin_required
-def update_professional_status(user_id):
-    data = json_body()
-    is_professional = data.get("is_professional")
-    if not isinstance(is_professional, bool):
-        return jsonify({"error": "is_professional deve ser verdadeiro ou falso"}), 400
-
-    user_to_update = db.get_or_404(User, user_id)
-    previous = user_to_update.admin_dict()
-    professional_scope = data.get("professional_scope")
-    if is_professional:
-        try:
-            current_period_end = _admin_grant_end(data)
-        except ValueError as error:
-            return jsonify({"error": str(error)}), 400
-        allowed_scopes = {"diet", "workout", "both"}
-        if professional_scope is None:
-            professional_scope = "both"
-        if professional_scope not in allowed_scopes:
-            return jsonify({"error": "Escolha uma especialidade compatível com o plano profissional."}), 400
-        user_to_update.professional_scope = professional_scope
-        _upsert_admin_grant(
-            user_to_update,
-            "professional",
-            "professional_complete" if professional_scope == "both" else "professional_single",
-            current_period_end,
-        )
-    user_to_update.is_professional = is_professional
-    if not is_professional:
-        _revoke_admin_grants(user_to_update, "professional")
-        user_to_update.professional_scope = None
-        now = datetime.utcnow()
-        relationships = ProfessionalStudentRelationship.query.filter(
-            ProfessionalStudentRelationship.professional_user_id == user_to_update.id,
-            ProfessionalStudentRelationship.status.in_(("active", "pending")),
-        ).all()
-        for relationship in relationships:
-            relationship.status = "revoked"
-            relationship.revoked_at = now
-            relationship.revoked_by_user_id = g.user.id
-    _audit_admin("professional.granted" if is_professional else "professional.revoked", user_to_update, {
-        "previous_scope": previous["professional_scope"],
-        "new_scope": user_to_update.professional_scope,
-        "duration_days": data.get("duration_days"),
-    })
-    db.session.commit()
-    action = "concedido" if is_professional else "revogado"
-    return jsonify({
-        "message": f"Perfil profissional {action} para {user_to_update.username}.",
-        "user": user_to_update.admin_dict(),
-    }), 200
-
-
 @admin_bp.route("/admin/users/<uuid:user_id>/toggle_admin", methods=["POST"])
 @admin_required
 def toggle_admin_status(user_id):
@@ -530,10 +468,9 @@ def _date_series(start_date, end_date, bucket):
 def _admin_summary_counts(from_date, to_date):
     period_start = datetime.combine(from_date, datetime.min.time())
     period_end = datetime.combine(to_date, datetime.max.time())
-    admin_users, banned_users, professional_users, new_users = db.session.query(
+    admin_users, banned_users, new_users = db.session.query(
         func.coalesce(func.sum(case((User.is_admin.is_(True), 1), else_=0)), 0),
         func.coalesce(func.sum(case((User.is_banned.is_(True), 1), else_=0)), 0),
-        func.coalesce(func.sum(case((User.is_professional.is_(True), 1), else_=0)), 0),
         func.coalesce(func.sum(case((User.created_at >= period_start, 1), else_=0)), 0),
     ).filter(User.created_at <= period_end).one()
     total_users = User.query.count()
@@ -558,10 +495,10 @@ def _admin_summary_counts(from_date, to_date):
         Subscription.status.in_(("active", "trialing")),
         Subscription.current_period_end > datetime.utcnow(),
     ).group_by(Subscription.plan_code).all()
-    user_plan_counts = {"premium_student": 0, "professional_single": 0, "professional_complete": 0}
+    user_plan_counts = {"premium_student": 0}
     for plan_code, count in active_subscription_rows:
-        if plan_code in user_plan_counts:
-            user_plan_counts[plan_code] = count
+        if plan_code in {"premium_student", "premium_student_annual"}:
+            user_plan_counts["premium_student"] += count
     return {
         "total_users": total_users,
         "new_users": new_users,
@@ -569,7 +506,6 @@ def _admin_summary_counts(from_date, to_date):
         "admin_users": admin_users,
         "banned_users": banned_users,
         "premium_users": premium_users,
-        "professional_users": professional_users,
         "active_subscriptions": sum(user_plan_counts.values()),
         "active_subscription_plans": user_plan_counts,
     }
@@ -675,7 +611,7 @@ def _build_admin_analytics_payload(from_date, to_date, bucket):
 
     user_new_by_bucket = defaultdict(int)
     activity_by_bucket = defaultdict(lambda: {"diet_entries": 0, "measurements": 0, "chat_messages": 0, "workout_sessions": 0, "active_users": set()})
-    subscription_by_bucket = defaultdict(lambda: {"premium_student": 0, "professional_single": 0, "professional_complete": 0})
+    subscription_by_bucket = defaultdict(lambda: {"premium_student": 0})
 
     if bucket == "day":
         new_user_rows = db.session.query(
@@ -732,8 +668,8 @@ def _build_admin_analytics_payload(from_date, to_date, bucket):
     for plan_code, created_day, count in subscription_rows:
         created_day = datetime.fromisoformat(created_day).date() if isinstance(created_day, str) else created_day
         key = _bucket_key(created_day, bucket)
-        if plan_code in subscription_by_bucket[key]:
-            subscription_by_bucket[key][plan_code] += count
+        if plan_code in {"premium_student", "premium_student_annual"}:
+            subscription_by_bucket[key]["premium_student"] += count
 
     labels = []
     new_users_series = []
@@ -743,7 +679,7 @@ def _build_admin_analytics_payload(from_date, to_date, bucket):
     for bucket_day in bucket_dates:
         labels.append(_bucket_label(bucket_day, bucket))
         activity = activity_by_bucket.get(bucket_day, {"diet_entries": 0, "measurements": 0, "chat_messages": 0, "workout_sessions": 0, "active_users": set()})
-        subs = subscription_by_bucket.get(bucket_day, {"premium_student": 0, "professional_single": 0, "professional_complete": 0})
+        subs = subscription_by_bucket.get(bucket_day, {"premium_student": 0})
         new_users_series.append(user_new_by_bucket.get(bucket_day, 0))
         active_users_series.append(len(activity["active_users"]))
         activity_series.append({
@@ -757,20 +693,8 @@ def _build_admin_analytics_payload(from_date, to_date, bucket):
         subscription_series.append({
             "label": _bucket_label(bucket_day, bucket),
             "premium_student": subs["premium_student"],
-            "professional_single": subs["professional_single"],
-            "professional_complete": subs["professional_complete"],
         })
 
-    application_rows = db.session.query(
-        ProfessionalApplication.status, func.count(ProfessionalApplication.id)
-    ).filter(
-        ProfessionalApplication.created_at >= datetime.combine(from_date, datetime.min.time()),
-        ProfessionalApplication.created_at <= datetime.combine(to_date, datetime.max.time()),
-    ).group_by(ProfessionalApplication.status).all()
-    application_counts = {"pending": 0, "approved": 0, "rejected": 0}
-    for status, count in application_rows:
-        if status in application_counts:
-            application_counts[status] = count
 
     return {
         "range": {"from": from_date.isoformat(), "to": to_date.isoformat(), "bucket": bucket},
@@ -785,12 +709,10 @@ def _build_admin_analytics_payload(from_date, to_date, bucket):
             "subscriptions": subscription_series,
         },
         "breakdowns": {
-            "applications": application_counts,
             "subscriptions": summary["active_subscription_plans"],
             "roles": {
                 "admins": summary["admin_users"],
                 "premium": summary["premium_users"],
-                "professionals": summary["professional_users"],
                 "banned": summary["banned_users"],
             },
         },
@@ -903,7 +825,7 @@ def admin_analytics_csv():
     payload = _build_admin_analytics_payload(from_date, to_date, bucket)
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["label", "new_users", "active_users", "diet_entries", "measurements", "chat_messages", "workout_sessions", "premium_student", "professional_single", "professional_complete"])
+    writer.writerow(["label", "new_users", "active_users", "diet_entries", "measurements", "chat_messages", "workout_sessions", "premium_student"])
     for idx, item in enumerate(payload["series"]["activity"]):
         sub = payload["series"]["subscriptions"][idx]
         writer.writerow([
@@ -915,8 +837,6 @@ def admin_analytics_csv():
             item["chat_messages"],
             item["workout_sessions"],
             sub.get("premium_student", 0),
-            sub.get("professional_single", 0),
-            sub.get("professional_complete", 0),
         ])
     response = current_app.response_class(output.getvalue(), mimetype="text/csv")
     response.headers["Content-Disposition"] = 'attachment; filename="admin-analytics.csv"'

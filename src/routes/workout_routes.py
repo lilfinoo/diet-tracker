@@ -3,7 +3,7 @@ import uuid
 from flask import Blueprint, abort, g, jsonify
 from sqlalchemy.orm import selectinload
 
-from src.models.user import ProfessionalReviewRequest, WorkoutDay, WorkoutExercise, WorkoutPlan, WorkoutSession, UserProfile, db
+from src.models.user import WorkoutDay, WorkoutExercise, WorkoutPlan, WorkoutSession, UserProfile, db
 from src.routes.common import (_apply_workout_plan_schedule, _editable_workout_plan, _get_or_create_profile, _local_date_for_timezone, _plan_catalog, _prescription, _redistribute_workout_plan_data, _set_catalog_exercise, _workout_questionnaire_for_plan, _workout_today_payload, _version_workout_plan_for_edit, json_body, login_required, page_query)
 from src.services.plan_management import create_workout_plan
 from src.services.analytics import record_event
@@ -287,11 +287,7 @@ def delete_workout_plan(plan_id):
     plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=user.id, status="published").with_for_update().first_or_404()
     if WorkoutSession.query.filter_by(workout_plan_id=plan.id, user_id=user.id, completed_at=None).first():
         return jsonify({"error": "Finalize o treino em andamento antes de excluir este plano."}), 409
-    has_review = ProfessionalReviewRequest.query.filter(
-        (ProfessionalReviewRequest.source_workout_plan_id == plan.id)
-        | (ProfessionalReviewRequest.proposal_workout_plan_id == plan.id)
-    ).first()
-    if WorkoutSession.query.filter_by(workout_plan_id=plan.id, user_id=user.id).first() or has_review:
+    if WorkoutSession.query.filter_by(workout_plan_id=plan.id, user_id=user.id).first():
         plan.status = "archived"
         db.session.commit()
         return jsonify({"message": "Plano removido. O histórico de atividades foi preservado."}), 200

@@ -10,8 +10,6 @@ db = SQLAlchemy()
 class User(db.Model):
     __table_args__ = (
         db.CheckConstraint(
-            "professional_scope IS NULL OR professional_scope IN ('diet', 'workout', 'both')",
-            name="ck_user_professional_scope",
         ),
         db.CheckConstraint("ai_trial_uses >= 0", name="ck_user_ai_trial_uses_nonnegative"),
     )
@@ -29,9 +27,7 @@ class User(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_premium = db.Column(db.Boolean, default=False, nullable=False)
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
-    is_professional = db.Column(db.Boolean, default=False, nullable=False)
     ai_trial_uses = db.Column(db.Integer, default=0, nullable=False)
-    professional_scope = db.Column(db.String(16), nullable=True)
     terms_version = db.Column(db.String(40), nullable=True)
     terms_accepted_at = db.Column(db.DateTime, nullable=True)
     privacy_version = db.Column(db.String(40), nullable=True)
@@ -65,13 +61,6 @@ class User(db.Model):
     subscriptions = db.relationship("Subscription", backref="user", lazy=True)
     consent_records = db.relationship(
         "ConsentRecord", back_populates="user", lazy=True, cascade="all, delete-orphan"
-    )
-    professional_applications = db.relationship(
-        "ProfessionalApplication",
-        backref="user",
-        lazy=True,
-        cascade="all, delete-orphan",
-        foreign_keys="ProfessionalApplication.user_id",
     )
     badges = db.relationship(
         "UserBadge",
@@ -117,8 +106,7 @@ class User(db.Model):
         plan_rank = {
             "free": 0,
             "premium_student": 1,
-            "professional_single": 2,
-            "professional_complete": 3,
+            "premium_student_annual": 1,
         }
         return max(
             active,
@@ -129,6 +117,8 @@ class User(db.Model):
     def effective_plan_code(self):
         subscription = self.active_subscription()
         if subscription:
+            if subscription.plan_code.startswith("professional_"):
+                return "premium_student"
             return subscription.plan_code
         return "premium_student" if self.is_premium else "free"
 
@@ -137,9 +127,9 @@ class User(db.Model):
         if entitlement == "premium":
             return self.is_premium or plan_code != "free"
         if entitlement == "professional":
-            return self.is_professional and plan_code in {"professional_single", "professional_complete"}
+            return False
         if entitlement in {"diet", "workout"}:
-            return self.has_entitlement("professional") and self.professional_scope in {entitlement, "both"}
+            return False
         return False
 
     def has_current_ai_consent(self):
@@ -182,10 +172,7 @@ class User(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "is_admin": self.is_admin,
             "is_premium": self.has_entitlement("premium"),
-            "is_professional": self.is_professional,
-            "professional_entitled": self.has_entitlement("professional"),
             "plan_code": self.effective_plan_code(),
-            "professional_scope": self.professional_scope,
             "ai_trial_uses": self.ai_trial_uses,
             "has_password": bool(self.password_hash),
             "is_public": bool(self.profile and self.profile.is_public),
@@ -202,8 +189,6 @@ class User(db.Model):
         subscription = self.active_subscription()
         if self.is_admin:
             account_type = "admin"
-        elif self.is_professional:
-            account_type = "professional"
         else:
             account_type = "standard"
         return {
@@ -217,9 +202,6 @@ class User(db.Model):
             "is_banned": self.is_banned,
             "is_admin": self.is_admin,
             "is_premium": self.has_entitlement("premium"),
-            "is_professional": self.is_professional,
-            "professional_entitled": self.has_entitlement("professional"),
-            "professional_scope": self.professional_scope,
             "plan_code": self.effective_plan_code(),
             "subscription_status": subscription.status if subscription else "none",
         }
@@ -237,10 +219,7 @@ class User(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "is_admin": self.is_admin,
             "is_premium": self.has_entitlement("premium"),
-            "is_professional": self.is_professional,
-            "professional_entitled": self.has_entitlement("professional"),
             "plan_code": self.effective_plan_code(),
-            "professional_scope": self.professional_scope,
             "ai_trial_uses": self.ai_trial_uses,
             "has_password": bool(self.password_hash),
             "diet_entries_count": count("diet_entries", lambda: self.diet_entries),
@@ -305,7 +284,7 @@ class Subscription(db.Model):
     __table_args__ = (
         db.UniqueConstraint("provider", "external_subscription_id", name="uq_subscription_provider_external_id"),
         db.CheckConstraint(
-            "plan_code IN ('free', 'premium_student', 'professional_single', 'professional_complete')",
+            "plan_code IN ('free', 'premium_student', 'premium_student_annual', 'professional_single', 'professional_complete')",
             name="ck_subscription_plan_code",
         ),
         db.Index("ix_subscription_user_status", "user_id", "status"),

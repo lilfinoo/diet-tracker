@@ -2,7 +2,6 @@ import time
 from datetime import datetime
 
 from flask import Blueprint, current_app, g, jsonify, session
-from sqlalchemy import or_
 
 from src.legal import (
     AI_CONSENT_VERSION,
@@ -15,7 +14,6 @@ from src.models.user import (
     BillingCheckout,
     DelegatedActionAudit,
     DietPlan,
-    ProfessionalApplication,
     ProfessionalStudentRelationship,
     Subscription,
     User,
@@ -122,7 +120,7 @@ def _detach_account_attribution(user):
                 {model.supersedes_plan_id: None}, synchronize_session=False
             )
 
-    relationships = ProfessionalStudentRelationship.query.filter(or_(
+    relationships = ProfessionalStudentRelationship.query.filter(db.or_(
         ProfessionalStudentRelationship.professional_user_id == user_id,
         ProfessionalStudentRelationship.student_user_id == user_id,
     )).all()
@@ -143,6 +141,7 @@ def _detach_account_attribution(user):
     ProfessionalStudentRelationship.query.filter_by(initiated_by_user_id=user_id).update(
         {ProfessionalStudentRelationship.initiated_by_user_id: None}, synchronize_session=False
     )
+
     DelegatedActionAudit.query.filter_by(actor_user_id=user_id).update(
         {DelegatedActionAudit.actor_user_id: None}, synchronize_session=False
     )
@@ -158,8 +157,9 @@ def _detach_account_attribution(user):
     AdminActionAudit.query.filter_by(
         resource_type="user", resource_id=str(user_id)
     ).update({AdminActionAudit.resource_id: None}, synchronize_session=False)
-    ProfessionalApplication.query.filter_by(reviewed_by_user_id=user_id).update(
-        {ProfessionalApplication.reviewed_by_user_id: None}, synchronize_session=False
+    db.session.execute(
+        db.text("UPDATE professional_application SET reviewed_by_user_id = NULL WHERE reviewed_by_user_id = :user_id"),
+        {"user_id": getattr(user_id, "hex", str(user_id))},
     )
     AnalyticsEvent.query.filter_by(subject_id=user.analytics_subject_id).update(
         {

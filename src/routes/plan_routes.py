@@ -4,7 +4,7 @@ from flask import Blueprint, current_app, g, jsonify
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
-from src.models.user import ChatMessage, DietAdherenceDay, DietMealCheckIn, DietMealDailyState, DietPlan, DietPlanMeal, ProfessionalReviewRequest, UserProfile, WorkoutDay, WorkoutExercise, WorkoutPlan, db
+from src.models.user import ChatMessage, DietAdherenceDay, DietMealCheckIn, DietMealDailyState, DietPlan, DietPlanMeal, UserProfile, WorkoutDay, WorkoutExercise, WorkoutPlan, db
 from src.routes.common import ai_consent_required, chat_plan_intent, coerce_numbers, json_body, login_required, page_query, premium_required
 from src.services.ai import (
     AIQuotaExceededError,
@@ -415,11 +415,7 @@ def delete_diet_plan(plan_id):
         DietAdherenceDay.query.filter_by(diet_plan_id=plan.id).first()
         or DietMealDailyState.query.filter_by(diet_plan_id=plan.id).first()
     )
-    has_review = ProfessionalReviewRequest.query.filter(
-        (ProfessionalReviewRequest.source_diet_plan_id == plan.id)
-        | (ProfessionalReviewRequest.proposal_diet_plan_id == plan.id)
-    ).first()
-    if has_history or has_review:
+    if has_history:
         plan.status = "archived"
         db.session.commit()
         return jsonify({"message": "Plano removido. O histórico alimentar foi preservado."}), 200

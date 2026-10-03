@@ -265,8 +265,6 @@
                         <button type="button" class="btn-primary" onclick="openAuthModal('Crie sua conta para salvar sua evolução.', 'register')">Criar conta</button>
                     </div>
                     <button id="adminPanelBtn" class="header-icon-button hidden" onclick="window.location.href='/admin'" aria-label="Abrir painel administrativo"><i class="fas fa-shield-halved"></i></button>
-                    <button id="professionalPanelBtn" class="professional-header-button hidden" onclick="showTab('professional')"><i class="fas fa-user-tie" aria-hidden="true"></i><span>Área profissional</span></button>
-                    <button id="networkHeaderButton" class="header-icon-button hidden" onclick="openNetworkCenter()" aria-label="Abrir rede e solicitações"><i class="fas fa-users"></i><span id="networkRequestCount" class="network-request-count hidden">0</span></button>
                     <button id="userHeaderButton" class="header-icon-button hidden" onclick="showTab('stats')" aria-label="Abrir perfil">
                         <span id="headerUserInitial" class="user-initial">U</span>
                     </button>
@@ -299,11 +297,6 @@
                         <div><h1>Hoje</h1><p id="homeDate"></p></div>
                         <button class="home-greeting__avatar" type="button" onclick="showTab('stats')" aria-label="Abrir conta"><span id="homeUserInitial">U</span></button>
                     </header>
-                    <button id="homeProfessionalShortcut" class="home-professional-shortcut hidden" type="button" onclick="showTab('professional')">
-                        <span class="home-professional-shortcut__icon"><i data-lucide="briefcase-business" aria-hidden="true"></i></span>
-                        <span><strong>Área profissional</strong><small>Gerencie alunos, planos e revisões</small></span>
-                        <i data-lucide="chevron-right" aria-hidden="true"></i>
-                    </button>
                     <section id="todayNutrition" class="today-nutrition hidden" aria-label="Nutrição registrada hoje" aria-live="polite">
                         <header class="today-nutrition__heading">
                             <span>Registrado hoje</span>
@@ -529,14 +522,11 @@
                         <div id="profileAuthenticatedContent">
                             <nav class="profile-shortcuts" aria-label="Assinatura e rede">
                                 <button type="button" onclick="openPlansModal()"><span class="profile-shortcut-icon"><i data-lucide="credit-card" aria-hidden="true"></i></span><strong>Planos e assinatura</strong><span class="profile-shortcut-caption">Gerenciar plano<i data-lucide="chevron-right" aria-hidden="true"></i></span></button>
-                                <button type="button" onclick="openNetworkCenter()"><span class="profile-shortcut-icon"><i data-lucide="users-round" aria-hidden="true"></i></span><strong>Minha rede</strong><span class="profile-shortcut-caption">Pessoas e solicitações<i data-lucide="chevron-right" aria-hidden="true"></i></span></button>
-                                <button type="button" id="profileProfessionalDashboard" class="hidden" onclick="showTab('professional')"><span class="profile-shortcut-icon"><i data-lucide="briefcase-business" aria-hidden="true"></i></span><strong>Área profissional</strong><span class="profile-shortcut-caption">Alunos e planos<i data-lucide="chevron-right" aria-hidden="true"></i></span></button>
                             </nav>
                             <section class="profile-dashboard-section profile-settings-section">
                                 <div class="profile-section-heading"><h3>Preferências e acesso</h3></div>
                                 <div class="profile-settings-list" aria-label="Opções do perfil">
                                     <button type="button" onclick="openPrivacySettings()"><span><i data-lucide="shield-check" aria-hidden="true"></i></span><div><strong>Privacidade e IA</strong><small>Seus dados e consentimentos</small></div><i data-lucide="chevron-right" aria-hidden="true"></i></button>
-                                    <button type="button" id="profileProfessionalRelationship" class="hidden" onclick="revokeOwnProfessionalRelationship()"><span><i data-lucide="contact-round" aria-hidden="true"></i></span><div><strong id="profileProfessionalName">Profissional vinculado</strong><small>Gerenciar acesso ao acompanhamento</small></div><i data-lucide="chevron-right" aria-hidden="true"></i></button>
                                     <button type="button" id="profileAdminLink" class="hidden" onclick="window.location.href='/admin'"><span><i data-lucide="shield-user" aria-hidden="true"></i></span><div><strong>Painel administrativo</strong><small>Gestão da plataforma</small></div><i data-lucide="chevron-right" aria-hidden="true"></i></button>
                                 </div>
                             </section>
@@ -548,21 +538,7 @@
                     </div>
                 </div>
 
-                <div id="professionalTab" class="tab-content hidden">
-                    <section id="professionalDashboard">
-                        <div class="content-header professional-heading">
-                            <div class="content-heading"><span class="content-kicker">Workspace profissional</span><h2>Seus alunos</h2><p>Crie, revise e publique treinos e planos alimentares.</p></div>
-                            <div class="professional-create-actions"><button type="button" class="btn-primary" onclick="openOfflineStudent()"><i class="fas fa-user-plus"></i> Novo aluno</button><button type="button" class="btn-secondary" onclick="openProfessionalInvite()"><i class="fas fa-link"></i> Convite avulso</button></div>
-                        </div>
-                        <div id="professionalStats" class="stats-grid"></div>
-                        <section class="professional-draft-section" aria-labelledby="professionalDraftsTitle">
-                            <div class="section-header"><div><span class="content-kicker">Pendências</span><h3 id="professionalDraftsTitle">Rascunhos para revisar</h3></div></div>
-                            <div id="professionalDrafts" class="professional-draft-list" aria-live="polite"></div>
-                        </section>
-                        <div id="professionalStudents" class="professional-student-grid" aria-live="polite"></div>
-                    </section>
-                    <section id="professionalStudentDetail" class="hidden" aria-live="polite"></section>
-                </div>
+
             </main>
         </div>
 
@@ -593,45 +569,10 @@
             </div>
         </div>
 
-        <div id="networkModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="networkModalTitle" aria-hidden="true">
-            <div class="modal-content network-sheet">
-                <div class="modal-header"><div><span class="content-kicker">Sua rede</span><h3 id="networkModalTitle">Pessoas e solicitações</h3><p>Seu perfil público não expõe dieta, medidas ou histórico de saúde.</p></div><button type="button" class="btn-close" onclick="closeAppModal(document.getElementById('networkModal'))" aria-label="Fechar">&times;</button></div>
-                <div class="network-settings">
-                    <label class="legal-check"><input id="publicProfileToggle" type="checkbox"><span>Permitir que outros usuários encontrem meu perfil</span></label>
-                    <label id="externalReviewsSetting" class="legal-check hidden"><input id="externalReviewsToggle" type="checkbox"><span>Aceitar revisões avulsas de treino</span></label>
-                    <label id="externalDietReviewsSetting" class="legal-check hidden"><input id="externalDietReviewsToggle" type="checkbox"><span>Aceitar revisões avulsas de dieta</span></label>
-                </div>
-                <div class="network-search"><label for="networkSearchInput">Encontrar usuário</label><div><input id="networkSearchInput" type="search" minlength="2" maxlength="80" placeholder="Digite o username"><button id="networkSearchButton" type="button" class="btn-primary">Buscar</button></div></div>
-                <div id="networkSearchResults" class="network-list" aria-live="polite"></div>
-                <section><div class="section-header"><div><span class="content-kicker">Caixa de entrada</span><h4>Solicitações</h4></div></div><div id="networkInbox" class="network-list" aria-live="polite"></div></section>
-                <section><div class="section-header"><div><span class="content-kicker">Planos</span><h4>Revisões profissionais</h4></div></div><div id="reviewInbox" class="network-list" aria-live="polite"></div></section>
-            </div>
-        </div>
-
-        <div id="planReviewRequestModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="planReviewRequestTitle" aria-hidden="true">
-            <div class="modal-content review-sheet">
-                <div class="modal-header"><div><span class="content-kicker">Avaliação especializada</span><h3 id="planReviewRequestTitle">Solicitar revisão profissional</h3><p>O profissional verá somente este plano e o contexto autorizado.</p></div><button type="button" class="btn-close" onclick="closeAppModal(document.getElementById('planReviewRequestModal'))" aria-label="Fechar">&times;</button></div>
-                <form id="planReviewRequestForm">
-                    <input id="reviewPlanType" type="hidden"><input id="reviewPlanId" type="hidden">
-                    <fieldset class="wizard-fieldset"><legend>Quem deve revisar?</legend><label class="review-target-card"><input type="radio" name="reviewTargetMode" value="linked"><span><strong>Meu personal</strong><small id="linkedProfessionalLabel">Verificando vínculo...</small></span></label><label class="review-target-card"><input type="radio" name="reviewTargetMode" value="specific"><span><strong>Escolher outro profissional</strong><small>Revisão avulsa, sem vínculo permanente</small></span></label><label class="review-target-card"><input type="radio" name="reviewTargetMode" value="open"><span><strong>Solicitação aberta</strong><small>Sem garantia de disponibilidade ou prazo</small></span></label></fieldset>
-                    <label id="reviewSpecificGroup" class="field-group hidden"><span class="field-label">Username do profissional</span><input id="reviewSpecificUsername" maxlength="80" placeholder="Digite o username exato"></label>
-                    <fieldset class="wizard-fieldset"><legend>O que deseja analisar?</legend><div id="reviewFocusOptions" class="review-focus-grid"></div></fieldset>
-                    <label class="field-group"><span class="field-label">Observações ou dificuldades</span><textarea id="reviewStudentNote" rows="4" maxlength="2000"></textarea></label>
-                    <label class="legal-check"><input id="reviewDataConsent" type="checkbox" required><span>Autorizo o compartilhamento deste plano, objetivo, experiência, equipamentos e limitações com o profissional responsável.</span></label>
-                    <p id="planReviewRequestMessage" class="auth-message" aria-live="polite"></p>
-                    <div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeAppModal(document.getElementById('planReviewRequestModal'))">Cancelar</button><button type="submit" class="btn-primary">Enviar solicitação</button></div>
-                </form>
-            </div>
-        </div>
-
-        <div id="planReviewDetailsModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="planReviewDetailsTitle" aria-hidden="true">
-            <div class="modal-content review-details-sheet"><div class="modal-header"><div><span class="content-kicker">Revisão profissional</span><h3 id="planReviewDetailsTitle">Detalhes da revisão</h3></div><button type="button" class="btn-close" onclick="closeAppModal(document.getElementById('planReviewDetailsModal'))" aria-label="Fechar">&times;</button></div><div id="planReviewDetails" aria-live="polite"></div></div>
-        </div>
-
         <div id="plansModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="plansModalTitle" aria-hidden="true">
             <div class="modal-content plans-sheet">
                 <div class="modal-header">
-                    <div><span class="content-kicker">Escolha seu plano</span><h3 id="plansModalTitle">Planos simples, sem surpresa</h3><p>Assinaturas mensais em reais. Profissionais passam por aprovação.</p></div>
+                    <div><span class="content-kicker">Escolha seu plano</span><h3 id="plansModalTitle">Planos simples, sem surpresa</h3><p>Assinaturas mensais em reais.</p></div>
                     <button type="button" class="btn-close" onclick="closePlansModal()" aria-label="Fechar planos">&times;</button>
                 </div>
                 <div id="plansGrid" class="pricing-grid" aria-live="polite"><p>Carregando planos...</p></div>
@@ -643,12 +584,12 @@
         <div id="billingPaymentModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="billingPaymentTitle" aria-hidden="true">
             <div class="modal-content billing-payment-sheet">
                 <div class="modal-header">
-                    <div><span class="content-kicker">Pagamento seguro</span><h3 id="billingPaymentTitle">Como deseja pagar?</h3><p>Escolha entre renovação automática no cartão ou 30 dias de acesso por PIX.</p></div>
+                    <div><span class="content-kicker">Pagamento seguro</span><h3 id="billingPaymentTitle">Como deseja pagar?</h3><p id="billingPaymentDescription">Escolha sua forma de pagamento.</p></div>
                     <button type="button" class="btn-close" onclick="closeBillingPaymentModal()" aria-label="Fechar pagamento">&times;</button>
                 </div>
                 <div class="billing-payment-options">
-                    <button type="button" onclick="confirmBillingCheckout('credit_card')"><span><i class="fas fa-credit-card" aria-hidden="true"></i></span><div><strong>Cartão de crédito</strong><small>Assinatura mensal com renovação automática.</small></div><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
-                    <button type="button" onclick="confirmBillingCheckout('pix')"><span><i class="fas fa-qrcode" aria-hidden="true"></i></span><div><strong>PIX</strong><small>Pagamento único com acesso por 30 dias. Sem renovação automática.</small></div><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
+                    <button type="button" onclick="confirmBillingCheckout('credit_card')"><span><i class="fas fa-credit-card" aria-hidden="true"></i></span><div><strong>Cartão de crédito</strong><small id="billingCreditCardDetail">7 dias grátis na primeira assinatura elegível.</small></div><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
+                    <button type="button" onclick="confirmBillingCheckout('pix')"><span><i class="fas fa-qrcode" aria-hidden="true"></i></span><div><strong>PIX</strong><small id="billingPixDetail">Pagamento único, sem renovação automática.</small></div><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
                 </div>
             </div>
         </div>
@@ -996,54 +937,6 @@
             </div>
         </div>
 
-        <div id="professionalStudentModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="professionalStudentModalTitle">
-            <div class="modal-content professional-sheet">
-                <div class="modal-header"><div><span class="content-kicker">Cadastro do personal</span><h3 id="professionalStudentModalTitle">Novo aluno</h3></div><button type="button" class="btn-close" onclick="closeOfflineStudent()" aria-label="Fechar">&times;</button></div>
-                <p>Este cadastro pode ser gerenciado sem o aluno ter uma conta no aplicativo.</p>
-                <form id="professionalStudentForm" onsubmit="saveOfflineStudent(event)">
-                    <div class="professional-editor-basics">
-                        <label for="rosterName">Nome<input id="rosterName" maxlength="100" placeholder="Nome do aluno" required></label>
-                        <label for="rosterAge">Idade (anos)<input id="rosterAge" type="number" min="0" max="120" placeholder="Ex.: 30" required></label>
-                        <label for="rosterWeight">Peso (kg)<input id="rosterWeight" type="number" min="0.1" max="500" step="0.1" placeholder="Ex.: 70" required></label>
-                        <label for="rosterHeight">Altura (cm)<input id="rosterHeight" type="number" min="0.1" max="300" step="0.1" placeholder="Ex.: 170" required></label>
-                        <label for="rosterGender">Gênero usado no cálculo<select id="rosterGender"><option value="">Não informado</option><option value="masculino">Masculino</option><option value="feminino">Feminino</option></select></label>
-                        <label for="rosterGoal">Objetivo<input id="rosterGoal" maxlength="100" placeholder="Ex.: ganhar massa muscular"></label>
-                        <label for="rosterActivity">Nível de atividade<select id="rosterActivity"><option value="">Não informado</option><option value="sedentario">Sedentário</option><option value="leve">Leve</option><option value="moderado">Moderado</option><option value="intenso">Intenso</option></select></label>
-                        <label for="rosterRestrictions">Restrições alimentares<textarea id="rosterRestrictions" maxlength="2000" rows="2" placeholder="Ex.: intolerância à lactose"></textarea></label>
-                    </div>
-                    <div id="professionalStudentMessage" class="modal-message" role="status" aria-live="polite"></div>
-                    <div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeOfflineStudent()">Cancelar</button><button class="btn-primary" type="submit">Salvar aluno</button></div>
-                </form>
-            </div>
-        </div>
-
-        <div id="professionalInviteModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="professionalInviteTitle">
-            <div class="modal-content professional-sheet">
-                <div class="modal-header"><div><span class="content-kicker">Novo vínculo</span><h3 id="professionalInviteTitle">Convidar aluno</h3></div><button type="button" class="btn-close" onclick="closeProfessionalInvite()">&times;</button></div>
-                <p>Gere um link seguro, válido por 7 dias, e envie ao aluno. Ele poderá entrar ou criar uma conta antes de aceitar.</p>
-                <div id="professionalInviteResult" class="invite-result hidden"><label for="professionalInviteLink">Link do convite</label><input id="professionalInviteLink" readonly><div class="modal-actions"><button class="btn-secondary" type="button" onclick="copyProfessionalInvite()"><i class="fas fa-copy"></i> Copiar</button><button class="btn-primary" type="button" onclick="shareProfessionalInvite()"><i class="fab fa-whatsapp"></i> WhatsApp</button></div></div>
-                <div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeProfessionalInvite()">Fechar</button><button id="professionalInviteGenerate" type="button" class="btn-primary" onclick="generateProfessionalInvite()">Gerar link</button></div>
-                <div id="professionalInviteMessage" class="modal-message" role="status" aria-live="polite"></div>
-            </div>
-        </div>
-
-        <div id="professionalPlanEditorModal" class="modal plan-modal" role="dialog" aria-modal="true" aria-labelledby="professionalPlanEditorTitle">
-            <div class="modal-content professional-editor-sheet">
-                <div class="modal-header"><div><span id="professionalPlanEditorKicker" class="content-kicker">Rascunho</span><h3 id="professionalPlanEditorTitle">Editor de plano</h3></div><button type="button" class="btn-close" onclick="closeProfessionalPlanEditor()">&times;</button></div>
-                <form id="professionalPlanEditorForm"><div id="professionalPlanEditorBody"></div><div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeProfessionalPlanEditor()">Cancelar</button><button type="submit" class="btn-primary"><i class="fas fa-floppy-disk"></i> Salvar rascunho</button></div></form>
-                <div id="professionalPlanEditorMessage" class="modal-message" role="status" aria-live="polite"></div>
-            </div>
-        </div>
-
-        <div id="professionalExportModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="professionalExportTitle">
-            <div class="modal-content professional-sheet">
-                <div class="modal-header"><div><span class="content-kicker">Compartilhar</span><h3 id="professionalExportTitle">Exportar para WhatsApp</h3></div><button type="button" class="btn-close" onclick="closeProfessionalExport()">&times;</button></div>
-                <textarea id="professionalExportText" rows="16" class="form-textarea"></textarea>
-                <div class="modal-actions"><button type="button" class="btn-secondary" onclick="copyProfessionalExport()"><i class="fas fa-copy"></i> Copiar texto</button><button type="button" class="btn-primary" onclick="shareProfessionalExport()"><i class="fab fa-whatsapp"></i> Abrir WhatsApp</button></div>
-            </div>
-        </div>
-    </div>
-
     <script defer src="/vendor/lucide.min.js?v=1.42.0-no-map"></script>
     <script defer src="/js/icons.js?v=20260907-lucide-today"></script>
     <script defer src="/fluid.js?v=20260828-achievements"></script>
@@ -1061,7 +954,5 @@
     <script defer src="/js/home-refresh.js?v=20260921-home-refresh"></script>
     <script defer src="/js/progress.js?v=20260919-progress"></script>
     <script defer src="/js/social.js?v=20260919-camera"></script>
-    <script defer src="/js/reviews.js?v=20260913-diet-portions"></script>
-    <script defer src="/js/professional.js?v=20260913-diet-portions"></script>
 </body>
 </html>

@@ -4,8 +4,8 @@ import hmac
 from flask import Blueprint, current_app, g, jsonify, request
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from src.models.user import AdminActionAudit, BillingCheckout, BillingEvent, ProfessionalApplication, Subscription, User, db
-from src.routes.common import admin_required, json_body, login_required, page_query
+from src.models.user import AdminActionAudit, BillingCheckout, BillingEvent, Subscription, db
+from src.routes.common import json_body, login_required
 from src.services.asaas import (
     AsaasError,
     create_checkout,
@@ -18,38 +18,19 @@ from src.services.analytics import record_event
 
 
 billing_bp = Blueprint("billing", __name__)
-PIX_ACCESS_DAYS = 30
 PIX_RENEWAL_WINDOW_DAYS = 7
+PREMIUM_PLAN_CODES = {"premium_student", "premium_student_annual"}
+PREMIUM_FEATURES = ["IA sem limite de teste", "Dietas personalizadas", "Treinos personalizados"]
 
 PLANS = (
     {"code": "free", "name": "Gratuito", "price_brl": 0, "features": ["Diário alimentar", "Medidas e progresso", "3 usos da IA"]},
-    {"code": "premium_student", "name": "Premium Aluno", "price_brl": 20, "features": ["IA sem limite de teste", "Dietas personalizadas", "Treinos personalizados"]},
-    {"code": "professional_single", "name": "Profissional Especialista", "price_brl": 50, "student_limit": 5, "features": ["Até 5 alunos", "Escolha entre dietas ou treinos", "Aprovação obrigatória"]},
-    {"code": "professional_complete", "name": "Profissional Completo", "price_brl": 70, "student_limit": 5, "features": ["Até 5 alunos", "Dietas e treinos", "Aprovação obrigatória"]},
+    {"code": "premium_student", "name": "Premium Mensal", "price_brl": 20, "cycle": "MONTHLY", "period_label": "/mês", "pix_access_days": 30, "features": PREMIUM_FEATURES},
+    {"code": "premium_student_annual", "name": "Premium Anual", "price_brl": 120, "cycle": "YEARLY", "period_label": "/ano", "pix_access_days": 365, "discount_percent": 50, "monthly_equivalent_brl": 10, "features": PREMIUM_FEATURES},
 )
-
-PAID_PLAN_CODES = {"premium_student", "professional_single", "professional_complete"}
-PROFESSIONAL_PLAN_SCOPES = {
-    "professional_single": {"personal_trainer": "workout", "nutritionist": "diet"},
-    "professional_complete": {"personal_trainer": "both", "nutritionist": "both"},
-}
-PROFESSION_LABELS = {"personal_trainer": "Personal trainer (CREF)", "nutritionist": "Nutricionista (CRN)"}
 
 
 def _plan_or_none(plan_code):
     return next((plan for plan in PLANS if plan["code"] == plan_code), None)
-
-
-def _professional_application_for(user_id):
-    return ProfessionalApplication.query.filter_by(user_id=user_id).order_by(
-        ProfessionalApplication.created_at.desc(),
-        ProfessionalApplication.id.desc(),
-    ).first()
-
-
-def _scope_for_application(application):
-    mapping = PROFESSIONAL_PLAN_SCOPES.get(application.plan_code, {})
-    return mapping.get(application.profession)
 
 
 def _billing_available():
@@ -78,7 +59,7 @@ def get_plans():
         "provider_environment": current_app.config.get("ASAAS_ENV", "sandbox"),
         "payment_methods": {
             "credit_card": {"recurring": True},
-            "pix": {"recurring": False, "access_days": PIX_ACCESS_DAYS},
+            "pix": {"recurring": False},
         },
         "plans": PLANS,
     }), 200
@@ -97,7 +78,6 @@ def get_subscription():
         "provider_configured": _billing_available(),
         "plan_code": g.user.effective_plan_code(),
         "is_premium": g.user.has_entitlement("premium"),
-        "professional_scope": g.user.professional_scope,
         "subscription": subscription.public_dict() if subscription else None,
         "pix_renewal_available_at": pix_renewal_available_at,
     }), 200
@@ -123,10 +103,6 @@ def create_billing_checkout():
         return jsonify({"error": "Escolha um plano válido."}), 400
     if payment_method not in {"pix", "credit_card"}:
         return jsonify({"error": "Forma de pagamento inválida."}), 400
-    if plan["code"] in PROFESSIONAL_PLAN_SCOPES:
-        application = _professional_application_for(g.user.id)
-        if not application or application.status != "approved" or application.plan_code != plan["code"]:
-            return jsonify({"error": "A solicitação profissional precisa ser aprovada antes da contratação.", "code": "approval_required"}), 403
     if not _billing_available():
         return jsonify({"error": "Cobrança indisponível no momento."}), 503
 
@@ -217,8 +193,27 @@ def create_billing_checkout():
         return jsonify({"error": "Checkout já está sendo criado.", "code": "checkout_in_progress"}), 409
 
     try:
+        has_previous_card_checkout = BillingCheckout.query.filter(
+            BillingCheckout.user_id == g.user.id,
+            BillingCheckout.provider == "asaas",
+            BillingCheckout.payment_method == "credit_card",
+            BillingCheckout.status == "completed",
+            BillingCheckout.id != checkout.id,
+        ).first() is not None
+        has_previous_subscription = Subscription.query.filter_by(
+            user_id=g.user.id,
+            provider="asaas",
+        ).first() is not None
+        checkout_plan = {
+            **plan,
+            "trial_days": 7 if (
+                payment_method == "credit_card"
+                and not has_previous_card_checkout
+                and not has_previous_subscription
+            ) else 0,
+        }
         result = create_checkout(
-            plan,
+            checkout_plan,
             checkout.payment_method,
             current_app.config["PUBLIC_BASE_URL"],
             checkout.external_reference,
@@ -260,8 +255,7 @@ def cancel_billing_subscription():
     plan_rank = {
         "free": 0,
         "premium_student": 1,
-        "professional_single": 2,
-        "professional_complete": 3,
+        "premium_student_annual": 1,
     }
     subscription = max(
         subscriptions,
@@ -307,7 +301,7 @@ def cancel_billing_subscription():
     return jsonify({"message": message, "subscription": subscription.public_dict()}), 200
 
 
-def _upsert_subscription_from_event(user_id, plan_code, remote):
+def _upsert_subscription_from_event(user_id, plan_code, remote, trial_period_end=None, trial_started_at=None):
     external_id = str(remote.get("id", ""))[:255]
     if not external_id:
         return None
@@ -322,8 +316,15 @@ def _upsert_subscription_from_event(user_id, plan_code, remote):
         local.external_customer_id = remote["customer"]
     remote_status = str(remote.get("status", "")).upper()
     if remote_status == "ACTIVE":
-        if local.status not in {"active", "canceled", "revoked", "disputed"}:
-            local.status = "pending"
+        if local.status not in {"active", "trialing", "canceled", "revoked", "disputed"}:
+            if trial_period_end:
+                local.status = "trialing"
+                local.current_period_start = trial_started_at or datetime.utcnow()
+                local.current_period_end = datetime.combine(
+                    trial_period_end + timedelta(days=1), datetime.min.time()
+                )
+            else:
+                local.status = "pending"
     elif remote_status in {"INACTIVE", "EXPIRED"}:
         local.status = "canceled"
     return local
@@ -385,7 +386,8 @@ def _activate_pix_checkout(checkout):
     access.status = "active"
     access.plan_code = checkout.plan_code
     access.current_period_start = now
-    access.current_period_end = base + timedelta(days=PIX_ACCESS_DAYS)
+    plan = _plan_or_none(checkout.plan_code)
+    access.current_period_end = base + timedelta(days=plan["pix_access_days"] if plan else 30)
     checkout.status = "completed"
     if not was_active:
         record_event(
@@ -413,9 +415,40 @@ def _subscription_for_remote(remote, payload):
     origin = _checkout_for_remote(remote, payload)
     if not origin:
         return None
-    local = _upsert_subscription_from_event(origin.user_id, origin.plan_code, remote)
+    trial_period_end = None
+    next_due = remote.get("nextDueDate")
+    if origin.payment_method == "credit_card" and origin.plan_code in PREMIUM_PLAN_CODES and next_due:
+        try:
+            next_due_date = datetime.strptime(str(next_due)[:10], "%Y-%m-%d").date()
+        except ValueError:
+            next_due_date = None
+        checkout_date = (origin.created_at or datetime.utcnow()).date()
+        if next_due_date in {
+            checkout_date + timedelta(days=7),
+            checkout_date + timedelta(days=8),
+        }:
+            trial_period_end = next_due_date
+    local = _upsert_subscription_from_event(
+        origin.user_id,
+        origin.plan_code,
+        remote,
+        trial_period_end=trial_period_end,
+        trial_started_at=datetime.utcnow(),
+    )
     if local:
         origin.status = "completed"
+        if trial_period_end and local.status == "trialing":
+            record_event(
+                "subscription_trial_started",
+                user_id=origin.user_id,
+                properties={"plan_code": origin.plan_code, "trial_days": 7},
+            )
+            _audit_billing(
+                "subscription.trial_started",
+                origin.user_id,
+                {"plan_code": origin.plan_code, "trial_days": 7},
+                local.id,
+            )
     return local
 
 
@@ -458,7 +491,7 @@ def _activate_recurring_payment(local, payment):
         raise ValueError("Asaas subscription did not provide a paid-through date")
     if period_end <= start:
         raise ValueError("Asaas payment period is invalid")
-    was_entitled = local.status in {"active", "canceled"} and (
+    was_entitled = local.status in {"active", "trialing", "canceled"} and (
         local.current_period_end is None or local.current_period_end > datetime.utcnow()
     )
     local.current_period_start = datetime.combine(start, datetime.min.time())
@@ -654,90 +687,3 @@ def asaas_webhook():
         )
         return jsonify({"received": False, "retryable": True}), 503
     return jsonify({"received": True}), 200
-
-
-@billing_bp.route("/professional-application", methods=["GET"])
-@login_required
-def get_my_professional_application():
-    application = _professional_application_for(g.user.id)
-    return jsonify({"application": application.to_dict() if application else None}), 200
-
-
-@billing_bp.route("/professional-application", methods=["POST"])
-@login_required
-def create_professional_application():
-    data = json_body()
-    plan = _plan_or_none(str(data.get("plan_code", "")))
-    profession = str(data.get("profession", ""))
-    full_name = str(data.get("full_name", "")).strip()
-    registration_number = str(data.get("registration_number", "")).strip()
-    if not plan or plan["code"] not in PROFESSIONAL_PLAN_SCOPES:
-        return jsonify({"error": "Escolha um plano profissional válido."}), 400
-    if profession not in PROFESSION_LABELS:
-        return jsonify({"error": "Informe a sua profissão."}), 400
-    if not full_name or len(full_name) > 120:
-        return jsonify({"error": "Informe seu nome completo (até 120 caracteres)."}), 400
-    if not registration_number or len(registration_number) > 40:
-        return jsonify({"error": "Informe o número do registro (CREF ou CRN)."}), 400
-    existing = _professional_application_for(g.user.id)
-    if existing and existing.status == "pending":
-        return jsonify({"error": "Você já possui uma solicitação em análise."}), 409
-    application = ProfessionalApplication(
-        user_id=g.user.id,
-        plan_code=plan["code"],
-        full_name=full_name,
-        profession=profession,
-        registration_number=registration_number,
-    )
-    db.session.add(application)
-    db.session.commit()
-    return jsonify({"message": "Solicitação enviada para análise.", "application": application.to_dict()}), 201
-
-
-@billing_bp.route("/admin/professional-applications", methods=["GET"])
-@admin_required
-def list_professional_applications():
-    status_filter = request.args.get("status")
-    query = ProfessionalApplication.query.order_by(ProfessionalApplication.created_at.desc())
-    if status_filter in {"pending", "approved", "rejected"}:
-        query = query.filter_by(status=status_filter)
-    applications, _, _ = page_query(query, default_limit=50)
-    return jsonify([item.to_dict() for item in applications.all()]), 200
-
-
-@billing_bp.route("/admin/professional-applications/<int:application_id>/review", methods=["POST"])
-@admin_required
-def review_professional_application(application_id):
-    data = json_body()
-    decision = str(data.get("decision", ""))
-    note = str(data.get("note", "")).strip()[:500] or None
-    application = db.get_or_404(ProfessionalApplication, application_id)
-    if application.status != "pending":
-        return jsonify({"error": "Esta solicitação já foi analisada."}), 409
-    if decision not in {"approve", "reject"}:
-        return jsonify({"error": "Decisão inválida."}), 400
-    application.reviewed_by_user_id = g.user.id
-    application.reviewed_at = datetime.utcnow()
-    application.admin_note = note
-    if decision == "approve":
-        scope = _scope_for_application(application)
-        if not scope:
-            return jsonify({"error": "Combinação de plano e profissão inválida."}), 422
-        applicant = db.session.get(User, application.user_id)
-        applicant.is_professional = True
-        applicant.professional_scope = scope
-        application.status = "approved"
-        message = f"Solicitação aprovada. Especialidade: {scope}."
-    else:
-        application.status = "rejected"
-        message = "Solicitação recusada."
-    db.session.add(AdminActionAudit(
-        actor_user_id=g.user.id,
-        subject_user_id=application.user_id,
-        action=f"professional_application.{application.status}",
-        resource_type="professional_application",
-        resource_id=str(application.id),
-        details={"plan_code": application.plan_code, "profession": application.profession},
-    ))
-    db.session.commit()
-    return jsonify({"message": message, "application": application.to_dict()}), 200

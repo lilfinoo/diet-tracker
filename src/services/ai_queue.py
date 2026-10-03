@@ -69,11 +69,6 @@ def _handler_for(operation):
         create_guided_workout_plan,
         suggest_diet_day,
     )
-    from src.routes.professional_routes import (
-        generate_professional_diet,
-        generate_professional_workout,
-        suggest_professional_diet_day,
-    )
     from src.routes.profile_routes import get_ai_macros
 
     return {
@@ -82,9 +77,6 @@ def _handler_for(operation):
         "diet_plan": create_guided_diet_plan,
         "workout_plan": create_guided_workout_plan,
         "diet_day": suggest_diet_day,
-        "professional_diet_plan": generate_professional_diet,
-        "professional_workout_plan": generate_professional_workout,
-        "professional_diet_day": suggest_professional_diet_day,
     }.get(operation)
 
 
@@ -93,26 +85,22 @@ def _existing_result(task):
         message = ChatMessage.query.filter_by(ai_task_id=task.id).first()
         if message:
             return {"response": message.response, "action": None}, 200
-    elif task.operation in {"diet_plan", "professional_diet_plan"}:
+    elif task.operation == "diet_plan":
         plan = DietPlan.query.filter_by(ai_task_id=task.id).first()
         if plan:
-            if task.operation == "diet_plan":
-                return {
-                    "message": "Plano alimentar criado.",
-                    "plan_id": plan.id,
-                    "plan": plan.to_dict_full(),
-                }, 201
-            return {"message": "Dieta gerada como rascunho.", "plan": plan.to_dict_full()}, 201
-    elif task.operation in {"workout_plan", "professional_workout_plan"}:
+            return {
+                "message": "Plano alimentar criado.",
+                "plan_id": plan.id,
+                "plan": plan.to_dict_full(),
+            }, 201
+    elif task.operation == "workout_plan":
         plan = WorkoutPlan.query.filter_by(ai_task_id=task.id).first()
         if plan:
-            if task.operation == "workout_plan":
-                return {
-                    "message": "Plano de treino criado.",
-                    "plan_id": plan.id,
-                    "plan": plan.to_dict_full(),
-                }, 201
-            return {"message": "Treino gerado como rascunho.", "plan": plan.to_dict_full()}, 201
+            return {
+                "message": "Plano de treino criado.",
+                "plan_id": plan.id,
+                "plan": plan.to_dict_full(),
+            }, 201
     return None
 
 
@@ -159,18 +147,6 @@ def execute_ai_job(self, task_id):
         if not user.has_entitlement("premium"):
             _fail(task, "O plano Premium não está mais ativo.", 403)
             return
-        if task.operation.startswith("professional_") and not user.has_entitlement("professional"):
-            _fail(task, "A assinatura profissional não está mais ativa.", 403)
-            return
-        required_scope = {
-            "professional_workout_plan": "workout",
-            "professional_diet_plan": "diet",
-            "professional_diet_day": "diet",
-        }.get(task.operation)
-        if required_scope and not user.has_entitlement(required_scope):
-            _fail(task, "Seu plano profissional não inclui mais este recurso.", 403)
-            return
-
         handler = _handler_for(task.operation)
         if handler is None:
             _fail(task, "Tipo de tarefa de IA inválido.", 422)

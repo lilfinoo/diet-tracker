@@ -79,7 +79,7 @@ def create_checkout(plan, payment_method, public_base_url, external_reference):
         },
         "items": [{
             "name": str(plan["name"])[:30],
-            "description": "Assinatura mensal Diet Tracker",
+            "description": "Assinatura Diet Tracker",
             "quantity": 1,
             "value": float(plan["price_brl"]),
             "imageBase64": transparent_png,
@@ -87,8 +87,8 @@ def create_checkout(plan, payment_method, public_base_url, external_reference):
     }
     if payment_method == "credit_card":
         payload["subscription"] = {
-            "cycle": "MONTHLY",
-            "nextDueDate": today.isoformat(),
+            "cycle": plan.get("cycle", "MONTHLY"),
+            "nextDueDate": (today + timedelta(days=int(plan.get("trial_days", 0)))).isoformat(),
         }
     data = _request(
         "POST",
