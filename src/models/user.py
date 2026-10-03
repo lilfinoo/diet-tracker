@@ -9,8 +9,6 @@ db = SQLAlchemy()
 
 class User(db.Model):
     __table_args__ = (
-        db.CheckConstraint(
-        ),
         db.CheckConstraint("ai_trial_uses >= 0", name="ck_user_ai_trial_uses_nonnegative"),
     )
 
