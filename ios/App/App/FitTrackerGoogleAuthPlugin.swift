@@ -144,6 +144,7 @@ final class FitTrackerBridgeViewController: CAPBridgeViewController {
     override public func capacitorDidLoad() {
         bridge?.registerPluginInstance(FitTrackerGoogleAuthPlugin())
         bridge?.registerPluginInstance(FitTrackerSharePlugin())
+        bridge?.registerPluginInstance(FitTrackerBillingPlugin())
         bridge?.registerPluginInstance(FitTrackerConsolePlugin())
         bridge?.registerPluginInstance(FitTrackerRefreshPlugin())
     }

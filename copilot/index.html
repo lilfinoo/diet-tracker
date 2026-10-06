@@ -564,6 +564,7 @@
                 <label class="field-group"><span class="field-label">Digite seu nome de usuário</span><input id="deleteAccountUsername" autocomplete="off"></label>
                 <label id="deleteAccountPasswordGroup" class="field-group"><span class="field-label">Senha atual</span><input type="password" id="deleteAccountPassword" autocomplete="current-password"></label>
                 <p id="deleteGoogleNotice" class="auth-helper hidden">Sua entrada recente com Google será usada para confirmar esta ação.</p>
+                <p id="deleteAppleSubscriptionNotice" class="hidden">Excluir sua conta não cancela uma assinatura da Apple. <button type="button" class="text-button" onclick="manageNativeSubscription()">Gerencie ou cancele sua assinatura na Apple</button> antes de excluir.</p>
                 <label class="legal-check"><input type="checkbox" id="deleteAccountConfirm"><span>Entendo que minha conta e meus dados serão excluídos definitivamente.</span></label>
                 <div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeAppModal(document.getElementById('deleteAccountModal'))">Cancelar</button><button type="button" class="btn-danger" onclick="deleteAccount()">Excluir definitivamente</button></div>
             </div>
@@ -946,7 +947,8 @@
     <script defer src="/js/analytics.js?v=20260923-acquisition"></script>
     <script defer src="/js/body-evolution.js?v=20260909"></script>
     <script defer src="/js/exercise-media.js?v=20260828-achievements"></script>
-    <script defer src="/script.js?v=20261006-app-store-workoutx-v2"></script>
+    <script defer src="/js/native-billing.js?v=20261006-revenuecat"></script>
+    <script defer src="/script.js?v=20261006-revenuecat-v1"></script>
     <script defer src="/js/diet-entry.js?v=20260926-diet-transparent"></script>
     <script defer src="/js/diet-share.js?v=20260926-diet-transparent"></script>
     <script defer src="/js/workout-share.js?v=20260926-home-share"></script>

@@ -8,6 +8,7 @@
     "@capacitor/cli": "8.5.1",
     "@capacitor/core": "8.5.1",
     "@capacitor/ios": "8.5.1",
+    "@revenuecat/purchases-capacitor": "13.7.0",
     "lucide": "1.42.0"
   }
 }

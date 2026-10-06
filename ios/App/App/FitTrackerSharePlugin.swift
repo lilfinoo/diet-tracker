@@ -51,3 +51,19 @@ public class FitTrackerSharePlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 }
+
+@objc(FitTrackerBilling)
+public class FitTrackerBillingPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "FitTrackerBilling"
+    public let jsName = "FitTrackerBilling"
+    public let pluginMethods: [CAPPluginMethod] = [CAPPluginMethod(name: "manageSubscriptions", returnType: CAPPluginReturnPromise)]
+
+    @objc public func manageSubscriptions(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            UIApplication.shared.open(URL(string: "https://apps.apple.com/account/subscriptions")!) { opened in
+                if opened { call.resolve() }
+                else { call.reject("Não foi possível abrir as assinaturas da Apple.") }
+            }
+        }
+    }
+}

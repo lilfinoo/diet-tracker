@@ -1,10 +1,12 @@
 from datetime import datetime, timedelta
 import hmac
+from threading import RLock
+from uuid import UUID
 
 from flask import Blueprint, current_app, g, jsonify, request
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from src.models.user import AdminActionAudit, BillingCheckout, BillingEvent, Subscription, db
+from src.models.user import AdminActionAudit, BillingCheckout, BillingEvent, Subscription, User, db
 from src.routes.common import json_body, login_required
 from src.services.asaas import (
     AsaasError,
@@ -15,9 +17,89 @@ from src.services.asaas import (
     period_end_from_subscription,
 )
 from src.services.analytics import record_event
+from src.services.revenuecat import ENTITLEMENT_ID, RevenueCatError, sync_subscription
 
 
 billing_bp = Blueprint("billing", __name__)
+REVENUECAT_SYNC_LOCK = RLock()
+
+
+@billing_bp.route("/billing/revenuecat/config", methods=["GET"])
+def revenuecat_config():
+    key = current_app.config.get("REVENUECAT_IOS_API_KEY")
+    if not isinstance(key, str) or not key.startswith("appl_"):
+        key = None
+    return jsonify({
+        "configured": bool(key and current_app.config.get("REVENUECAT_SECRET_API_KEY")),
+        "public_api_key": key,
+        "entitlement_id": ENTITLEMENT_ID,
+    })
+
+
+@billing_bp.route("/billing/revenuecat/sync", methods=["POST"])
+@login_required
+def revenuecat_sync():
+    try:
+        # Production uses one threaded worker; serialize fetch through commit so
+        # an older concurrent snapshot cannot overwrite a newer purchase/refund.
+        with REVENUECAT_SYNC_LOCK:
+            db.session.expire_all()
+            sync_subscription(g.user)
+            db.session.commit()
+    except RevenueCatError as error:
+        db.session.rollback()
+        return jsonify({"error": str(error)}), error.status_code
+    except SQLAlchemyError:
+        db.session.rollback()
+        return jsonify({"error": "Não foi possível atualizar sua assinatura."}), 503
+    subscription = g.user.active_subscription()
+    return jsonify({"user": g.user.session_dict(),
+                    "subscription": subscription.public_dict() if subscription else None,
+                    "is_premium": g.user.has_entitlement("premium")})
+
+
+@billing_bp.route("/billing/revenuecat/webhook", methods=["POST"])
+def revenuecat_webhook():
+    expected = current_app.config.get("REVENUECAT_WEBHOOK_AUTHORIZATION")
+    if not expected:
+        return jsonify({"error": "Webhook não configurado."}), 503
+    if not hmac.compare_digest(str(expected).encode(), request.headers.get("Authorization", "").encode()):
+        return jsonify({"error": "Não autorizado."}), 401
+    payload = request.get_json(silent=True)
+    event = payload.get("event") if isinstance(payload, dict) else None
+    if not isinstance(event, dict):
+        return jsonify({"error": "Evento inválido."}), 400
+    # Fetch canonical state rather than applying potentially duplicated/out-of-order events.
+    identifiers = [event.get("app_user_id")]
+    for field in ("aliases", "transferred_from", "transferred_to"):
+        values = event.get(field)
+        if isinstance(values, list):
+            identifiers.extend(values)
+    user_ids = set()
+    for identifier in identifiers:
+        try:
+            user_ids.add(UUID(str(identifier)))
+        except ValueError:
+            continue
+    if len(user_ids) > 20:
+        return jsonify({"error": "Evento inválido."}), 400
+    try:
+        with REVENUECAT_SYNC_LOCK:
+            db.session.expire_all()
+            for user_id in user_ids:
+                user = db.session.get(User, user_id)
+                if user:
+                    sync_subscription(user)
+            db.session.commit()
+    except RevenueCatError as error:
+        db.session.rollback()
+        return jsonify({"error": str(error)}), error.status_code
+    except SQLAlchemyError:
+        db.session.rollback()
+        return jsonify({"error": "Não foi possível atualizar a assinatura."}), 503
+    return jsonify({"received": True})
+
+
 PIX_RENEWAL_WINDOW_DAYS = 7
 PREMIUM_PLAN_CODES = {"premium_student", "premium_student_annual"}
 PREMIUM_FEATURES = ["IA sem limite de teste", "Dietas personalizadas", "Treinos personalizados"]

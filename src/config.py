@@ -38,6 +38,11 @@ class Config:
     )
     ASAAS_WEBHOOK_TOKEN = os.getenv("ASAAS_WEBHOOK_TOKEN")
     BILLING_ENABLED = os.getenv("BILLING_ENABLED", "false").lower() == "true"
+    REVENUECAT_IOS_API_KEY = os.getenv("REVENUECAT_IOS_API_KEY")
+    REVENUECAT_SECRET_API_KEY = os.getenv("REVENUECAT_SECRET_API_KEY")
+    REVENUECAT_WEBHOOK_AUTHORIZATION = os.getenv("REVENUECAT_WEBHOOK_AUTHORIZATION")
+    REVENUECAT_ALLOW_SANDBOX = os.getenv("REVENUECAT_ALLOW_SANDBOX", "false").lower() == "true"
+    REVENUECAT_SANDBOX_USER_IDS = os.getenv("REVENUECAT_SANDBOX_USER_IDS", "")
     PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL")
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
     GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
@@ -101,6 +106,11 @@ class TestConfig(Config):
     GEMINI_API_KEY = None
     GOOGLE_CLIENT_ID = "test-google-client-id"
     ASAAS_API_KEY = None
+    REVENUECAT_IOS_API_KEY = None
+    REVENUECAT_SECRET_API_KEY = None
+    REVENUECAT_WEBHOOK_AUTHORIZATION = None
+    REVENUECAT_ALLOW_SANDBOX = False
+    REVENUECAT_SANDBOX_USER_IDS = ""
     ASAAS_ENV = "sandbox"
     ASAAS_API_BASE_URL = "https://api-sandbox.asaas.com/v3"
     ASAAS_WEBHOOK_TOKEN = "test-webhook-token-0123456789abcdef"

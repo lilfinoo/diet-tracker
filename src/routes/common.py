@@ -35,7 +35,7 @@ def _csrf_protect_request():
         return None
     if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
         return None
-    if request.endpoint == "billing.asaas_webhook":
+    if request.endpoint in {"billing.asaas_webhook", "billing.revenuecat_webhook"}:
         return None
     if request.endpoint in {"auth.login", "auth.register", "auth.google_auth"} and not session.get("user_id"):
         return None

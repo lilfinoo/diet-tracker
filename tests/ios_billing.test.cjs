@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../copilot/script.js'), 'utf8');
-const notice = 'Assinaturas pelo iPhone estarão disponíveis após a integração com a App Store';
+const notice = 'Compras e assinaturas são gerenciadas pela App Store.';
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function harness(platform = 'ios', subscription = null) {
@@ -20,9 +20,12 @@ function harness(platform = 'ios', subscription = null) {
         ],
     };
     const context = {
-        API_BASE: 'https://api.example/api', currentUser: { plan_code: 'free', is_premium: Boolean(subscription) },
-        window: { Capacitor: { getPlatform: () => platform }, location: { href: 'capacitor://localhost' }, confirm: () => true },
-        document: { querySelectorAll: () => options },
+        API_BASE: 'https://api.example/api', currentUser: { id: 'user-1', plan_code: 'free', is_premium: Boolean(subscription) },
+        window: { Capacitor: { getPlatform: () => platform }, location: { href: 'capacitor://localhost' }, confirm: () => true, NativeBilling: {
+            offerings: async () => ({ packages: { premium_student: { product: { priceString: 'US$ 5.99' } }, premium_student_annual: { product: { priceString: 'US$ 35.99' } } }, eligibility: {} }),
+            hasSevenDayTrial: () => false, transaction: async () => ({ is_premium: true }), cancelled: () => false, manage: async () => {}
+        } },
+        document: { addEventListener() {}, querySelectorAll: () => options },
         getElement(id) {
             if (!elements.has(id)) elements.set(id, { id, innerHTML: '', textContent: '' });
             return elements.get(id);
@@ -52,28 +55,28 @@ test('iOS shows plan features without Asaas prices, discounts or checkout action
     assert.match(html, /Premium mensal/);
     assert.match(html, /Planos com IA/);
     assert.match(html, /Grátis/);
-    assert.match(html, /disabled>Indisponível no iPhone/);
+    assert.match(html, /purchaseNativePlan/);
+    assert.match(html, /US\$ 5.99/);
     assert.doesNotMatch(html, /R\$|desconto|startBillingCheckout|Escolher pagamento/);
-    assert.equal(elements.get('billingNotice').textContent, notice);
+    assert.match(elements.get('billingNotice').innerHTML, /Restaurar compras/);
+    assert.match(elements.get('billingNotice').innerHTML, /Termos de uso/);
 });
 
-test('iOS blocks direct and stale checkout calls before authentication, UI changes or network', async () => {
+test('iOS directs purchase to native SDK and blocks stale external checkout', async () => {
     const h = harness();
+    let purchases = 0;
+    h.context.window.NativeBilling.transaction = async () => { purchases++; return { is_premium: true }; };
     const button = { disabled: false };
-    h.context.startBillingCheckout('premium_student', button);
-    assert.equal(h.authenticated(), 0);
+    await h.context.startBillingCheckout('premium_student', button);
+    assert.equal(purchases, 1);
+    assert.equal(h.authenticated(), 1);
     assert.equal(vm.runInContext('pendingBillingCheckout', h.context), null);
     h.context.staleCheckout = { planCode: 'premium_student', button };
     vm.runInContext('pendingBillingCheckout = staleCheckout', h.context);
     for (const method of ['credit_card', 'pix']) await h.context.confirmBillingCheckout(method);
     assert.equal(button.disabled, false);
-    assert.ok(h.options.every(option => !option.disabled));
-    assert.equal(h.elements.size, 0);
-    assert.equal(h.opened.length, 0);
-    assert.equal(h.calls.length, 0);
+    assert.ok(h.calls.every(call => !call.url.endsWith('/billing/checkout')));
     assert.equal(h.context.window.location.href, 'capacitor://localhost');
-    assert.equal(h.toasts.length, 3);
-    assert.ok(h.toasts.every(toast => toast.message === notice));
 });
 
 test('web retains Asaas prices and both payment methods with checkout redirect', async () => {
@@ -122,4 +125,12 @@ test('iOS retains cancellation of an existing Asaas subscription', async () => {
     assert.equal(cancellation.init.credentials, 'include');
     assert.ok(h.toasts.some(toast => toast.message === 'Assinatura cancelada.'));
     assert.ok(h.calls.every(call => !call.url.endsWith('/billing/checkout')));
+});
+
+test('Apple subscription management never cancels through Asaas', async () => {
+    const h = harness('ios', { provider: 'revenuecat', status: 'active', plan_code: 'premium_student' });
+    h.context.renderSubscriptionManagement(true);
+    await tick();
+    assert.match(h.elements.get('subscriptionManage').innerHTML, /manageNativeSubscription/);
+    assert.doesNotMatch(h.elements.get('subscriptionManage').innerHTML, /cancelMySubscription/);
 });

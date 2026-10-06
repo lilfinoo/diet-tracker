@@ -2110,6 +2110,7 @@ function openDeleteAccount() {
     getElement('deleteAccountConfirm').checked = false;
     getElement('deleteAccountPasswordGroup')?.classList.toggle('hidden', !currentUser.has_password);
     getElement('deleteGoogleNotice')?.classList.toggle('hidden', Boolean(currentUser.has_password));
+    getElement('deleteAppleSubscriptionNotice')?.classList.toggle('hidden', window.Capacitor?.getPlatform?.() !== 'ios');
     openAppModal(getElement('deleteAccountModal'));
 }
 
@@ -2274,7 +2275,72 @@ window.addEventListener('popstate', () => {
     if (view) showTab(view, { history: 'none' });
 });
 
-const IOS_BILLING_NOTICE = 'Assinaturas pelo iPhone estarão disponíveis após a integração com a App Store';
+const IOS_BILLING_NOTICE = 'Compras e assinaturas são gerenciadas pela App Store.';
+let nativePlansRequest = 0;
+
+async function openNativePlans(data, grid) {
+    const request = ++nativePlansRequest;
+    const owner = currentUser?.id;
+    let catalog = null, error = null;
+    if (owner) {
+        try {
+            const refreshed = await window.NativeBilling.refresh?.(API_BASE, () => currentUser);
+            if (refreshed && currentUser?.id === owner) await checkAuthStatus({ force: true });
+        } catch (_) { /* As ofertas continuam disponíveis para tentar restaurar compras. */ }
+        try { catalog = await window.NativeBilling.offerings(API_BASE, () => currentUser); }
+        catch (failure) { error = failure.message; }
+    }
+    if (request !== nativePlansRequest || currentUser?.id !== owner) return;
+    grid.innerHTML = data.plans.map(plan => {
+        const item = catalog?.packages[plan.code];
+        const free = plan.price_brl === 0;
+        const annual = plan.code === 'premium_student_annual';
+        const trial = window.NativeBilling?.hasSevenDayTrial(item, catalog?.eligibility);
+        const active = currentUser?.is_premium && !free;
+        const price = item ? `${escapeHtml(item.product.priceString)}${annual ? '/ano' : '/mês'}` : '';
+        return `<article class="pricing-card"><h4>${escapeHtml(plan.name)}</h4>
+            ${free ? '<p class="pricing-card__price"><strong>Grátis</strong></p>' : price ? `<p class="pricing-card__price"><strong>${price}</strong></p>` : ''}
+            ${trial ? `<p>7 dias grátis; depois ${price}. Renovação automática.</p>` : ''}
+            <ul>${(plan.features || []).map(feature => `<li><i class="fas fa-check" aria-hidden="true"></i>${escapeHtml(feature)}</li>`).join('')}</ul>
+            ${free ? '' : active ? '<button type="button" class="btn-primary" disabled>Premium ativo</button>' : `<button type="button" class="btn-primary" onclick="purchaseNativePlan('${escapeHtml(plan.code)}', this)" ${owner && !item ? 'disabled' : ''}>${!owner ? 'Entrar para assinar' : trial ? 'Começar 7 dias grátis' : 'Assinar'}</button>`}
+        </article>`;
+    }).join('');
+    const base = API_BASE.replace(/\/api\/?$/, '');
+    getElement('billingNotice').innerHTML = `${error ? escapeHtml(error) + '<br>' : ''}A cobrança será feita pela sua conta Apple. A assinatura renova automaticamente até o cancelamento. Cancele nas assinaturas da Apple antes da renovação ou do fim do teste gratuito.<br>
+        <button type="button" class="btn-secondary" onclick="restoreNativePurchases(this)">Restaurar compras</button>
+        <button type="button" class="btn-secondary" onclick="manageNativeSubscription()">Gerenciar assinatura na Apple</button><br>
+        <a href="${escapeHtml(base)}/terms.html" target="_blank" rel="noopener">Termos de uso</a> · <a href="${escapeHtml(base)}/privacy.html" target="_blank" rel="noopener">Privacidade</a>`;
+    renderSubscriptionManagement(false);
+}
+
+async function nativeBillingTransaction(kind, code, button) {
+    if (!requireAuth('Entre na sua conta para comprar ou restaurar o Premium.', { mode: 'login' })) return;
+    if (button) button.disabled = true;
+    try {
+        const result = await window.NativeBilling.transaction(kind, code, API_BASE, () => currentUser);
+        await checkAuthStatus({ force: true });
+        showToast(result.is_premium ? 'Premium confirmado na sua conta.' : 'Nenhuma assinatura Apple ativa foi confirmada. Compras de teste exigem uma conta autorizada. Se acabou de comprar, tente Restaurar compras novamente.', result.is_premium ? 'success' : 'info');
+        await openPlansModal();
+    } catch (error) {
+        if (!window.NativeBilling?.cancelled(error)) showToast(error.message || 'Não foi possível concluir. Tente Restaurar compras.', 'error');
+    } finally { if (button) button.disabled = false; }
+}
+
+function purchaseNativePlan(code, button) { return nativeBillingTransaction('purchase', code, button); }
+function restoreNativePurchases(button) { return nativeBillingTransaction('restore', null, button); }
+document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible' || !currentUser?.id || !window.NativeBilling?.native()) return;
+    try {
+        const result = await window.NativeBilling.refresh(API_BASE, () => currentUser);
+        if (result) await checkAuthStatus({ force: true });
+    } catch (_) { /* Mantém a sessão atual e permite restauração manual. */ }
+});
+
+async function manageNativeSubscription() {
+    try { await window.NativeBilling.manage(); }
+    catch (error) { showToast(error.message, 'error'); }
+}
+
 
 async function openPlansModal() {
     const isIos = window.Capacitor?.getPlatform?.() === 'ios';
@@ -2285,6 +2351,7 @@ async function openPlansModal() {
         const plansResponse = await fetch(`${API_BASE}/plans`);
         const data = await plansResponse.json();
         if (!plansResponse.ok) throw new Error(data.error || 'Não foi possível carregar os planos.');
+        if (isIos) { await openNativePlans(data, grid); return; }
         const currentPlan = currentUser?.plan_code || 'free';
         grid.innerHTML = data.plans.map(plan => {
             const isCurrent = plan.code === currentPlan;
@@ -2325,8 +2392,7 @@ let pendingBillingCheckout = null;
 
 function startBillingCheckout(planCode, button) {
     if (window.Capacitor?.getPlatform?.() === 'ios') {
-        showToast(IOS_BILLING_NOTICE, 'info');
-        return;
+        return purchaseNativePlan(planCode, button);
     }
     if (!requireAuth('Crie sua conta para assinar e desbloquear o plano Premium.', { mode: 'register' })) return;
     const annual = planCode === 'premium_student_annual';
@@ -2384,7 +2450,9 @@ function renderSubscriptionManagement(providerConfigured) {
             const until = subscription.current_period_end ? new Date(subscription.current_period_end).toLocaleDateString('pt-BR') : null;
             const isPix = subscription.provider === 'asaas_pix';
             const renewalAvailable = data.pix_renewal_available_at && new Date(data.pix_renewal_available_at) <= new Date();
-            const managementAction = isPix
+            const managementAction = subscription.provider === 'revenuecat' && isIos
+                ? '<button type="button" class="btn-secondary" onclick="manageNativeSubscription()">Gerenciar na Apple</button>'
+                : isPix
                 ? (!isIos && renewalAvailable ? `<button type="button" class="btn-secondary" onclick="startBillingCheckout('${escapeHtml(subscription.plan_code)}', this)">Renovar por PIX</button>` : '')
                 : (subscription.provider === 'asaas' && providerConfigured ? '<button type="button" class="btn-secondary" onclick="cancelMySubscription()">Cancelar assinatura</button>' : '');
             container.innerHTML = `
@@ -2591,6 +2659,7 @@ function finalizeModalClose(modal) {
 function closeAppModal(modal, options = {}) {
     if (!modal) return;
     if (modal.id === "dietModal" && window.DietEntryFlow?.canClose() === false) return false;
+    if (modal.id === 'plansModal') nativePlansRequest += 1;
     if (modal.id === 'loginScreen' && !currentUser) pendingAuthIntent = null;
     const fluid = typeof Fluid !== "undefined" ? Fluid : null;
     const content = modal.querySelector(".modal-content, .diet-daily-actions-sheet");

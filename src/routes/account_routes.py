@@ -68,6 +68,9 @@ def update_consents():
 
 def _subscription_block(user):
     for subscription in sorted(user.subscriptions, key=lambda item: item.created_at or datetime.min, reverse=True):
+        # Apple purchases are managed by Apple; account deletion cannot cancel them.
+        if subscription.provider == "revenuecat":
+            continue
         local_active = subscription.status in {"active", "trialing"}
         if subscription.provider == "asaas" and subscription.external_subscription_id:
             if current_app.config.get("ASAAS_API_KEY"):
