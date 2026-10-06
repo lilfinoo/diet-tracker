@@ -2,7 +2,7 @@
 
 Atualizado em 6 de outubro de 2026. Objetivo confirmado: publicar na App Store com Premium pago. O usuário tem iPhone e informou ter pago o Apple Developer Program. Confirmar ativação da equipe no App Store Connect/Xcode.
 
-**Situação: ainda não enviar à revisão.** A base iOS existe, mas compra/restauração Apple, login Apple, documentos finais e validação no aparelho estão pendentes.
+**Situação: ainda não enviar à revisão.** A compra/restauração Apple e a validação RevenueCat foram implementadas no código. Login Apple, documentos finais, build assinado e validação de compras no aparelho continuam pendentes. Veja `docs/REVENUECAT_SETUP.md`.
 
 ## Caminho escolhido
 
@@ -10,7 +10,7 @@ Manter Capacitor e a interface empacotada no iPhone, Flask no Render e PostgreSQ
 
 A API continuará online. Manter apenas as páginas públicas de privacidade, termos e suporte necessárias ao lançamento. Não é preciso investir em um novo site institucional.
 
-Para assinaturas, a recomendação é usar compras Apple com RevenueCat para validar acesso, renovação e restauração. O SDK oficial tem integração Capacitor; a integração ainda não foi implementada. [Documentação RevenueCat](https://www.revenuecat.com/docs/getting-started/installation/capacitor).
+Para assinaturas, a recomendação é usar compras Apple com RevenueCat para validar acesso, renovação e restauração. O SDK oficial Capacitor foi integrado, com compra/restauração e validação pelo servidor; falta validar o fluxo no iPhone. [Documentação RevenueCat](https://www.revenuecat.com/docs/getting-started/installation/capacitor).
 
 ## Ordem de execução e critérios de conclusão
 
@@ -28,7 +28,7 @@ As etapas 3–5 podem avançar enquanto a Apple ativa a equipe. A inscrição fo
 
 ## Pendências da versão paga
 
-- Compras digitais: substituir PIX/cartão Asaas no iOS por compras Apple. O código atual foi protegido contra checkout externo, mas a venda Apple ainda precisa ser implementada. A regra geral para desbloqueio digital é IAP; esta rota evita depender de exceções regionais. [Apple, regra 3.1.1](https://developer.apple.com/app-store/review/guidelines/#in-app-purchase).
+- Compras digitais: substituir PIX/cartão Asaas no iOS por compras Apple. O código usa RevenueCat no iOS para compra/restauração; a venda Apple ainda precisa ser validada no aparelho. A regra geral para desbloqueio digital é IAP; esta rota evita depender de exceções regionais. [Apple, regra 3.1.1](https://developer.apple.com/app-store/review/guidelines/#in-app-purchase).
 - Preços: exibir os valores localizados retornados pela App Store, com período e renovação. Os R$ 20/mês e R$ 120/ano atuais são preços do Asaas e não configuram automaticamente a loja.
 - Entitlement: usar o UUID da conta Fit Tracker no RevenueCat, manter segredos no servidor e liberar Premium somente com confirmação do provedor. Tratar notificações autenticadas, duplicadas e fora de ordem. Cliente sozinho não concede acesso.
 - Restauração: ação visível para recuperar compras; testar conta/aparelho diferentes, logout e troca de conta. Definir a regra de vínculo para impedir transferência indevida ou duas assinaturas simultâneas.
