@@ -701,7 +701,7 @@ def _write_gif_to_local_cache(cache_path, provider_id, gif):
 
 
 def _gif_cache_path(provider_id):
-    return Path(current_app.config["WORKOUTX_CACHE_DIR"]) / "basic-v1" / f"workoutx-{provider_id}.gif"
+    return Path(current_app.config["WORKOUTX_CACHE_DIR"]) / "basic-v2" / f"workoutx-{provider_id}.gif"
 
 
 def cache_local_gif(provider_id, gif):

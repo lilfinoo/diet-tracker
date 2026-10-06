@@ -2925,7 +2925,7 @@ async function deleteDietPlan(id) {
 function exerciseImagePath(_exerciseName, catalogKey) {
     const key = String(catalogKey || "");
     const path = document.documentElement.dataset.nativePlatform === "ios" ? "/public/exercise-media/" : "/exercise-media/";
-    return key ? `${API_BASE}${path}${encodeURIComponent(key)}?v=workoutx-basic-20261006` : "";
+    return key ? `${API_BASE}${path}${encodeURIComponent(key)}?v=workoutx-basic-20261006-2` : "";
 }
 
 function exerciseFallbackImagePath(catalogKey) {

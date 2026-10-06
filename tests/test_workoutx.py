@@ -178,6 +178,43 @@ def test_basic_migration_refreshes_provider_cache_and_preserves_manual_gifs(app,
     assert calls == ["https://api.workoutxapp.com/v1/gifs/0201.gif"]
 
 
+def test_basic_import_migration_refreshes_free_imports_and_retains_new_downloads(app, tmp_path, monkeypatch):
+    import importlib.util
+    from pathlib import Path
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    migration_path = Path(__file__).parents[1] / "migrations/versions/d7b3f9a5c021_refresh_imported_workoutx_gifs.py"
+    spec = importlib.util.spec_from_file_location("refresh_imported_workoutx", migration_path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    calls = []
+    monkeypatch.setattr(workoutx, "_request", lambda url, **_kwargs: calls.append(url) or b"GIF89abasic")
+    previous_cache = tmp_path / "basic-v1"
+    previous_cache.mkdir()
+    (previous_cache / "workoutx-0201.gif").write_bytes(b"GIF89afree-watermark")
+
+    with app.app_context():
+        app.config["WORKOUTX_CACHE_DIR"] = tmp_path
+        db.session.add_all([
+            WorkoutXGif(provider_id="0201", content=b"GIF89afree-watermark"),
+            WorkoutXGif(provider_id="0289", content=b"GIF89afresh-basic"),
+            AdminActionAudit(action="exercise_media.cached", resource_type="exercise_media", resource_id="0201"),
+        ])
+        db.session.commit()
+        with db.engine.begin() as connection:
+            monkeypatch.setattr(migration, "op", Operations(MigrationContext.configure(connection)))
+            migration.upgrade()
+        db.session.expire_all()
+        assert db.session.get(WorkoutXGif, "0201") is None
+        assert workoutx.get_cached_gif("workoutx:0201", "0201").read_bytes() == b"GIF89abasic"
+        assert workoutx.get_stored_gif("0289").read_bytes() == b"GIF89afresh-basic"
+        assert AdminActionAudit.query.count() == 1
+
+    assert calls == ["https://api.workoutxapp.com/v1/gifs/0201.gif"]
+
+
 def test_exercise_media_serves_a_database_gif_without_r2_or_workoutx(app, client, tmp_path, monkeypatch):
     monkeypatch.setattr(workoutx, "_request", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("WorkoutX called")))
     monkeypatch.setattr("src.services.media_storage._client", lambda: (_ for _ in ()).throw(AssertionError("R2 called")))

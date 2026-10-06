@@ -18,7 +18,7 @@ for (const platform of ['web', 'ios']) {
         vm.runInContext(source.slice(start, end), context);
         const route = platform === 'ios' ? '/public/exercise-media/' : '/exercise-media/';
         assert.equal(context.exerciseImagePath('Supino', 'workoutx:0289'),
-            `https://fit.test/api${route}workoutx%3A0289?v=workoutx-basic-20261006`);
+            `https://fit.test/api${route}workoutx%3A0289?v=workoutx-basic-20261006-2`);
         assert.equal(context.exerciseImagePath('Sem imagem', ''), '');
     });
 }

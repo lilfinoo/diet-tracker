@@ -58,7 +58,7 @@ O Render gratuito suspende o serviço após 15 minutos sem tráfego. Planejar co
 
 ## Contas e orçamento inicial
 
-1. [Apple Developer — inscrição](https://developer.apple.com/programs/enroll/): usar a conta Apple/iCloud, ativar autenticação de dois fatores e inscrever-se. US$ 99/ano; preço local aparece na contratação. Pessoa física aparece com nome legal como vendedor; organização exige verificação própria.
+1. [Apple Developer — inscrição](https://developer.apple.com/programs/enroll/): pagamento já informado como concluído; confirmar ativação e acesso usando a conta Apple/iCloud. US$ 99/ano; preço local aparece na contratação. Pessoa física aparece com nome legal como vendedor; organização exige verificação própria.
 2. [App Store Connect](https://appstoreconnect.apple.com/): após aprovação, concluir os contratos de apps pagos e os dados bancários/fiscais para receber pelas assinaturas.
 3. [RevenueCat](https://app.revenuecat.com/): criar projeto Fit Tracker e app Apple com o bundle correto. Começa gratuito até US$ 2.500 em receita mensal rastreada; acima, o plano divulgado cobra 1% da receita rastreada. Essa cobrança é adicional à comissão da Apple. [Preços](https://www.revenuecat.com/pricing).
 4. [Apple Small Business Program](https://developer.apple.com/app-store/small-business-program/): solicitar participação se elegível; comissão reduzida de 15% depende de inscrição e aprovação, não é automática.
@@ -93,9 +93,9 @@ Não publicar esta compilação como versão paga enquanto os critérios de comp
 
 - O titular informou ter pago o plano Basic. Uma consulta direta com a chave local retornou HTTP 200, `X-WorkoutX-Plan: basic` e um GIF válido de 360×360 sem marca d’água na prévia inspecionada. A chave não foi exposta.
 - Causa confirmada: GIFs Free persistiam em `workoutx_gif`, no diretório local e por um ano no navegador. Trocar o plano não invalidava essas camadas.
-- Migração `d6a2f8c4b910`: remove apenas o cache baixado do provedor; preserva IDs importados manualmente pelo administrador conforme auditoria. Não altera contas, treinos ou catálogo.
-- Cache local passa a usar `basic-v1`; cliente solicita uma URL nova no site e no iOS. Rotas passam a revalidar via ETag, sem manter uma imagem por um ano. Upload administrativo substitui também o arquivo local, sob o mesmo bloqueio usado na restauração/download.
+- Migrações `d6a2f8c4b910` e `d7b3f9a5c021`: renovam o cache baixado e os imports administrativos antigos. A validação de produção confirmou marca d’água também nesses imports. O histórico de auditoria é preservado; contas, treinos e catálogo não são alterados.
+- Cache local passa a usar `basic-v2`; cliente solicita uma URL nova no site e no iOS. Rotas passam a revalidar via ETag, sem manter uma imagem por um ano. Upload administrativo substitui também o arquivo local, sob o mesmo bloqueio usado na restauração/download.
 - Downloads continuam sob demanda, com cache persistente, limite de concorrência e tratamento de 429 existentes. Não executar prefetch de todo o catálogo para esta limpeza.
 - Próxima etapa do lançamento pago: confirmar acesso ao [App Store Connect](https://appstoreconnect.apple.com/), criar o app `ai.fittracker.app`, concluir contratos bancários/fiscais e cadastrar assinaturas mensal/anual. Depois integrar RevenueCat, compra/restauração Apple e login Apple antes do TestFlight.
 
-Validação da correção: 33 testes Python de WorkoutX/privacidade e sete testes JavaScript de cobrança iOS/URL de GIF passaram; lint dos arquivos alterados e verificação de sintaxe passaram. Todas as migrações foram aplicadas do zero até `d6a2f8c4b910` em SQLite temporário. Validar a imagem pública e o health check após o deploy no Render.
+Validação da correção: 34 testes Python de WorkoutX/privacidade e sete testes JavaScript de cobrança iOS/URL de GIF passaram; lint dos arquivos alterados e verificação de sintaxe passaram. Todas as migrações foram aplicadas do zero até `d7b3f9a5c021` em SQLite temporário. Validar a imagem pública e o health check após o deploy no Render.
