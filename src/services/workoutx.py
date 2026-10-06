@@ -20,7 +20,7 @@ from src.services.workoutx_classification import movement_pattern
 
 BASE_URL = "https://api.workoutxapp.com/v1"
 SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
-GIF_DOWNLOAD_LOCK = threading.Lock()
+GIF_DOWNLOAD_LOCK = threading.RLock()
 LAST_GIF_DOWNLOAD_AT = 0.0
 GIF_DOWNLOAD_BLOCKED_UNTIL = 0.0
 
@@ -700,18 +700,30 @@ def _write_gif_to_local_cache(cache_path, provider_id, gif):
     return cache_path
 
 
+def _gif_cache_path(provider_id):
+    return Path(current_app.config["WORKOUTX_CACHE_DIR"]) / "basic-v1" / f"workoutx-{provider_id}.gif"
+
+
+def cache_local_gif(provider_id, gif):
+    provider_id = _provider_id(provider_id)
+    return _write_gif_to_local_cache(_gif_cache_path(provider_id), provider_id, gif)
+
+
 def get_stored_gif(provider_id):
     """Return a GIF already stored locally or in the database, without an API request."""
     provider_id = _provider_id(provider_id)
-    cache_dir = Path(current_app.config["WORKOUTX_CACHE_DIR"])
-    cache_path = cache_dir / f"workoutx-{provider_id}.gif"
+    cache_path = _gif_cache_path(provider_id)
     if cache_path.is_file() and cache_path.stat().st_size:
         return cache_path
 
-    from src.models.user import WorkoutXGif, db
+    with GIF_DOWNLOAD_LOCK:
+        if cache_path.is_file() and cache_path.stat().st_size:
+            return cache_path
 
-    stored = db.session.get(WorkoutXGif, provider_id)
-    return _write_gif_to_local_cache(cache_path, provider_id, stored.content) if stored else None
+        from src.models.user import WorkoutXGif, db
+
+        stored = db.session.get(WorkoutXGif, provider_id)
+        return cache_local_gif(provider_id, stored.content) if stored else None
 
 
 def get_cached_gif(catalog_key, provider_id):
@@ -756,11 +768,7 @@ def get_cached_gif(catalog_key, provider_id):
             raise WorkoutXServiceError("WorkoutX did not return a GIF")
         db.session.merge(WorkoutXGif(provider_id=provider_id, content=gif))
         db.session.commit()
-        return _write_gif_to_local_cache(
-            Path(current_app.config["WORKOUTX_CACHE_DIR"]) / f"workoutx-{provider_id}.gif",
-            provider_id,
-            gif,
-        )
+        return cache_local_gif(provider_id, gif)
 
 
 def prefetch_gifs():

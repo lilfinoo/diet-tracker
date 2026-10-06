@@ -2,7 +2,7 @@ from src.services import workoutx
 from io import BytesIO
 from urllib.error import HTTPError
 
-from src.models.user import ExerciseMediaReview, User, WorkoutXExercise, WorkoutXGif, db
+from src.models.user import AdminActionAudit, ExerciseMediaReview, User, WorkoutXExercise, WorkoutXGif, db
 from tests.helpers import registration_payload
 
 
@@ -138,6 +138,46 @@ def test_workoutx_reads_a_stored_gif_without_an_api_request(app, tmp_path, monke
     assert path.read_bytes() == b"GIF89astored"
 
 
+def test_basic_migration_refreshes_provider_cache_and_preserves_manual_gifs(app, tmp_path, monkeypatch):
+    import importlib.util
+    from pathlib import Path
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    migration_path = Path(__file__).parents[1] / "migrations/versions/d6a2f8c4b910_refresh_workoutx_basic_gifs.py"
+    spec = importlib.util.spec_from_file_location("refresh_workoutx_basic", migration_path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    calls = []
+    monkeypatch.setattr(workoutx, "_request", lambda url, **_kwargs: calls.append(url) or b"GIF89abasic")
+    (tmp_path / "workoutx-0201.gif").write_bytes(b"GIF89afree-watermark")
+
+    with app.app_context():
+        app.config["WORKOUTX_CACHE_DIR"] = tmp_path
+        db.session.add_all([
+            WorkoutXGif(provider_id="0201", content=b"GIF89afree-watermark"),
+            WorkoutXGif(provider_id="0289", content=b"GIF89amanual"),
+            AdminActionAudit(action="exercise_media.cached", resource_type="exercise_media", resource_id="0289"),
+            AdminActionAudit(action="exercise_media.cached", resource_type="exercise_media", resource_id=None),
+        ])
+        db.session.commit()
+        with db.engine.begin() as connection:
+            monkeypatch.setattr(migration, "op", Operations(MigrationContext.configure(connection)))
+            migration.upgrade()
+        db.session.expire_all()
+        assert db.session.get(WorkoutXGif, "0201") is None
+        first = workoutx.get_cached_gif("workoutx:0201", "0201")
+        second = workoutx.get_cached_gif("workoutx:0201", "0201")
+        assert first == second
+        assert first.read_bytes() == b"GIF89abasic"
+        assert db.session.get(WorkoutXGif, "0201").content == b"GIF89abasic"
+        assert workoutx.get_stored_gif("0289").read_bytes() == b"GIF89amanual"
+        assert AdminActionAudit.query.count() == 2
+
+    assert calls == ["https://api.workoutxapp.com/v1/gifs/0201.gif"]
+
+
 def test_exercise_media_serves_a_database_gif_without_r2_or_workoutx(app, client, tmp_path, monkeypatch):
     monkeypatch.setattr(workoutx, "_request", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("WorkoutX called")))
     monkeypatch.setattr("src.services.media_storage._client", lambda: (_ for _ in ()).throw(AssertionError("R2 called")))
@@ -157,6 +197,13 @@ def test_exercise_media_serves_a_database_gif_without_r2_or_workoutx(app, client
     assert response.status_code == 200
     assert response.mimetype == "image/gif"
     assert response.data == b"GIF89astored"
+    assert response.cache_control.no_cache
+    assert response.cache_control.max_age == 0
+    revalidated = client.get(
+        "/api/public/exercise-media/agachamento_livre",
+        headers={"If-None-Match": response.headers["ETag"]},
+    )
+    assert revalidated.status_code == 304
 
 
 def test_workoutx_429_starts_a_fast_failure_cooldown(app, tmp_path, monkeypatch):
@@ -331,7 +378,8 @@ def test_authenticated_user_can_serve_a_direct_workoutx_gif(app, client, tmp_pat
     response = client.get("/api/exercise-media/workoutx:0289")
     assert response.status_code == 200
     assert response.data == b"GIF89adirect"
-    assert response.cache_control.max_age == 31_536_000
+    assert response.cache_control.max_age == 0
+    assert response.cache_control.no_cache
 
 
 def test_exercise_media_transient_failure_is_not_cached_and_can_recover(app, client, tmp_path, monkeypatch):
@@ -362,7 +410,8 @@ def test_exercise_media_transient_failure_is_not_cached_and_can_recover(app, cli
     recovered = client.get("/api/exercise-media/workoutx:0289")
     assert recovered.status_code == 200
     assert recovered.data == b"GIF89arecovered"
-    assert recovered.cache_control.max_age == 31_536_000
+    assert recovered.cache_control.max_age == 0
+    assert recovered.cache_control.no_cache
 
 
 def test_exercise_media_downloads_a_mapped_gif_on_demand(app, client, tmp_path, monkeypatch):
@@ -400,16 +449,20 @@ def test_admin_can_import_legacy_gif_without_provider_catalog(app, client):
     assert response.data == b"GIF89alegacy"
 
 
-def test_admin_can_import_a_workoutx_gif_directly_into_database(app, client):
+def test_admin_can_import_a_workoutx_gif_directly_into_database(app, client, tmp_path):
     assert client.post("/api/register", json=registration_payload("gif-admin")).status_code == 201
     with app.app_context():
+        app.config["WORKOUTX_CACHE_DIR"] = tmp_path
         user = User.query.filter_by(username="gif-admin").one()
         user.is_admin = True
         db.session.add(WorkoutXExercise(provider_id="0289", data={
             "id": "0289", "name": "Dumbbell Bench Press",
             "equipment": "Dumbbell", "gifUrl": "https://example.test/0289.gif",
         }))
+        db.session.add(WorkoutXGif(provider_id="0289", content=b"GIF89aold"))
         db.session.commit()
+        old_path = workoutx.get_stored_gif("0289")
+        assert old_path.read_bytes() == b"GIF89aold"
 
     response = client.post(
         "/api/admin/exercise-media/cache/0289",
@@ -420,6 +473,7 @@ def test_admin_can_import_a_workoutx_gif_directly_into_database(app, client):
     assert response.status_code == 201
     with app.app_context():
         assert db.session.get(WorkoutXGif, "0289").content == b"GIF89aimported"
+        assert workoutx.get_stored_gif("0289").read_bytes() == b"GIF89aimported"
 
 
 def test_exact_legacy_alias_is_automatic_but_equipment_mismatch_is_doubt(app):

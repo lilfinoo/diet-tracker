@@ -52,7 +52,9 @@ def test_existing_user_can_inspect_grant_and_revoke_ai_consent(app, client, monk
     current = client.get("/api/account/consents").get_json()
     assert current["ai"]["accepted"] is False
 
-    granted = client.put("/api/account/consents", json={"ai_consent": True})
+    granted = client.put("/api/account/consents", json={
+        "ai_consent": True, "ai_consent_version": AI_CONSENT_VERSION,
+    })
     assert granted.status_code == 200
     assert granted.get_json()["ai"]["version"] == AI_CONSENT_VERSION
     monkeypatch.setattr(
@@ -69,6 +71,35 @@ def test_existing_user_can_inspect_grant_and_revoke_ai_consent(app, client, monk
     assert client.post(
         "/api/diet/ai_macros", json={"description": "banana"}
     ).get_json()["code"] == "ai_consent_required"
+
+
+def test_outdated_ai_consent_requires_accepting_the_current_disclosure(app, client):
+    assert client.post(
+        "/api/register", json=registration_payload("old-ai-consent")
+    ).status_code == 201
+    with app.app_context():
+        user = User.query.filter_by(username="old-ai-consent").one()
+        user.ai_consent_version = "draft-2026-08-29"
+        db.session.commit()
+        original_record_count = ConsentRecord.query.filter_by(user_id=user.id).count()
+
+    assert client.get("/api/account/consents").get_json()["ai"]["accepted"] is False
+    assert client.post(
+        "/api/diet/ai_macros", json={"description": "banana"}
+    ).get_json()["code"] == "ai_consent_required"
+    for payload in (
+        {"ai_consent": True},
+        {"ai_consent": True, "ai_consent_version": "draft-2026-08-29"},
+    ):
+        assert client.put("/api/account/consents", json=payload).status_code == 400
+    with app.app_context():
+        user = User.query.filter_by(username="old-ai-consent").one()
+        assert ConsentRecord.query.filter_by(user_id=user.id).count() == original_record_count
+        assert user.ai_consent_version == "draft-2026-08-29"
+
+    assert client.put("/api/account/consents", json={
+        "ai_consent": True, "ai_consent_version": AI_CONSENT_VERSION,
+    }).get_json()["ai"]["accepted"] is True
 
 
 def test_account_deletion_requires_password_and_anonymizes_retained_records(app, client):

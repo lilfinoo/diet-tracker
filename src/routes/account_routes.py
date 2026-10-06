@@ -52,6 +52,8 @@ def update_consents():
     if "ai_consent" in data:
         if not isinstance(data["ai_consent"], bool):
             return jsonify({"error": "Consentimento de IA inválido."}), 400
+        if data["ai_consent"] and data.get("ai_consent_version") != AI_CONSENT_VERSION:
+            return jsonify({"error": "A versão do consentimento de IA está desatualizada."}), 400
         record_consent(
             g.user,
             "ai",

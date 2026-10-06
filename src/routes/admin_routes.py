@@ -18,7 +18,7 @@ from src.models.user import (
 )
 from src.routes.common import admin_required, json_body, page_query
 from src.services.workout_plans import catalog_by_key
-from src.services.workoutx import WorkoutXServiceError, automatic_legacy_media, get_cached_gif, get_exercise, media_mapping, review_mapping_is_doubt, search_cached_exercises
+from src.services.workoutx import GIF_DOWNLOAD_LOCK, WorkoutXServiceError, automatic_legacy_media, cache_local_gif, get_cached_gif, get_exercise, media_mapping, review_mapping_is_doubt, search_cached_exercises
 
 
 admin_bp = Blueprint("admin", __name__)
@@ -261,7 +261,7 @@ def exercise_media_candidate(provider_id):
         gif_path = get_cached_gif(f"review-{provider_id}", provider_id)
     except WorkoutXServiceError:
         abort(404)
-    return send_file(gif_path, mimetype="image/gif", conditional=True, max_age=86_400)
+    return send_file(gif_path, mimetype="image/gif", conditional=True, max_age=0)
 
 
 @admin_bp.route("/admin/exercise-media/cache/<provider_id>", methods=["POST"])
@@ -282,14 +282,16 @@ def upload_exercise_media_cache(provider_id):
         return jsonify({"error": "GIF excede o tamanho permitido."}), 413
     if not content.startswith((b"GIF87a", b"GIF89a")):
         return jsonify({"error": "Arquivo GIF inválido."}), 400
-    db.session.merge(WorkoutXGif(provider_id=provider_id, content=content))
-    _audit_admin(
-        "exercise_media.cached",
-        resource_type="exercise_media",
-        resource_id=provider_id,
-        details={"bytes": len(content)},
-    )
-    db.session.commit()
+    with GIF_DOWNLOAD_LOCK:
+        db.session.merge(WorkoutXGif(provider_id=provider_id, content=content))
+        _audit_admin(
+            "exercise_media.cached",
+            resource_type="exercise_media",
+            resource_id=provider_id,
+            details={"bytes": len(content)},
+        )
+        db.session.commit()
+        cache_local_gif(provider_id, content)
     return jsonify({"provider_id": provider_id, "bytes": len(content)}), 201
 
 

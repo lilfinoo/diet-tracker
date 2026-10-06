@@ -370,7 +370,7 @@ def _serve_exercise_media(catalog_key):
         if error.retry_after:
             response.headers["Retry-After"] = str(error.retry_after)
         return response
-    return send_file(gif_path, mimetype="image/gif", conditional=True, max_age=31_536_000)
+    return send_file(gif_path, mimetype="image/gif", conditional=True, max_age=0)
 
 
 @profile_bp.route("/exercise-media/<catalog_key>", methods=["GET"])

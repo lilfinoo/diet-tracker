@@ -2091,6 +2091,7 @@ async function savePrivacySettings() {
             credentials: 'include',
             body: JSON.stringify({
                 ai_consent: Boolean(getElement('accountAiConsent')?.checked),
+                ai_consent_version: legalVersions.ai.version,
             }),
         });
         const data = await response.json();
@@ -2273,7 +2274,10 @@ window.addEventListener('popstate', () => {
     if (view) showTab(view, { history: 'none' });
 });
 
+const IOS_BILLING_NOTICE = 'Assinaturas pelo iPhone estarão disponíveis após a integração com a App Store';
+
 async function openPlansModal() {
+    const isIos = window.Capacitor?.getPlatform?.() === 'ios';
     window.analytics?.track('paywall_viewed', { surface: 'plans_modal' });
     openAppModal(getElement('plansModal'));
     const grid = getElement('plansGrid');
@@ -2290,6 +2294,8 @@ async function openPlansModal() {
                 action = `<button type="button" class="btn-primary" disabled>${isCurrent ? 'Seu plano atual' : 'Premium ativo'}</button>`;
             } else if (plan.price_brl === 0) {
                 action = '';
+            } else if (isIos) {
+                action = '<button type="button" class="btn-primary" disabled>Indisponível no iPhone</button>';
             } else {
                 action = data.provider_configured
                     ? `<button type="button" class="btn-primary" onclick="startBillingCheckout('${plan.code}', this)">Escolher pagamento · R$ ${Number(plan.price_brl).toFixed(0)}</button>`
@@ -2298,14 +2304,14 @@ async function openPlansModal() {
             return `
             <article class="pricing-card${isCurrent ? ' is-current' : ''}">
                 <h4>${escapeHtml(plan.name)}</h4>
-                <p class="pricing-card__price"><strong>R$ ${Number(plan.price_brl).toFixed(0)}</strong><span>${plan.price_brl ? escapeHtml(plan.period_label || '/mês') : ''}</span></p>
-                ${plan.discount_percent ? `<p class="pricing-card__savings">${Number(plan.discount_percent)}% de desconto · equivale a R$ ${Number(plan.monthly_equivalent_brl).toFixed(0)}/mês</p>` : ''}
+                ${isIos ? (plan.price_brl === 0 ? '<p class="pricing-card__price"><strong>Grátis</strong></p>' : '') : `<p class="pricing-card__price"><strong>R$ ${Number(plan.price_brl).toFixed(0)}</strong><span>${plan.price_brl ? escapeHtml(plan.period_label || '/mês') : ''}</span></p>`}
+                ${!isIos && plan.discount_percent ? `<p class="pricing-card__savings">${Number(plan.discount_percent)}% de desconto · equivale a R$ ${Number(plan.monthly_equivalent_brl).toFixed(0)}/mês</p>` : ''}
                 <ul>${(plan.features || []).map(feature => `<li><i class="fas fa-check" aria-hidden="true"></i>${escapeHtml(feature)}</li>`).join('')}</ul>
                 ${action}
             </article>`;
         }).join('');
         renderSubscriptionManagement(data.provider_configured);
-        getElement('billingNotice').textContent = data.provider_configured
+        getElement('billingNotice').textContent = isIos ? IOS_BILLING_NOTICE : data.provider_configured
             ? (data.provider_environment === 'sandbox'
                 ? 'Ambiente de testes (Sandbox): nenhum valor real será movimentado.'
                 : 'Cartão renova conforme o período do plano. PIX libera o período descrito no plano e não renova automaticamente.')
@@ -2318,6 +2324,10 @@ async function openPlansModal() {
 let pendingBillingCheckout = null;
 
 function startBillingCheckout(planCode, button) {
+    if (window.Capacitor?.getPlatform?.() === 'ios') {
+        showToast(IOS_BILLING_NOTICE, 'info');
+        return;
+    }
     if (!requireAuth('Crie sua conta para assinar e desbloquear o plano Premium.', { mode: 'register' })) return;
     const annual = planCode === 'premium_student_annual';
     pendingBillingCheckout = { planCode, button };
@@ -2335,6 +2345,10 @@ function closeBillingPaymentModal() {
 }
 
 async function confirmBillingCheckout(paymentMethod) {
+    if (window.Capacitor?.getPlatform?.() === 'ios') {
+        showToast(IOS_BILLING_NOTICE, 'info');
+        return;
+    }
     if (!pendingBillingCheckout) return;
     const { planCode, button } = pendingBillingCheckout;
     if (button) button.disabled = true;
@@ -2357,6 +2371,7 @@ async function confirmBillingCheckout(paymentMethod) {
 }
 
 function renderSubscriptionManagement(providerConfigured) {
+    const isIos = window.Capacitor?.getPlatform?.() === 'ios';
     const container = getElement('subscriptionManage');
     if (!container) return;
     container.innerHTML = '';
@@ -2370,11 +2385,11 @@ function renderSubscriptionManagement(providerConfigured) {
             const isPix = subscription.provider === 'asaas_pix';
             const renewalAvailable = data.pix_renewal_available_at && new Date(data.pix_renewal_available_at) <= new Date();
             const managementAction = isPix
-                ? (renewalAvailable ? `<button type="button" class="btn-secondary" onclick="startBillingCheckout('${escapeHtml(subscription.plan_code)}', this)">Renovar por PIX</button>` : '')
+                ? (!isIos && renewalAvailable ? `<button type="button" class="btn-secondary" onclick="startBillingCheckout('${escapeHtml(subscription.plan_code)}', this)">Renovar por PIX</button>` : '')
                 : (subscription.provider === 'asaas' && providerConfigured ? '<button type="button" class="btn-secondary" onclick="cancelMySubscription()">Cancelar assinatura</button>' : '');
             container.innerHTML = `
                 <section class="subscription-manage">
-                    <div><strong>${isPix ? 'Acesso PIX' : subscription.status === 'trialing' ? 'Teste grátis · ' + escapeHtml(subscription.plan_code) : escapeHtml(subscription.plan_code)}</strong>${until ? `<small>Ativo até ${escapeHtml(until)}</small>` : ''}${isPix && !renewalAvailable ? '<small>A renovação abre nos últimos 7 dias.</small>' : ''}</div>
+                    <div><strong>${isPix ? 'Acesso PIX' : subscription.status === 'trialing' ? 'Teste grátis · ' + escapeHtml(subscription.plan_code) : escapeHtml(subscription.plan_code)}</strong>${until ? `<small>Ativo até ${escapeHtml(until)}</small>` : ''}${!isIos && isPix && !renewalAvailable ? '<small>A renovação abre nos últimos 7 dias.</small>' : ''}</div>
                     ${managementAction}
                 </section>`;
         })
@@ -2910,7 +2925,7 @@ async function deleteDietPlan(id) {
 function exerciseImagePath(_exerciseName, catalogKey) {
     const key = String(catalogKey || "");
     const path = document.documentElement.dataset.nativePlatform === "ios" ? "/public/exercise-media/" : "/exercise-media/";
-    return key ? `${API_BASE}${path}${encodeURIComponent(key)}` : "";
+    return key ? `${API_BASE}${path}${encodeURIComponent(key)}?v=workoutx-basic-20261006` : "";
 }
 
 function exerciseFallbackImagePath(catalogKey) {
