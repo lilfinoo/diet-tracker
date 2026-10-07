@@ -168,3 +168,7 @@ def test_exchange_encrypts_token_and_revocation_uses_private_credentials(app, mo
         apple_auth.revoke_identity(SimpleNamespace(apple_refresh_token=encrypted))
         assert post.call_args.args[0].endswith("/auth/revoke")
         assert post.call_args.kwargs["data"]["token"] == "private-refresh"
+
+
+def test_malformed_signup_token_is_rejected(client, apple_ready):
+    assert client.post("/api/auth/apple", json={"signup_token": {"forged": True}}).status_code == 401
