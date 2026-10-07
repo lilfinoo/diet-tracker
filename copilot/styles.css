@@ -17748,3 +17748,22 @@ html[data-native-platform="ios"] .home-refresh-indicator:is([data-state="partial
 .diet-daily-slot.is-saving .diet-daily-swipe__hint { display: none; }
 @keyframes meal-saving-settle { from { opacity: .72; transform: translate3d(-8px, 0, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
 @media (prefers-reduced-motion: reduce) { .diet-daily-slot.is-saving { animation: none; } }
+
+.apple-signin {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 10px 16px;
+    border: 1px solid #fff;
+    border-radius: 8px;
+    background: #000;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.google-auth > .apple-signin { width: 100%; margin-top: 12px; }
+.apple-signin:disabled { opacity: .6; cursor: wait; }
+.apple-signin:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }

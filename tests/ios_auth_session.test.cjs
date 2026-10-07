@@ -226,7 +226,7 @@ test('uncaught exceptions report sanitized location and details', () => {
 test('native login blocks repeated taps, handles cancellation and allows the next attempt', async () => {
     let resolve, nativeCalls = 0, backendCalls = 0;
     const context = {
-        nativeGoogleInFlight: false, authRequestInFlight: false, sessionConfirmationInFlight: false,
+        nativeGoogleInFlight: false, nativeAppleInFlight: false, authRequestInFlight: false, sessionConfirmationInFlight: false,
         window: { Capacitor: { Plugins: { FitTrackerGoogleAuth: { signIn: () => {
             nativeCalls++; return new Promise(done => { resolve = done; });
         } } } } },

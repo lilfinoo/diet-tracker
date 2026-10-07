@@ -35,6 +35,7 @@
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		A1B2C3D4E5F60708090A0B0D /* FitTrackerGoogleAuthPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FitTrackerGoogleAuthPlugin.swift; sourceTree = "<group>"; };
 		B8D471AA2026091400000002 /* FitTrackerSharePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FitTrackerSharePlugin.swift; sourceTree = "<group>"; };
+		F7A21DD63075E06200866931 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -70,6 +71,7 @@
 		504EC3061FED79650016851F /* App */ = {
 			isa = PBXGroup;
 			children = (
+				F7A21DD63075E06200866931 /* App.entitlements */,
 				A1B2C3D4E5F60708090A0B0D /* FitTrackerGoogleAuthPlugin.swift */,
 				B8D471AA2026091400000002 /* FitTrackerSharePlugin.swift */,
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
@@ -325,6 +327,7 @@
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				GOOGLE_IOS_CLIENT_ID = "962052909671-o5ilrh1029cbodkkl4phgfobe0ibs1a5.apps.googleusercontent.com";
@@ -350,6 +353,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				GOOGLE_IOS_CLIENT_ID = "962052909671-o5ilrh1029cbodkkl4phgfobe0ibs1a5.apps.googleusercontent.com";

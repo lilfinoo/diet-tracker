@@ -266,6 +266,7 @@ class OAuthIdentity(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    apple_refresh_token = db.Column(db.Text, nullable=True)
     provider = db.Column(db.String(32), nullable=False)
     issuer = db.Column(db.String(255), nullable=False)
     subject = db.Column(db.String(255), nullable=False)
@@ -1762,3 +1763,10 @@ class AdminActionAudit(db.Model):
 
     actor = db.relationship("User", foreign_keys=[actor_user_id])
     subject = db.relationship("User", foreign_keys=[subject_user_id])
+
+
+class AppleAuthChallenge(db.Model):
+    __tablename__ = "apple_auth_challenge"
+
+    nonce_hash = db.Column(db.String(64), primary_key=True)
+    expires_at = db.Column(db.DateTime, nullable=False, index=True)

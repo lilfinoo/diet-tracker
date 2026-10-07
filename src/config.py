@@ -28,6 +28,11 @@ class Config:
     CSRF_PROTECTION = True
     MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", 10 * 1024 * 1024))
     CORS_ORIGINS = _csv("CORS_ORIGINS")
+    APPLE_TEAM_ID = os.getenv("APPLE_TEAM_ID")
+    APPLE_KEY_ID = os.getenv("APPLE_KEY_ID")
+    APPLE_PRIVATE_KEY = os.getenv("APPLE_PRIVATE_KEY")
+    APPLE_TOKEN_ENCRYPTION_KEY = os.getenv("APPLE_TOKEN_ENCRYPTION_KEY")
+    APPLE_CLIENT_ID = os.getenv("APPLE_CLIENT_ID", "ai.fittracker.app")
     GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
     GOOGLE_SIGNUP_TOKEN_MAX_AGE = int(os.getenv("GOOGLE_SIGNUP_TOKEN_MAX_AGE", "600"))
     ASAAS_API_KEY = os.getenv("ASAAS_API_KEY")
@@ -104,6 +109,11 @@ class TestConfig(Config):
     SESSION_COOKIE_SECURE = False
     CSRF_PROTECTION = False
     GEMINI_API_KEY = None
+    APPLE_CLIENT_ID = "ai.fittracker.app"
+    APPLE_TEAM_ID = None
+    APPLE_KEY_ID = None
+    APPLE_PRIVATE_KEY = None
+    APPLE_TOKEN_ENCRYPTION_KEY = None
     GOOGLE_CLIENT_ID = "test-google-client-id"
     ASAAS_API_KEY = None
     REVENUECAT_IOS_API_KEY = None

@@ -1,3 +1,7 @@
+from src.services import apple_auth as apple_auth_service
+import jwt
+import requests
+from cryptography.fernet import InvalidToken
 import time
 from datetime import datetime
 
@@ -204,7 +208,7 @@ def delete_account():
         return jsonify({"error": "A conta não possui método de reautenticação válido."}), 409
     elif int(time.time()) - int(session.get("authenticated_at", 0)) > 600:
         return jsonify({
-            "error": "Entre novamente com Google antes de excluir a conta.",
+            "error": "Entre novamente com seu provedor de login antes de excluir a conta.",
             "code": "reauthentication_required",
         }), 403
 
@@ -216,6 +220,12 @@ def delete_account():
         return blocked
 
     user = g.user
+    for identity in user.oauth_identities:
+        if identity.provider == "apple":
+            try:
+                apple_auth_service.revoke_identity(identity)
+            except (ValueError, InvalidToken, requests.RequestException, jwt.PyJWTError):
+                return jsonify({"error": "Não foi possível revogar o acesso Apple. Tente novamente.", "code": "apple_revocation_failed"}), 503
     avatar_key = user.profile.avatar_object_key if user.profile else None
     try:
         delete_avatar(avatar_key)

@@ -19,6 +19,8 @@ let pendingAuthIntent = null;
 let pendingPostProfileResume = null;
 let pendingProfileRequiredFields = [];
 let googleSignupToken = null;
+let socialSignupProvider = 'google';
+let nativeAppleInFlight = false;
 let legalVersions = null;
 let authMessageTimer = null;
 let authRequestInFlight = false;
@@ -494,7 +496,7 @@ async function bootApp() {
 }
 
 async function resumeApp() {
-    if (nativeGoogleInFlight || authRequestInFlight || pendingSessionUser) return;
+    if (nativeGoogleInFlight || nativeAppleInFlight || authRequestInFlight || pendingSessionUser) return;
     if (document.hidden || navigator.onLine === false || resumeInFlight || Date.now() - lastResumeAt < 1000) return resumeInFlight;
     resumeInFlight = (async () => {
         if (authState === 'unknown' || Date.now() - lastAuthCheckAt > 60_000) await checkAuthStatus({ resume: true });
@@ -985,6 +987,7 @@ async function initializeGoogleAuth() {
         const response = await window.fetchWithTimeout(`${API_BASE}/auth/config`);
         const config = response.ok ? await response.json() : {};
         legalVersions = config.legal || null;
+        if (config.apple_enabled) initializeAppleAuth();
         if (!config.google_client_id) return;
         getElement('googleAuthSection')?.classList.remove('hidden');
         getElement('googleHeaderButton')?.classList.remove('hidden');
@@ -1034,8 +1037,70 @@ function startAuthChoiceGoogle() {
     showAuthMessage('Toque no botão oficial do Google abaixo para continuar.', 'info');
 }
 
+function initializeAppleAuth() {
+    if (window.Capacitor?.getPlatform?.() !== 'ios') return;
+    document.querySelectorAll('.apple-signin').forEach(button => button.classList.remove('hidden'));
+    getElement('googleAuthSection')?.classList.remove('hidden');
+}
+
+function openAuthWithApple() {
+    openAuthModal('Entre com sua conta Apple.', 'login');
+    startNativeAppleSignIn();
+}
+
+async function startNativeAppleSignIn() {
+    if (nativeAppleInFlight || nativeGoogleInFlight || authRequestInFlight || sessionConfirmationInFlight) return;
+    if (window.Capacitor?.getPlatform?.() !== 'ios') return;
+    const plugin = window.Capacitor?.Plugins?.FitTrackerAppleAuth;
+    if (!plugin?.signIn) {
+        showAuthMessage('Atualize o app para entrar com Apple.', 'info');
+        return;
+    }
+    nativeAppleInFlight = true;
+    setGoogleAuthPending(true, 'Entrando com Apple...');
+    try {
+        const challenge = await window.fetchWithTimeout(`${API_BASE}/auth/apple/challenge`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            credentials: 'include', body: JSON.stringify({})
+        });
+        if (!challenge.ok) throw new Error('Não foi possível preparar o login com Apple. Tente novamente.');
+        const { nonce } = await challenge.json();
+        if (typeof nonce !== 'string' || nonce.length < 32) throw new Error('Não foi possível preparar o login com Apple. Tente novamente.');
+        const result = await plugin.signIn({ nonce });
+        if (!result?.idToken) throw new Error('A Apple não devolveu uma credencial válida. Tente novamente.');
+        authRequestInFlight = true;
+        const response = await window.fetchWithTimeout(`${API_BASE}/auth/apple`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            credentials: 'include', body: JSON.stringify({ credential: result.idToken, authorization_code: result.authorizationCode, nonce, display_name: result.displayName })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 409 && data.code === 'username_required') {
+            googleSignupToken = data.signup_token;
+            socialSignupProvider = 'apple';
+            getElement('authChoicePanel')?.classList.add('hidden');
+            document.querySelector('.login-tabs')?.classList.add('hidden');
+            getElement('loginForm')?.classList.add('hidden');
+            getElement('registerForm')?.classList.add('hidden');
+            getElement('googleAuthSection')?.classList.add('hidden');
+            getElement('googleSignupStep')?.classList.remove('hidden');
+            getElement('googleUsername')?.focus();
+            return;
+        }
+        if (!response.ok) throw new Error(data.error || 'Não foi possível entrar com Apple.');
+        await completeAuthentication(data.user, data.csrf_token);
+    } catch (error) {
+        if (error?.message !== 'cancelled' && error?.code !== 'cancelled') {
+            showAuthMessage(error.message || 'Não foi possível entrar com Apple.', 'error');
+        }
+    } finally {
+        authRequestInFlight = false;
+        nativeAppleInFlight = false;
+        setGoogleAuthPending(false);
+    }
+}
+
 async function startNativeGoogleSignIn() {
-    if (nativeGoogleInFlight || authRequestInFlight || sessionConfirmationInFlight) return;
+    if (nativeGoogleInFlight || nativeAppleInFlight || authRequestInFlight || sessionConfirmationInFlight) return;
     const plugin = window.Capacitor?.Plugins?.FitTrackerGoogleAuth;
     if (!plugin?.signIn) {
         showAuthMessage('Atualize o app para concluir o login com Google. Você ainda pode entrar com e-mail e senha.', 'info');
@@ -1058,8 +1123,8 @@ async function startNativeGoogleSignIn() {
 }
 
 function setGoogleAuthPending(pending, message = '') {
-    pending = pending || nativeGoogleInFlight || authRequestInFlight || sessionConfirmationInFlight;
-    document.querySelectorAll('#authChoiceGoogleButton, #googleHeaderButton, .google-native-signin').forEach(button => { button.disabled = pending; });
+    pending = pending || nativeGoogleInFlight || nativeAppleInFlight || authRequestInFlight || sessionConfirmationInFlight;
+    document.querySelectorAll('#authChoiceGoogleButton, #googleHeaderButton, .google-native-signin, .apple-signin').forEach(button => { button.disabled = pending; });
     const section = getElement('googleAuthSection');
     const submit = getElement('googleSignupSubmit');
     section?.setAttribute('aria-busy', String(pending));
@@ -1097,6 +1162,7 @@ async function handleGoogleCredential(result) {
         if (response.status === 409 && data.code === 'username_required') {
             window.analytics?.track('signup_started', { surface: 'google_auth' });
             googleSignupToken = data.signup_token;
+            socialSignupProvider = 'google';
             getElement('authChoicePanel')?.classList.add('hidden');
             document.querySelector('.login-tabs')?.classList.add('hidden');
             getElement('loginForm')?.classList.add('hidden');
@@ -1119,7 +1185,7 @@ async function handleGoogleCredential(result) {
 
 async function finishGoogleSignup(event) {
     event.preventDefault();
-    if (authRequestInFlight || nativeGoogleInFlight || sessionConfirmationInFlight) return;
+    if (authRequestInFlight || nativeGoogleInFlight || nativeAppleInFlight || sessionConfirmationInFlight) return;
     const username = getElement('googleUsername')?.value.trim();
     if (!googleSignupToken || !username) return;
     if (!legalVersions) {
@@ -1129,7 +1195,7 @@ async function finishGoogleSignup(event) {
     setGoogleAuthPending(true, 'Concluindo cadastro...');
     authRequestInFlight = true;
     try {
-        const response = await fetch(`${API_BASE}/auth/google`, {
+        const response = await fetch(`${API_BASE}/auth/${socialSignupProvider}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
@@ -1972,7 +2038,7 @@ async function readAuthResponse(response) {
 
 async function handleLogin(e) {
     e.preventDefault();
-    if (authRequestInFlight || nativeGoogleInFlight || sessionConfirmationInFlight) return;
+    if (authRequestInFlight || nativeGoogleInFlight || nativeAppleInFlight || sessionConfirmationInFlight) return;
     const username = getElement("loginUsername").value.trim();
     const password = getElement("loginPassword").value.trim();
 
@@ -2011,7 +2077,7 @@ async function handleLogin(e) {
 
 async function handleRegister(e) {
     e.preventDefault();
-    if (authRequestInFlight || nativeGoogleInFlight || sessionConfirmationInFlight) return;
+    if (authRequestInFlight || nativeGoogleInFlight || nativeAppleInFlight || sessionConfirmationInFlight) return;
     const username = getElement("registerUsername").value.trim();
     const password = getElement("registerPassword").value.trim();
     const confirmPassword = getElement("confirmPassword").value.trim();
@@ -2523,7 +2589,7 @@ function showAuthChoice() {
 }
 
 function backFromGoogleSignup() {
-    if (authRequestInFlight || nativeGoogleInFlight || sessionConfirmationInFlight) return;
+    if (authRequestInFlight || nativeGoogleInFlight || nativeAppleInFlight || sessionConfirmationInFlight) return;
     googleSignupToken = null;
     getElement('googleSignupStep')?.classList.add('hidden');
     showAuthChoice();

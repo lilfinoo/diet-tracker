@@ -1,4 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+import hashlib
+import secrets
+import jwt
+import requests
+from itsdangerous import URLSafeTimedSerializer
+from src.services import apple_auth as apple_auth_service
 import logging
 from flask import Blueprint, current_app, jsonify, request, session
 from google.auth.transport import requests as google_requests
@@ -6,7 +12,7 @@ from google.oauth2 import id_token as google_id_token
 from itsdangerous import BadSignature, SignatureExpired
 from sqlalchemy.exc import IntegrityError
 
-from src.models.user import OAuthIdentity, User, db
+from src.models.user import AppleAuthChallenge, OAuthIdentity, User, db
 from src.legal import AI_CONSENT_VERSION, legal_versions_payload, record_consent
 from src.routes.common import _csrf_token, _google_identity_claims, _google_signup_serializer, _start_session, json_body, login_required
 from src.services.badges import grant_signup_badges
@@ -29,6 +35,8 @@ def log_session_diagnostic(response):
             current_app.config.get("SESSION_COOKIE_NAME", "session") in request.cookies,
             bool(session.get("user_id")), payload.get("logged_in") is True,
         )
+    if request.endpoint in {"auth.auth_config", "auth.apple_challenge", "auth.apple_login"}:
+        response.headers["Cache-Control"] = "no-store"
     return response
 
 
@@ -49,6 +57,7 @@ def _sync_google_account(user, claims):
 @auth_bp.route("/auth/config", methods=["GET"])
 def auth_config():
     return jsonify({
+        "apple_enabled": apple_auth_service.configured(),
         "google_client_id": current_app.config.get("GOOGLE_CLIENT_ID"),
         "legal": legal_versions_payload(),
     }), 200
@@ -174,6 +183,113 @@ def google_auth():
         "code": "username_required",
         "signup_token": _google_signup_serializer().dumps(claims),
     }), 409
+
+
+@auth_bp.route("/auth/apple/challenge", methods=["POST"])
+@rate_limit("apple_challenge", 10, 60)
+def apple_challenge():
+    if not apple_auth_service.configured():
+        return jsonify({"error": "Login Apple não configurado"}), 503
+    nonce = secrets.token_urlsafe(32)
+    now = datetime.utcnow()
+    AppleAuthChallenge.query.filter(AppleAuthChallenge.expires_at <= now).delete()
+    db.session.add(AppleAuthChallenge(nonce_hash=hashlib.sha256(nonce.encode()).hexdigest(), expires_at=now + timedelta(minutes=5)))
+    db.session.commit()
+    session["apple_nonce"] = nonce
+    return jsonify({"nonce": nonce}), 200
+
+
+@auth_bp.route("/auth/apple", methods=["POST"])
+@rate_limit("apple_login", 10, 60)
+def apple_login():
+    if not apple_auth_service.configured():
+        return jsonify({"error": "Login Apple não configurado"}), 503
+    data = json_body()
+    serializer = URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt="apple-signup")
+    signup_token = data.get("signup_token")
+    if signup_token and (not isinstance(signup_token, str) or len(signup_token) > 20000):
+        return jsonify({"error": "Cadastro Apple expirado ou inválido"}), 401
+    if signup_token:
+        consent_error = _validate_signup_consents(data)
+        if consent_error:
+            return consent_error
+        try:
+            claims = serializer.loads(signup_token, max_age=600)
+            if claims.get("provider") != "apple":
+                raise BadSignature("Invalid provider")
+            if not AppleAuthChallenge.query.filter_by(nonce_hash=hashlib.sha256(signup_token.encode()).hexdigest()).filter(AppleAuthChallenge.expires_at > datetime.utcnow()).first():
+                raise BadSignature("Used signup token")
+        except BadSignature:
+            return jsonify({"error": "Cadastro Apple expirado ou inválido"}), 401
+    else:
+        nonce = data.get("nonce")
+        expected = session.pop("apple_nonce", None)
+        if not isinstance(nonce, str) or not expected or not secrets.compare_digest(nonce, expected):
+            return jsonify({"error": "Solicitação Apple inválida"}), 401
+        consumed = AppleAuthChallenge.query.filter_by(nonce_hash=hashlib.sha256(nonce.encode()).hexdigest()).filter(
+            AppleAuthChallenge.expires_at > datetime.utcnow()
+        ).delete()
+        db.session.commit()
+        if consumed != 1:
+            return jsonify({"error": "Solicitação Apple expirada ou já utilizada"}), 401
+        try:
+            payload = apple_auth_service.verify_identity(data.get("credential"), nonce)
+            encrypted_token = apple_auth_service.exchange_code(data.get("authorization_code"), payload["sub"], nonce)
+        except (ValueError, jwt.InvalidTokenError):
+            return jsonify({"error": "Credencial Apple inválida"}), 401
+        except (requests.RequestException, jwt.PyJWKClientError):
+            return jsonify({"error": "Apple indisponível. Tente novamente."}), 503
+        email = payload.get("email")
+        claims = {"provider": "apple", "issuer": apple_auth_service.APPLE_ISSUER, "subject": payload["sub"],
+                  "email": email[:320] if isinstance(email, str) else None,
+                  "email_verified": payload.get("email_verified") in (True, "true"),
+                  "display_name": str(data.get("display_name") or "")[:255] or None,
+                  "apple_refresh_token": encrypted_token}
+    identity = OAuthIdentity.query.filter_by(provider="apple", issuer=claims["issuer"], subject=claims["subject"]).first()
+    if identity:
+        if signup_token:
+            consumed = AppleAuthChallenge.query.filter_by(nonce_hash=hashlib.sha256(signup_token.encode()).hexdigest()).filter(AppleAuthChallenge.expires_at > datetime.utcnow()).delete()
+            if consumed != 1:
+                db.session.rollback()
+                return jsonify({"error": "Cadastro Apple expirado ou já utilizado"}), 401
+        if identity.user.is_banned:
+            session.clear()
+            return jsonify({"error": "Sua conta foi banida."}), 403
+        identity.last_login_at = datetime.utcnow()
+        identity.apple_refresh_token = claims["apple_refresh_token"]
+        db.session.commit()
+        _start_session(identity.user)
+        return jsonify({"message": "Login bem-sucedido", "user": identity.user.session_dict(), "csrf_token": _csrf_token()}), 200
+    if not signup_token:
+        token = serializer.dumps(claims)
+        db.session.add(AppleAuthChallenge(nonce_hash=hashlib.sha256(token.encode()).hexdigest(), expires_at=datetime.utcnow() + timedelta(minutes=10)))
+        db.session.commit()
+        return jsonify({"error": "Nome de usuário necessário", "code": "username_required", "signup_token": token}), 409
+    username = str(data.get("username") or "").strip()
+    if not username or len(username) > 80:
+        return jsonify({"error": "Nome de usuário deve ter entre 1 e 80 caracteres"}), 400
+    if User.query.filter_by(username=username).first():
+        return jsonify({"error": "Nome de usuário já existe", "code": "username_taken"}), 409
+    consumed = AppleAuthChallenge.query.filter_by(nonce_hash=hashlib.sha256(signup_token.encode()).hexdigest()).filter(AppleAuthChallenge.expires_at > datetime.utcnow()).delete()
+    if consumed != 1:
+        db.session.rollback()
+        return jsonify({"error": "Cadastro Apple expirado ou já utilizado"}), 401
+    user = User(username=username, name=claims["display_name"] or username,
+                email=claims["email"] if claims["email_verified"] else None)
+    identity = OAuthIdentity(user=user, last_login_at=datetime.utcnow(), **claims)
+    db.session.add_all((user, identity))
+    try:
+        db.session.flush()
+        _record_signup_consents(user, data)
+        grant_signup_badges(user)
+        anonymous_id, properties = analytics_context(data.get("analytics"))
+        record_event("signup_completed", user_id=user.id, anonymous_id=anonymous_id, properties=properties)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Cadastro já utilizado ou nome de usuário indisponível"}), 409
+    _start_session(user)
+    return jsonify({"message": "Usuário criado com sucesso", "user": user.session_dict(), "csrf_token": _csrf_token()}), 201
 
 
 @auth_bp.route("/register", methods=["POST"])

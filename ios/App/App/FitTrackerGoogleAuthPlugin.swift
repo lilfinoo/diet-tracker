@@ -1,5 +1,7 @@
 import Capacitor
 import UIKit
+import AuthenticationServices
+import CryptoKit
 
 #if canImport(GoogleSignIn)
 import GoogleSignIn
@@ -66,6 +68,85 @@ public class FitTrackerGoogleAuthPlugin: CAPPlugin, CAPBridgedPlugin {
             #endif
             call.resolve()
         }
+    }
+}
+
+@objc(FitTrackerAppleAuth)
+final class FitTrackerAppleAuthPlugin: CAPPlugin, CAPBridgedPlugin, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+    let identifier = "FitTrackerAppleAuth"
+    let jsName = "FitTrackerAppleAuth"
+    let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "signIn", returnType: CAPPluginReturnPromise),
+    ]
+    private var pendingCall: CAPPluginCall?
+    private var authorizationController: ASAuthorizationController?
+    private var presentationWindow: UIWindow?
+
+    @objc func signIn(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            guard self.pendingCall == nil else {
+                call.reject("Um login já está em andamento.", "sign_in_in_progress")
+                return
+            }
+            guard let nonce = call.getString("nonce"),
+                  nonce.count >= 32, nonce.count <= 256 else {
+                call.reject("O desafio do login Apple é inválido.", "invalid_nonce")
+                return
+            }
+            guard let window = self.bridge?.viewController?.view.window else {
+                call.reject("Não foi possível abrir o login Apple.", "presentation_unavailable")
+                return
+            }
+            let request = ASAuthorizationAppleIDProvider().createRequest()
+            request.requestedScopes = [.email, .fullName]
+            request.nonce = SHA256.hash(data: Data(nonce.utf8)).map { String(format: "%02x", $0) }.joined()
+            let controller = ASAuthorizationController(authorizationRequests: [request])
+            controller.delegate = self
+            controller.presentationContextProvider = self
+            self.pendingCall = call
+            self.presentationWindow = window
+            self.authorizationController = controller
+            controller.performRequests()
+        }
+    }
+
+    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        return presentationWindow ?? UIWindow()
+    }
+
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+        guard controller === authorizationController, let call = pendingCall else { return }
+        defer { finish() }
+        guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+              let tokenData = credential.identityToken,
+              let token = String(data: tokenData, encoding: .utf8), !token.isEmpty,
+              let codeData = credential.authorizationCode,
+              let code = String(data: codeData, encoding: .utf8), !code.isEmpty else {
+            call.reject("A Apple não devolveu os dados de autenticação.", "missing_credentials")
+            return
+        }
+        var result: [String: Any] = ["idToken": token, "authorizationCode": code]
+        if let name = credential.fullName {
+            result["displayName"] = PersonNameComponentsFormatter().string(from: name)
+        }
+        if let email = credential.email { result["email"] = email }
+        call.resolve(result)
+    }
+
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+        guard controller === authorizationController, let call = pendingCall else { return }
+        defer { finish() }
+        if let authorizationError = error as? ASAuthorizationError, authorizationError.code == .canceled {
+            call.reject("cancelled", "cancelled")
+        } else {
+            call.reject("Não foi possível concluir o login Apple. Tente novamente.", "apple_sign_in_failed")
+        }
+    }
+
+    private func finish() {
+        pendingCall = nil
+        authorizationController = nil
+        presentationWindow = nil
     }
 }
 
@@ -143,6 +224,7 @@ final class FitTrackerRefreshPlugin: CAPPlugin, CAPBridgedPlugin {
 final class FitTrackerBridgeViewController: CAPBridgeViewController {
     override public func capacitorDidLoad() {
         bridge?.registerPluginInstance(FitTrackerGoogleAuthPlugin())
+        bridge?.registerPluginInstance(FitTrackerAppleAuthPlugin())
         bridge?.registerPluginInstance(FitTrackerSharePlugin())
         bridge?.registerPluginInstance(FitTrackerBillingPlugin())
         bridge?.registerPluginInstance(FitTrackerConsolePlugin())
