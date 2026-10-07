@@ -299,12 +299,14 @@ def test_numeric_and_image_validation_rejects_unsafe_values(client, monkeypatch)
     }).status_code == 200
 
 
-def test_legal_pages_are_explicit_drafts_with_placeholders(client):
-    for path in ("/terms.html", "/privacy.html"):
+def test_public_legal_and_support_pages_have_contact_without_placeholders(client):
+    for path in ("/terms.html", "/privacy.html", "/support.html"):
         response = client.get(path)
         assert response.status_code == 200
-        assert "RASCUNHO JURÍDICO" in response.get_data(as_text=True)
-        assert "[" in response.get_data(as_text=True)
+        text = response.get_data(as_text=True)
+        assert "mailto:msteusoliveira@gmail.com" in text
+        assert "RASCUNHO" not in text
+        assert "[" not in text
 
 
 def test_app_wide_csrf_covers_logout_billing_admin_and_exempts_webhook(tmp_path):
