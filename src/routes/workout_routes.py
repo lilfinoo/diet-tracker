@@ -1,14 +1,18 @@
 import uuid
+import hashlib
+import json
 
 from flask import Blueprint, abort, g, jsonify
 from sqlalchemy.orm import selectinload
 
 from src.models.user import WorkoutDay, WorkoutExercise, WorkoutPlan, WorkoutSession, UserProfile, db
-from src.routes.common import (_apply_workout_plan_schedule, _editable_workout_plan, _get_or_create_profile, _local_date_for_timezone, _plan_catalog, _prescription, _redistribute_workout_plan_data, _set_catalog_exercise, _workout_questionnaire_for_plan, _workout_today_payload, _version_workout_plan_for_edit, json_body, login_required, page_query)
+from src.routes.common import (ai_consent_required, premium_required, _apply_workout_plan_schedule, _editable_workout_plan, _get_or_create_profile, _local_date_for_timezone, _plan_catalog, _prescription, _redistribute_workout_plan_data, _set_catalog_exercise, _workout_questionnaire_for_plan, _workout_today_payload, _version_workout_plan_for_edit, json_body, login_required, page_query)
 from src.services.plan_management import create_workout_plan
 from src.services.analytics import record_event
 from src.services.workout_plans import catalog_by_key, replacement_options
 from src.services.workout_progress import user_timezone
+from src.services.ai import AIServiceError, AIQuotaExceededError, suggest_workout_changes
+from src.services.rate_limit import rate_limit
 
 
 workout_bp = Blueprint("workout", __name__)
@@ -294,3 +298,81 @@ def delete_workout_plan(plan_id):
     db.session.delete(plan)
     db.session.commit()
     return jsonify({"message": "Plano de treino excluído com sucesso"}), 200
+
+
+def _workout_plan_revision(plan):
+    values = [{"id": item.id, "day_id": item.workout_day_id, "catalog_key": item.catalog_key,
+               "sets": item.sets, "reps": item.reps, "weight": item.weight, "rest_seconds": item.rest_seconds}
+              for item in sorted(plan.exercises, key=lambda exercise: exercise.id)]
+    return hashlib.sha256(json.dumps(values, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def _validated_workout_changes(plan, raw_changes):
+    if not isinstance(raw_changes, list) or not 1 <= len(raw_changes) <= len(plan.exercises):
+        abort(400, description="A proposta precisa conter alterações válidas.")
+    exercises = {exercise.id: exercise for exercise in plan.exercises}
+    catalog = {item["key"]: catalog_by_key()[item["key"]] for item in _plan_catalog(plan)}
+    normalized = []
+    seen = set()
+    for change in raw_changes:
+        if not isinstance(change, dict):
+            abort(400, description="Alteração inválida.")
+        exercise = exercises.get(change.get("exercise_id"))
+        item = catalog.get(change.get("catalog_key"))
+        source = catalog_by_key().get(exercise.catalog_key) if exercise else None
+        if not exercise or exercise.id in seen or not item or (source and item["substitution_group"] != source["substitution_group"]):
+            abort(400, description="Escolha exercícios compatíveis com o padrão de movimento atual.")
+        seen.add(exercise.id)
+        normalized.append({"exercise_id": exercise.id, "catalog_key": item["key"], "name": item["name"], **_prescription(change, exercise)})
+    keys = {item["exercise_id"]: item["catalog_key"] for item in normalized}
+    for day in plan.days:
+        proposed = [keys.get(exercise.id, exercise.catalog_key) for exercise in day.exercises]
+        if len(proposed) != len(set(proposed)):
+            abort(400, description="A proposta repete um exercício no mesmo treino.")
+    return normalized
+
+
+@workout_bp.route("/workout_plans/<int:plan_id>/suggest_changes", methods=["POST"])
+@rate_limit("ai", 8, 60)
+@ai_consent_required
+@premium_required(allow_trial=True)
+def suggest_workout_plan_changes(plan_id):
+    plan = _editable_workout_plan(plan_id)
+    data = json_body()
+    feedback = str(data.get("feedback", "")).strip()
+    if not 1 <= len(feedback) <= 2000:
+        abort(400, description="Descreva a mudança em até 2.000 caracteres.")
+    day_id = data.get("day_id")
+    if day_id is not None and day_id not in {day.id for day in plan.days}:
+        abort(400, description="Treino inválido.")
+    revision = _workout_plan_revision(plan)
+    snapshot = plan.to_dict_full()
+    try:
+        proposal = suggest_workout_changes(plan, _plan_catalog(plan), feedback, day_id)
+    except AIQuotaExceededError as error:
+        return jsonify({"error": str(error)}), 429
+    except AIServiceError:
+        return jsonify({"error": "A IA não conseguiu sugerir uma alteração agora."}), 503
+    changes = _validated_workout_changes(plan, proposal.get("changes"))
+    allowed = {exercise.id for day in plan.days if day_id is None or day.id == day_id for exercise in day.exercises}
+    if any(change["exercise_id"] not in allowed for change in changes):
+        abort(400, description="A proposta alterou outro treino. Tente novamente.")
+    return jsonify({"changes": changes, "revision": revision, "plan": snapshot}), 200
+
+
+@workout_bp.route("/workout_plans/<int:plan_id>/apply_changes", methods=["POST"])
+@login_required
+def apply_workout_plan_changes(plan_id):
+    plan = _editable_workout_plan(plan_id)
+    data = json_body()
+    if data.get("revision") != _workout_plan_revision(plan):
+        abort(409, description="O plano mudou desde a proposta. Gere e revise uma nova alteração.")
+    changes = _validated_workout_changes(plan, data.get("changes"))
+    plan, _, exercise_map = _version_workout_plan_for_edit(plan)
+    for change in changes:
+        exercise = exercise_map.get(change["exercise_id"]) or next(item for item in plan.exercises if item.id == change["exercise_id"])
+        _set_catalog_exercise(exercise, catalog_by_key()[change["catalog_key"]])
+        for field, value in _prescription(change, exercise).items():
+            setattr(exercise, field, value)
+    db.session.commit()
+    return jsonify({"plan": plan.to_dict_full()}), 200
