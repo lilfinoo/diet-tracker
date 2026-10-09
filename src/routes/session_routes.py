@@ -1,7 +1,8 @@
 from datetime import datetime
 import math
+from time import perf_counter
 
-from flask import Blueprint, abort, g, jsonify, request
+from flask import Blueprint, abort, current_app, g, jsonify, request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -19,8 +20,7 @@ from src.models.user import (
     WorkoutSetPerformance,
     db,
 )
-from src.routes.common import _activity_list_item, _ensure_user_workout_history, _owned_active_session, _performed_sets_payload, _session_exercise, _workout_session_summary, ai_consent_error, idempotent_mutation, json_body, login_required
-from src.services.ai import AIQuotaExceededError, AIServiceError, classify_exercise_catalog_key
+from src.routes.common import _activity_list_item, _ensure_user_workout_history, _owned_active_session, _performed_sets_payload, _session_exercise, _workout_session_summary, idempotent_mutation, json_body, login_required
 from src.services.achievements import evaluate_achievements, reconcile_achievements, serialize_unlock
 from src.services.analytics import record_event
 from src.services.personal_records import (
@@ -28,7 +28,7 @@ from src.services.personal_records import (
     process_session_personal_records,
     rebuild_personal_records,
 )
-from src.services.workout_plans import catalog_by_key, replacement_options, resolve_catalog_exercise
+from src.services.workout_plans import replacement_options
 from src.services.workout_progress import (
     complete_exercise_goal,
     reconcile_exercise_goals,
@@ -173,26 +173,6 @@ def get_exercise_replacement_options(session_id, exercise_id):
     if not isinstance(available, list) or len(available) > 12:
         return jsonify({"error": "Equipamentos disponíveis inválidos."}), 400
 
-    catalog_item = resolve_catalog_exercise(exercise.catalog_key, exercise.name)
-    if not catalog_item and exercise.catalog_key != "__unresolved__":
-        if not g.user.has_current_ai_consent():
-            return ai_consent_error()
-        try:
-            catalog_key = classify_exercise_catalog_key(exercise.name)
-        except AIQuotaExceededError as error:
-            return jsonify({"error": str(error)}), 429
-        except AIServiceError:
-            return jsonify({"error": "Não foi possível classificar este exercício agora."}), 503
-        catalog_item = catalog_by_key().get(catalog_key)
-        if catalog_item:
-            exercise.catalog_key = catalog_item["key"]
-            exercise.movement_pattern = catalog_item["movement_pattern"]
-            exercise.primary_muscle = catalog_item["primary_muscle"]
-            exercise.equipment = catalog_item["equipment"]
-            exercise.difficulty = catalog_item["difficulty"]
-        else:
-            exercise.catalog_key = "__unresolved__"
-        db.session.commit()
     options = replacement_options(
         exercise,
         unavailable,
@@ -209,6 +189,7 @@ def get_exercise_replacement_options(session_id, exercise_id):
 
 @session_bp.route("/workout_sessions/<int:session_id>/exercises/<int:exercise_id>/replace", methods=["POST"])
 @login_required
+@idempotent_mutation
 def replace_exercise_for_session(session_id, exercise_id):
     session_record = _owned_active_session(session_id)
     exercise = _session_exercise(session_record, exercise_id) if session_record else None
@@ -256,6 +237,7 @@ def replace_exercise_for_session(session_id, exercise_id):
 
 @session_bp.route("/workout_sessions/<int:session_id>/exercises/<int:exercise_id>/replace", methods=["DELETE"])
 @login_required
+@idempotent_mutation
 def restore_session_exercise(session_id, exercise_id):
     session_record = _owned_active_session(session_id)
     exercise = _session_exercise(session_record, exercise_id) if session_record else None
@@ -279,7 +261,11 @@ def complete_session_exercise(session_id, exercise_id):
     exercise = _session_exercise(session_record, exercise_id) if session_record else None
     if not session_record or not exercise:
         return jsonify({"error": "Sessão ou exercício não encontrado."}), 404
-    performed_sets = _performed_sets_payload(request.get_json(silent=True))
+    data = request.get_json(silent=True)
+    performed_sets = _performed_sets_payload(data)
+    completion_mode = data.get("completion_mode", "performed") if isinstance(data, dict) else "performed"
+    if completion_mode not in ("performed", "planned") or (completion_mode == "planned" and performed_sets):
+        return jsonify({"error": "Modo de conclusão inválido."}), 400
     completion = WorkoutSessionExerciseCompletion.query.filter_by(
         workout_session_id=session_record.id,
         workout_exercise_id=exercise.id,
@@ -297,6 +283,12 @@ def complete_session_exercise(session_id, exercise_id):
             workout_exercise_id=exercise.id,
             exercise_name=override.name if override else exercise.name,
             exercise_catalog_key=override.catalog_key if override else exercise.catalog_key,
+            completion_mode=completion_mode,
+            planned_prescription={
+                "sets": (override or exercise).sets,
+                "reps": (override or exercise).reps,
+                "rest_seconds": (override or exercise).rest_seconds,
+            } if completion_mode == "planned" else None,
         )
         db.session.add(completion)
         for performed_set in performed_sets:
@@ -333,7 +325,7 @@ def undo_session_exercise_completion(session_id, exercise_id):
     ).first()
     if completion:
         drafts = dict(session_record.draft_sets or {})
-        drafts[str(exercise.id)] = [
+        restored_sets = [
             {
                 "load_kg": str(performed_set.load_kg) if performed_set.load_kg is not None else "",
                 "repetitions": str(performed_set.repetitions),
@@ -342,7 +334,11 @@ def undo_session_exercise_completion(session_id, exercise_id):
             }
             for performed_set in completion.performed_sets
         ]
-        session_record.draft_sets = drafts
+        if restored_sets:
+            drafts[str(exercise.id)] = restored_sets
+        else:
+            drafts.pop(str(exercise.id), None)
+        session_record.draft_sets = drafts or None
         db.session.delete(completion)
         db.session.commit()
     return jsonify({"message": "Conclusão desfeita.", "session": session_record.to_dict()}), 200
@@ -376,6 +372,15 @@ def save_session_exercise_draft(session_id, exercise_id):
 @login_required
 @idempotent_mutation
 def finish_workout_session(session_id):
+    started = perf_counter()
+    phases = []
+
+    def mark(name):
+        nonlocal started
+        now = perf_counter()
+        phases.append((name, round((now - started) * 1000)))
+        started = now
+
     User.query.filter_by(id=g.user.id).with_for_update().first()
     session_record = WorkoutSession.query.filter_by(
         id=session_id,
@@ -384,31 +389,39 @@ def finish_workout_session(session_id):
     if not session_record:
         return jsonify({"error": "Sessão de treino não encontrada."}), 404
     WorkoutPlan.query.filter_by(id=session_record.workout_plan_id).with_for_update().first()
+    mark("lock")
     new_unlocks = []
     reached_goal = None
     newly_finished = session_record.completed_at is None
     if newly_finished:
         ensure_personal_record_history(g.user.id, exclude_session_id=session_record.id)
         evaluate_achievements(g.user.id, backfilled=True)
+        mark("history")
         session_record.completed_at = datetime.utcnow()
         timezone_name = confirmed_user_timezone(g.user.id) or user_timezone(g.user.id)
         snapshot_session_week(session_record, timezone=timezone_name)
+        mark("week_snapshot")
         process_session_personal_records(session_record)
+        mark("records")
         reached_goal = complete_exercise_goal(session_record)
         db.session.flush()
         new_unlocks = evaluate_achievements(g.user.id, related_session=session_record)
+        mark("goals_achievements")
     else:
-        ensure_personal_record_history(g.user.id)
-        timezone_name = confirmed_user_timezone(g.user.id) or user_timezone(g.user.id)
-        snapshot_session_week(session_record, timezone=timezone_name)
-        evaluate_achievements(g.user.id, backfilled=True)
+        if not session_record.completed_week_start:
+            timezone_name = confirmed_user_timezone(g.user.id) or user_timezone(g.user.id)
+            snapshot_session_week(session_record, timezone=timezone_name)
+        mark("existing_session")
     progress = weekly_progress(g.user.id)
+    mark("weekly_progress")
     if newly_finished:
         record_event(
             "workout_finished",
             user_id=g.user.id,
         )
     db.session.commit()
+    mark("commit")
+    current_app.logger.info("workout_finish_phases session_id=%s newly_finished=%s phases_ms=%s", session_id, newly_finished, phases)
     return jsonify({
         "message": "Treino finalizado.",
         "session": session_record.to_dict(),

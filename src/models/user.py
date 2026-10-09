@@ -950,6 +950,14 @@ class WorkoutSession(db.Model):
             "draft_sets": self.draft_sets or {},
             "overrides": [override.to_dict() for override in self.overrides],
             "completed_exercise_ids": [completion.workout_exercise_id for completion in self.completions],
+            "completions": [
+                {
+                    "workout_exercise_id": completion.workout_exercise_id,
+                    "completion_mode": completion.completion_mode,
+                    "planned_prescription": completion.planned_prescription,
+                }
+                for completion in self.completions
+            ],
         }
 
 
@@ -1013,6 +1021,8 @@ class WorkoutSessionExerciseCompletion(db.Model):
     )
     exercise_name = db.Column(db.String(100), nullable=True)
     exercise_catalog_key = db.Column(db.String(80), nullable=True)
+    completion_mode = db.Column(db.String(16), default="performed", nullable=False)
+    planned_prescription = db.Column(db.JSON, nullable=True)
     completed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     session = db.relationship("WorkoutSession", back_populates="completions")
     exercise = db.relationship("WorkoutExercise")

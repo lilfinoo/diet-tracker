@@ -119,6 +119,25 @@ def test_active_catalog_excludes_self_and_exercises_already_in_the_workout(app):
     assert [item["catalog_key"] for item in options] == ["workoutx:3"]
 
 
+def test_local_replacement_does_not_request_workoutx_recommendations(app, monkeypatch):
+    source = workout_exercise("1", "Barbell Bench Press")
+    with app.app_context():
+        app.config["WORKOUTX_API_KEY"] = "wx_test"
+        db.session.add_all([
+            WorkoutXExercise(provider_id="1", data=active_exercise("1", "Barbell Bench Press", "Pectorals", "Barbell")),
+            WorkoutXExercise(provider_id="2", data=active_exercise("2", "Dumbbell Bench Press", "Pectorals", "Dumbbell")),
+        ])
+        db.session.commit()
+        monkeypatch.setattr(
+            "src.services.workoutx.recommended_exercises",
+            lambda *_args: pytest.fail("A local option should avoid a WorkoutX request"),
+        )
+
+        options = replacement_options(source, present_exercises=[source])
+
+    assert [item["catalog_key"] for item in options] == ["workoutx:2"]
+
+
 def test_workoutx_replacement_uses_brazilian_name_and_preserves_gif_key(app):
     source = workout_exercise("0201", "Cable Pushdown")
     with app.app_context():

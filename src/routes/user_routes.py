@@ -730,6 +730,9 @@ def _workout_session_summary(session_record):
                 override.catalog_key if override else exercise.catalog_key
             ),
             "sets_performed": len(performed_sets),
+            "completion_mode": completion.completion_mode,
+            "planned_prescription": completion.planned_prescription,
+            "sets_planned": (completion.planned_prescription or {}).get("sets") if completion.completion_mode == "planned" else None,
             "sets": performed_sets,
             "best_set": best_set,
             "personal_records": [

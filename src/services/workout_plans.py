@@ -1116,7 +1116,7 @@ def _api_replacement_candidates(source_item, candidates, blocked, available, ful
 
 def _workoutx_replacement_options(exercise, source, unavailable_equipment, available_equipment, present_exercises, limit):
     from src.models.user import WorkoutXExercise
-    from src.services.workoutx import WorkoutXServiceError, approved_media, get_exercise
+    from src.services.workoutx import approved_media
 
     catalog = [item.data for item in WorkoutXExercise.query.all()]
     source_item = _active_workoutx_source(exercise, source, catalog)
@@ -1126,11 +1126,6 @@ def _workoutx_replacement_options(exercise, source, unavailable_equipment, avail
             source_item = next((
                 item for item in catalog if str(item["id"]) == str(media["provider_id"])
             ), None)
-            if source_item is None:
-                try:
-                    source_item = get_exercise(media["provider_id"])
-                except WorkoutXServiceError as error:
-                    current_app.logger.info("WorkoutX source details unavailable: %s", error)
     if not source_item:
         return None
     blocked = {str(value).strip().lower() for value in unavailable_equipment or []}
@@ -1147,8 +1142,12 @@ def _workoutx_replacement_options(exercise, source, unavailable_equipment, avail
         if present_item:
             present_ids.add(str(present_item["id"]))
     provider_scores = {}
+    local_options = substitution_options(
+        source_item, candidates, present_ids=present_ids, limit=max(len(candidates), limit),
+    )
+    local_options = _diversify_replacement_options(local_options, limit)
     extra_candidates = []
-    if current_app.config.get("WORKOUTX_API_KEY"):
+    if not local_options and current_app.config.get("WORKOUTX_API_KEY"):
         extra_candidates, provider_scores = _api_replacement_candidates(
             source_item,
             candidates,
@@ -1163,14 +1162,10 @@ def _workoutx_replacement_options(exercise, source, unavailable_equipment, avail
             if workoutx_display_name(item["id"])
             and _workoutx_equipment_available(item, blocked, available, full_gym)
         )
-    options = substitution_options(
-        source_item,
-        candidates,
-        present_ids=present_ids,
-        limit=max(len(candidates), limit),
-        provider_scores=provider_scores,
-    )
-    options = _diversify_replacement_options(options, limit)
+    options = local_options or _diversify_replacement_options(substitution_options(
+        source_item, candidates, present_ids=present_ids,
+        limit=max(len(candidates), limit), provider_scores=provider_scores,
+    ), limit)
     localized_options = [
         {
             "catalog_key": f"workoutx:{candidate['id']}",

@@ -3,6 +3,7 @@ from src.services.performance import performed_exercises, exercise_sessions, his
 from datetime import timedelta
 
 from flask import Blueprint, g, jsonify, request
+from sqlalchemy import func
 
 from src.models.user import AchievementUnlock, ExerciseGoal, PersonalRecordEvent, UserProfile, WorkoutSession, WorkoutSessionExerciseCompletion, WorkoutWeeklyGoal, db
 from src.routes.common import _activity_list_item, _ensure_user_workout_history, json_body, login_required, page_query
@@ -182,7 +183,11 @@ def personal_records():
     query = PersonalRecordEvent.query.filter_by(
         user_id=g.user.id,
         is_highlighted=True,
-    ).order_by(PersonalRecordEvent.achieved_at.desc(), PersonalRecordEvent.id.desc())
+    )
+    search = request.args.get("search", "").strip()
+    if search:
+        query = query.filter(func.lower(PersonalRecordEvent.exercise_name).contains(search.lower(), autoescape=True))
+    query = query.order_by(PersonalRecordEvent.achieved_at.desc(), PersonalRecordEvent.id.desc())
     query, limit, offset = page_query(query, default_limit=50)
     records = query.all()
     return jsonify({

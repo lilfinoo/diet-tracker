@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta
 
+import pytest
+
 from src.models.user import (
     AchievementUnlock,
     ExerciseGoal,
@@ -11,6 +13,7 @@ from src.models.user import (
     WorkoutPlan,
     WorkoutSession,
     WorkoutSessionExerciseCompletion,
+    WorkoutSessionExerciseOverride,
     WorkoutSetPerformance,
     WorkoutWeeklyGoal,
     db,
@@ -232,6 +235,84 @@ def test_undo_exercise_completion_requires_owner_and_active_session(app, client)
     ).status_code == 404
 
 
+def test_planned_completion_snapshots_override_without_performed_data(app, client):
+    with app.app_context():
+        owner = create_user("planned-owner")
+        plan, day, exercises = create_plan(owner, ("supino_reto_halteres",))
+        session = WorkoutSession(user_id=owner.id, workout_plan_id=plan.id, workout_day_id=day.id)
+        db.session.add(session)
+        db.session.flush()
+        db.session.add(WorkoutSessionExerciseOverride(
+            workout_session_id=session.id,
+            workout_exercise_id=exercises[0].id,
+            catalog_key="flexao",
+            name="Flexão",
+            sets=4,
+            reps="30-45 segundos",
+            rest_seconds=60,
+        ))
+        session_id, exercise_id = session.id, exercises[0].id
+        db.session.commit()
+
+    login(client, "planned-owner")
+    token = client.get("/api/check_session").get_json()["csrf_token"]
+    path = f"/api/workout_sessions/{session_id}/exercises/{exercise_id}/complete"
+    headers = {"X-CSRF-Token": token, "Idempotency-Key": "planned-complete-1"}
+    first = client.post(path, json={"completion_mode": "planned"}, headers=headers)
+    replay = client.post(path, json={"completion_mode": "planned"}, headers=headers)
+    assert first.status_code == 200
+    assert replay.get_json() == first.get_json()
+    completion = first.get_json()["session"]["completions"][0]
+    assert completion["completion_mode"] == "planned"
+    assert completion["planned_prescription"] == {"sets": 4, "reps": "30-45 segundos", "rest_seconds": 60}
+
+    with app.app_context():
+        stored = WorkoutSessionExerciseCompletion.query.one()
+        assert stored.exercise_name == "Flexão"
+        assert stored.performed_sets == []
+        assert WorkoutSetPerformance.query.count() == 0
+
+    undo_headers = {"X-CSRF-Token": token, "Idempotency-Key": "planned-undo-1"}
+    undo = client.delete(path, headers=undo_headers)
+    assert undo.status_code == 200
+    assert undo.get_json()["session"]["draft_sets"] == {}
+    assert client.delete(path, headers=undo_headers).get_json() == undo.get_json()
+    assert client.post(path, json={"completion_mode": "planned"}, headers={
+        "X-CSRF-Token": token, "Idempotency-Key": "planned-complete-2",
+    }).status_code == 200
+
+    finished = client.post(f"/api/workout_sessions/{session_id}/finish", headers={"X-CSRF-Token": token})
+    assert finished.status_code == 200
+    summary = finished.get_json()["summary"]
+    assert summary["sets_performed"] == 0
+    assert summary["volume_total_kg"] is None
+    assert summary["personal_records"] == []
+    assert summary["exercises"][0]["sets_planned"] == 4
+
+
+def test_planned_completion_rejects_performed_sets(app, client):
+    with app.app_context():
+        owner = create_user("planned-invalid")
+        plan, day, exercises = create_plan(owner, ("supino_reto_halteres",))
+        session = WorkoutSession(user_id=owner.id, workout_plan_id=plan.id, workout_day_id=day.id)
+        db.session.add(session)
+        db.session.flush()
+        session_id, exercise_id = session.id, exercises[0].id
+        db.session.commit()
+    login(client, "planned-invalid")
+    token = client.get("/api/check_session").get_json()["csrf_token"]
+    response = client.post(
+        f"/api/workout_sessions/{session_id}/exercises/{exercise_id}/complete",
+        json={"completion_mode": "planned", "sets": [{"repetitions": 8, "load_kg": 20}]},
+        headers={"X-CSRF-Token": token},
+    )
+    assert response.status_code == 400
+    with app.app_context():
+        assert WorkoutSessionExerciseCompletion.query.count() == 0
+
+
+
+
 def test_pr_engine_detects_strict_progress_epley_and_warmup(app):
     with app.app_context():
         user = create_user("pr-owner")
@@ -382,7 +463,7 @@ def test_weekly_goal_route_schedules_only_subsequent_changes_for_next_week(app, 
         assert goals[1].target_sessions == 4
 
 
-def test_exercise_goal_and_achievements_are_idempotent(app, client):
+def test_exercise_goal_and_achievements_are_idempotent(app, client, monkeypatch):
     with app.app_context():
         user = create_user("goal-owner", "UTC")
         plan, day, exercises = create_plan(user, ("supino_reto_halteres",))
@@ -429,6 +510,8 @@ def test_exercise_goal_and_achievements_are_idempotent(app, client):
     assert first.status_code == 200
     assert first.get_json()["exercise_goals_reached"]
     assert first.get_json()["summary"]["personal_records"]
+    monkeypatch.setattr("src.routes.session_routes.ensure_personal_record_history", lambda *_args, **_kwargs: pytest.fail("Retry must not rebuild PR history"))
+    monkeypatch.setattr("src.routes.session_routes.evaluate_achievements", lambda *_args, **_kwargs: pytest.fail("Retry must not reevaluate achievements"))
     second = client.post(f"/api/workout_sessions/{session_id}/finish")
     assert second.status_code == 200
     assert second.get_json()["exercise_goals_reached"] == []
@@ -439,3 +522,34 @@ def test_exercise_goal_and_achievements_are_idempotent(app, client):
         assert len(codes) == len(set(codes))
         assert "first_pr" in codes
         assert "first_goal" in codes
+
+
+def test_replacement_and_restore_replay_without_reapplying(app, client, monkeypatch):
+    with app.app_context():
+        owner = create_user("replace-replay")
+        plan, day, exercises = create_plan(owner, ("supino_reto_halteres",))
+        session = WorkoutSession(user_id=owner.id, workout_plan_id=plan.id, workout_day_id=day.id)
+        db.session.add(session)
+        db.session.flush()
+        session_id, exercise_id = session.id, exercises[0].id
+        db.session.commit()
+    login(client, "replace-replay")
+    token = client.get("/api/check_session").get_json()["csrf_token"]
+    path = f"/api/workout_sessions/{session_id}/exercises/{exercise_id}/replace"
+    monkeypatch.setattr("src.routes.session_routes.replacement_options", lambda *_args, **_kwargs: [{
+        "catalog_key": "flexao", "name": "Flexão", "sets": 3, "reps": "8-12", "rest_seconds": 60,
+    }])
+    headers = {"X-CSRF-Token": token, "Idempotency-Key": "replace-replay-1"}
+    first = client.post(path, json={"catalog_key": "flexao"}, headers=headers)
+    assert first.status_code == 200
+    monkeypatch.setattr("src.routes.session_routes.replacement_options", lambda *_args, **_kwargs: pytest.fail("Retry must not fetch alternatives"))
+    assert client.post(path, json={"catalog_key": "flexao"}, headers=headers).get_json() == first.get_json()
+    restore_headers = {"X-CSRF-Token": token, "Idempotency-Key": "restore-replay-1"}
+    restored = client.delete(path, headers=restore_headers)
+    assert restored.status_code == 200
+    with app.app_context():
+        db.session.add(WorkoutSessionExerciseOverride(workout_session_id=session_id, workout_exercise_id=exercise_id, catalog_key="flexao", name="Flexão"))
+        db.session.commit()
+    assert client.delete(path, headers=restore_headers).get_json() == restored.get_json()
+    with app.app_context():
+        assert WorkoutSessionExerciseOverride.query.count() == 1
