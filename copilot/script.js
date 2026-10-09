@@ -959,7 +959,7 @@ function closeAuthModal() {
 
 function requireAuth(reason, options = {}) {
     if (currentUser) {
-        if (options.premium && !hasAiAccess()) {
+        if (options.premium && !hasAiAccess(options.aiKind)) {
             showToast('Este recurso utiliza IA e está disponível no plano Premium.', 'info');
             openPlansModal();
             return false;
@@ -976,8 +976,12 @@ function requireAuth(reason, options = {}) {
     return false;
 }
 
-function hasAiAccess() {
-    return Boolean(currentUser?.is_premium || (currentUser && Number(currentUser.ai_trial_uses || 0) < 3));
+function hasAiAccess(kind = 'premium') {
+    if (currentUser?.is_premium) return true;
+    if (!currentUser) return false;
+    if (kind === 'plans') return Number(currentUser.free_plan_uses || 0) < 1;
+    if (kind === 'photos') return Number(currentUser.free_photo_uses || 0) < 3;
+    return false;
 }
 
 async function initializeGoogleAuth() {
@@ -3430,7 +3434,7 @@ async function loadTodayCardapio(options = {}) {
 }
 
 function editDailyNutritionTargets() {
-    if (!requireAuth('Entre para editar metas e gerar um novo cardápio.', { premium: true, requiresProfile: true, resume: editDailyNutritionTargets })) return;
+    if (!requireAuth('Entre para editar metas e gerar um novo cardápio.', { premium: true, aiKind: 'plans', requiresProfile: true, resume: editDailyNutritionTargets })) return;
     if (!cardapioActivePlan) {
         if (window.openPlanWizard) window.openPlanWizard("diet");
         return;

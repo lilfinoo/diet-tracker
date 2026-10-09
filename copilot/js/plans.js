@@ -1085,10 +1085,12 @@
         if (type !== "diet" && type !== "workout") return;
         if (type === "workout" && !window.requireAuth?.("Entre para criar seu treino.", {
             premium: true,
+            aiKind: "plans",
             resume: () => openPlanWizard(type)
         })) return;
         if (type === "diet" && !window.requireAuth?.("Entre para criar seu plano alimentar.", {
             premium: true,
+            aiKind: "plans",
             requiresProfile: true,
             resume: () => openPlanWizard(type)
         })) return;
@@ -1364,12 +1366,13 @@
             closePlanWizard();
             window.requireAuth?.(`Entre para gerar seu plano de ${type === "diet" ? "dieta" : "treino"}.`, {
                 premium: true,
+                aiKind: "plans",
                 requiresProfile: type === "diet",
                 resume: () => openPlanWizard(type)
             });
             return;
         }
-        if (!window.requireAuth?.(`Entre para gerar seu plano de ${type === "diet" ? "dieta" : "treino"}.`, { premium: true })) return;
+        if (!window.requireAuth?.(`Entre para gerar seu plano de ${type === "diet" ? "dieta" : "treino"}.`, { premium: true, aiKind: "plans" })) return;
 
         state.generating = true;
         state.pendingGenerationJob = null;
