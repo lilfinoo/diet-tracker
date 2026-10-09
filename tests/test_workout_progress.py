@@ -153,6 +153,85 @@ def test_activities_are_private_and_preserve_real_session_data(app, client):
         assert db.session.get(WorkoutPlan, plan_id).status == "archived"
 
 
+def test_undo_exercise_completion_restores_sets_as_draft_and_is_idempotent(app, client):
+    with app.app_context():
+        owner = create_user("undo-owner")
+        plan, day, exercises = create_plan(owner)
+        session = WorkoutSession(user_id=owner.id, workout_plan_id=plan.id, workout_day_id=day.id)
+        db.session.add(session)
+        db.session.flush()
+        completion = WorkoutSessionExerciseCompletion(
+            workout_session_id=session.id,
+            workout_exercise_id=exercises[0].id,
+            exercise_name=exercises[0].name,
+            exercise_catalog_key=exercises[0].catalog_key,
+        )
+        db.session.add(completion)
+        db.session.flush()
+        db.session.add_all([
+            WorkoutSetPerformance(completion_id=completion.id, set_order=1, load_kg=80, repetitions=8),
+            WorkoutSetPerformance(completion_id=completion.id, set_order=2, load_kg=None, repetitions=12, is_warmup=True),
+        ])
+        session.draft_sets = {str(exercises[1].id): [{"load_kg": "20", "repetitions": "10", "is_warmup": False, "completed": False}]}
+        session_id = session.id
+        exercise_id = exercises[0].id
+        other_exercise_id = exercises[1].id
+        db.session.commit()
+
+    login(client, "undo-owner")
+    token = client.get("/api/check_session").get_json()["csrf_token"]
+    path = f"/api/workout_sessions/{session_id}/exercises/{exercise_id}/complete"
+    first = client.delete(path, headers={"X-CSRF-Token": token})
+    assert first.status_code == 200
+    session_payload = first.get_json()["session"]
+    assert session_payload["completed_exercise_ids"] == []
+    assert session_payload["draft_sets"][str(exercise_id)] == [
+        {"load_kg": "80.00", "repetitions": "8", "is_warmup": False, "completed": True},
+        {"load_kg": "", "repetitions": "12", "is_warmup": True, "completed": True},
+    ]
+    assert str(other_exercise_id) in session_payload["draft_sets"]
+
+    second = client.delete(path, headers={"X-CSRF-Token": token})
+    assert second.status_code == 200
+    assert second.get_json()["session"]["draft_sets"] == session_payload["draft_sets"]
+    with app.app_context():
+        assert WorkoutSessionExerciseCompletion.query.filter_by(workout_session_id=session_id).count() == 0
+        assert WorkoutSetPerformance.query.count() == 0
+
+
+def test_undo_exercise_completion_requires_owner_and_active_session(app, client):
+    with app.app_context():
+        owner = create_user("undo-private-owner")
+        create_user("undo-private-other")
+        plan, day, exercises = create_plan(owner, ("supino_reto_halteres",))
+        active = WorkoutSession(user_id=owner.id, workout_plan_id=plan.id, workout_day_id=day.id)
+        completed = WorkoutSession(
+            user_id=owner.id,
+            workout_plan_id=plan.id,
+            workout_day_id=day.id,
+            completed_at=datetime.utcnow(),
+        )
+        db.session.add_all([active, completed])
+        db.session.flush()
+        active_id, completed_id, exercise_id = active.id, completed.id, exercises[0].id
+        db.session.commit()
+
+    login(client, "undo-private-other")
+    token = client.get("/api/check_session").get_json()["csrf_token"]
+    headers = {"X-CSRF-Token": token}
+    assert client.delete(
+        f"/api/workout_sessions/{active_id}/exercises/{exercise_id}/complete", headers=headers
+    ).status_code == 404
+
+    client.post("/api/logout", headers=headers)
+    login(client, "undo-private-owner")
+    token = client.get("/api/check_session").get_json()["csrf_token"]
+    assert client.delete(
+        f"/api/workout_sessions/{completed_id}/exercises/{exercise_id}/complete",
+        headers={"X-CSRF-Token": token},
+    ).status_code == 404
+
+
 def test_pr_engine_detects_strict_progress_epley_and_warmup(app):
     with app.app_context():
         user = create_user("pr-owner")

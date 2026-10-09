@@ -318,6 +318,36 @@ def complete_session_exercise(session_id, exercise_id):
     return jsonify({"message": "Exercício concluído.", "session": session_record.to_dict()}), 200
 
 
+@session_bp.route("/workout_sessions/<int:session_id>/exercises/<int:exercise_id>/complete", methods=["DELETE"])
+@login_required
+@idempotent_mutation
+def undo_session_exercise_completion(session_id, exercise_id):
+    session_record = _owned_active_session(session_id)
+    exercise = _session_exercise(session_record, exercise_id) if session_record else None
+    if not session_record or not exercise:
+        return jsonify({"error": "Sessão ou exercício não encontrado."}), 404
+
+    completion = WorkoutSessionExerciseCompletion.query.filter_by(
+        workout_session_id=session_record.id,
+        workout_exercise_id=exercise.id,
+    ).first()
+    if completion:
+        drafts = dict(session_record.draft_sets or {})
+        drafts[str(exercise.id)] = [
+            {
+                "load_kg": str(performed_set.load_kg) if performed_set.load_kg is not None else "",
+                "repetitions": str(performed_set.repetitions),
+                "is_warmup": performed_set.is_warmup,
+                "completed": True,
+            }
+            for performed_set in completion.performed_sets
+        ]
+        session_record.draft_sets = drafts
+        db.session.delete(completion)
+        db.session.commit()
+    return jsonify({"message": "Conclusão desfeita.", "session": session_record.to_dict()}), 200
+
+
 @session_bp.route("/workout_sessions/<int:session_id>/exercises/<int:exercise_id>/draft", methods=["PUT"])
 @login_required
 def save_session_exercise_draft(session_id, exercise_id):
