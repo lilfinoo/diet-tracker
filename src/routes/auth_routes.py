@@ -374,3 +374,71 @@ def check_session():
             return jsonify({"logged_in": True, "user": user.session_dict(), "csrf_token": _csrf_token()}), 200
         session.clear()
     return jsonify({"logged_in": False}), 200
+
+
+@auth_bp.route("/account/identities", methods=["GET"])
+@login_required
+def connected_identities():
+    from flask import g
+    return jsonify({"providers": sorted({identity.provider for identity in g.user.oauth_identities})}), 200
+
+
+@auth_bp.route("/account/identities/<provider>", methods=["POST"])
+@rate_limit("link_identity", 10, 60)
+@login_required
+def link_identity(provider):
+    """Attach a verified provider identity only to the authenticated account."""
+    from flask import g
+    if provider not in {"google", "apple"}:
+        return jsonify({"error": "Provedor não disponível"}), 404
+    data = json_body()
+    if provider == "google":
+        client_id = current_app.config.get("GOOGLE_CLIENT_ID")
+        if not client_id:
+            return jsonify({"error": "Login Google não configurado"}), 503
+        try:
+            payload = google_id_token.verify_oauth2_token(data.get("credential"), google_requests.Request(), client_id)
+            claims = _google_identity_claims(payload)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Token Google inválido"}), 401
+    else:
+        if not apple_auth_service.configured():
+            return jsonify({"error": "Login Apple não configurado"}), 503
+        nonce = data.get("nonce")
+        expected = session.pop("apple_nonce", None)
+        if not isinstance(nonce, str) or not expected or not secrets.compare_digest(nonce, expected):
+            return jsonify({"error": "Solicitação Apple inválida"}), 401
+        consumed = AppleAuthChallenge.query.filter_by(nonce_hash=hashlib.sha256(nonce.encode()).hexdigest()).filter(
+            AppleAuthChallenge.expires_at > datetime.utcnow()).delete()
+        db.session.commit()
+        if consumed != 1:
+            return jsonify({"error": "Solicitação Apple expirada ou já utilizada"}), 401
+        try:
+            payload = apple_auth_service.verify_identity(data.get("credential"), nonce)
+            encrypted = apple_auth_service.exchange_code(data.get("authorization_code"), payload["sub"], nonce)
+        except (ValueError, jwt.InvalidTokenError):
+            return jsonify({"error": "Credencial Apple inválida"}), 401
+        except (requests.RequestException, jwt.PyJWKClientError):
+            return jsonify({"error": "Apple indisponível. Tente novamente."}), 503
+        email = payload.get("email")
+        claims = {"provider": "apple", "issuer": apple_auth_service.APPLE_ISSUER, "subject": payload["sub"],
+                  "email": email[:320] if isinstance(email, str) else None,
+                  "email_verified": payload.get("email_verified") in (True, "true"),
+                  "display_name": str(data.get("display_name") or "")[:255] or None,
+                  "apple_refresh_token": encrypted}
+    identity = OAuthIdentity.query.filter_by(provider=provider, issuer=claims["issuer"], subject=claims["subject"]).first()
+    if identity and identity.user_id != g.user.id:
+        return jsonify({"error": "Este acesso já pertence a outra conta. Entre com outro acesso ou use a conta original.", "code": "identity_already_linked"}), 409
+    if identity is None:
+        identity = OAuthIdentity(user=g.user, last_login_at=datetime.utcnow(), **claims)
+        db.session.add(identity)
+    else:
+        identity.last_login_at = datetime.utcnow()
+        if provider == "apple":
+            identity.apple_refresh_token = claims["apple_refresh_token"]
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Este acesso já foi vinculado a outra conta.", "code": "identity_already_linked"}), 409
+    return jsonify({"providers": sorted({item.provider for item in g.user.oauth_identities})}), 200

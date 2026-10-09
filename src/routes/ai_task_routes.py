@@ -16,3 +16,17 @@ def get_ai_task(task_id):
         response.headers["Retry-After"] = "2"
     response.headers["Cache-Control"] = "no-store"
     return response, 200
+
+
+@ai_task_bp.route("/ai/usage", methods=["GET"])
+@login_required
+def get_ai_usage():
+    response = jsonify({
+        "premium": g.user.has_entitlement("premium"),
+        "policy": "lifetime",
+        "plans": {"limit": 1, "used": g.user.free_plan_uses, "remaining": max(0, 1 - g.user.free_plan_uses)},
+        "photos": {"limit": 3, "used": g.user.free_photo_uses, "remaining": max(0, 3 - g.user.free_photo_uses)},
+        "manual_logging": True,
+    })
+    response.headers["Cache-Control"] = "no-store"
+    return response, 200

@@ -1,3 +1,4 @@
+import base64
 from datetime import datetime, timedelta
 
 from itsdangerous import URLSafeTimedSerializer
@@ -193,13 +194,13 @@ def test_ai_trial_counts_only_successful_responses(app, client, monkeypatch):
         lambda description, image_bytes, mime_type: {"calories": 100},
     )
 
-    assert client.post("/api/diet/ai_macros", json={}).status_code == 400
+    assert client.post("/api/diet/ai_macros", json={}).status_code == 403
     for _ in range(3):
         assert client.post(
-            "/api/diet/ai_macros", json={"description": "banana"}
+            "/api/diet/ai_macros", json={"image": {"data": base64.b64encode(b"\xff\xd8\xffexample").decode(), "mime_type": "image/jpeg"}}
         ).status_code == 200
     blocked = client.post(
-        "/api/diet/ai_macros", json={"description": "banana"}
+        "/api/diet/ai_macros", json={"image": {"data": base64.b64encode(b"\xff\xd8\xffexample").decode(), "mime_type": "image/jpeg"}}
     )
     assert blocked.status_code == 403
     assert blocked.get_json()["code"] == "premium_required"

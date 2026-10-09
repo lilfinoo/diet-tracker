@@ -105,7 +105,7 @@ PREMIUM_PLAN_CODES = {"premium_student", "premium_student_annual"}
 PREMIUM_FEATURES = ["IA sem limite de teste", "Dietas personalizadas", "Treinos personalizados"]
 
 PLANS = (
-    {"code": "free", "name": "Gratuito", "price_brl": 0, "features": ["Diário alimentar", "Medidas e progresso", "3 usos da IA"]},
+    {"code": "free", "name": "Gratuito", "price_brl": 0, "features": ["Diário alimentar", "Medidas e progresso", "1 treino OU dieta e 3 análises de fotos, uma vez por conta"]},
     {"code": "premium_student", "name": "Premium Mensal", "price_brl": 20, "cycle": "MONTHLY", "period_label": "/mês", "pix_access_days": 30, "features": PREMIUM_FEATURES},
     {"code": "premium_student_annual", "name": "Premium Anual", "price_brl": 120, "cycle": "YEARLY", "period_label": "/ano", "pix_access_days": 365, "discount_percent": 50, "monthly_equivalent_brl": 10, "features": PREMIUM_FEATURES},
 )

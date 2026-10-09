@@ -293,7 +293,7 @@ def delete_diet_entry(entry_id):
 @profile_bp.route("/diet/ai_macros", methods=["POST"])
 @rate_limit("ai", 8, 60)
 @ai_consent_required
-@premium_required(allow_trial=True)
+@premium_required(allow_trial=True, trial_kind="photos")
 def get_ai_macros():
     data = json_body()
     raw_description = data.get("description", "")

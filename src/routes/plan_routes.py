@@ -44,7 +44,7 @@ plan_bp = Blueprint("plan", __name__)
 @plan_bp.route("/chat", methods=["POST"])
 @rate_limit("ai", 8, 60)
 @ai_consent_required
-@premium_required(allow_trial=True)
+@premium_required
 def chat():
     user = g.user
     profile = UserProfile.query.filter_by(user_id=user.id).first()
@@ -102,7 +102,7 @@ def chat_history():
 @plan_bp.route("/diet_plans/generate", methods=["POST"])
 @rate_limit("ai", 8, 60)
 @ai_consent_required
-@premium_required(allow_trial=True)
+@premium_required(allow_trial=True, trial_kind="plans")
 def create_guided_diet_plan():
     user = g.user
     data = json_body()
@@ -214,7 +214,7 @@ def get_workout_recommendation():
 @plan_bp.route("/workout_plans/generate", methods=["POST"])
 @rate_limit("ai", 8, 60)
 @ai_consent_required
-@premium_required(allow_trial=True)
+@premium_required(allow_trial=True, trial_kind="plans")
 def create_guided_workout_plan():
     user = g.user
     data = json_body()
@@ -462,7 +462,7 @@ def update_diet_plan_meal(plan_id, meal_id):
 @plan_bp.route("/diet_plans/<int:plan_id>/suggest", methods=["POST"])
 @rate_limit("ai", 8, 60)
 @ai_consent_required
-@premium_required(allow_trial=True)
+@premium_required
 def suggest_diet_day(plan_id):
     plan = DietPlan.query.filter_by(id=plan_id, user_id=g.user.id, status="published").first_or_404()
     data = json_body()

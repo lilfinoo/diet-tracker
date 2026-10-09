@@ -10,6 +10,8 @@ db = SQLAlchemy()
 class User(db.Model):
     __table_args__ = (
         db.CheckConstraint("ai_trial_uses >= 0", name="ck_user_ai_trial_uses_nonnegative"),
+        db.CheckConstraint("free_plan_uses >= 0", name="ck_user_free_plan_uses_nonnegative"),
+        db.CheckConstraint("free_photo_uses >= 0", name="ck_user_free_photo_uses_nonnegative"),
     )
 
     id = db.Column(UUIDType(binary=False), primary_key=True, default=uuid.uuid4)
@@ -26,6 +28,8 @@ class User(db.Model):
     is_premium = db.Column(db.Boolean, default=False, nullable=False)
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
     ai_trial_uses = db.Column(db.Integer, default=0, nullable=False)
+    free_plan_uses = db.Column(db.Integer, default=0, nullable=False)
+    free_photo_uses = db.Column(db.Integer, default=0, nullable=False)
     terms_version = db.Column(db.String(40), nullable=True)
     terms_accepted_at = db.Column(db.DateTime, nullable=True)
     privacy_version = db.Column(db.String(40), nullable=True)
@@ -172,6 +176,8 @@ class User(db.Model):
             "is_premium": self.has_entitlement("premium"),
             "plan_code": self.effective_plan_code(),
             "ai_trial_uses": self.ai_trial_uses,
+            "free_plan_uses": self.free_plan_uses,
+            "free_photo_uses": self.free_photo_uses,
             "has_password": bool(self.password_hash),
             "is_public": bool(self.profile and self.profile.is_public),
             "avatar_url": (
@@ -219,6 +225,8 @@ class User(db.Model):
             "is_premium": self.has_entitlement("premium"),
             "plan_code": self.effective_plan_code(),
             "ai_trial_uses": self.ai_trial_uses,
+            "free_plan_uses": self.free_plan_uses,
+            "free_photo_uses": self.free_photo_uses,
             "has_password": bool(self.password_hash),
             "diet_entries_count": count("diet_entries", lambda: self.diet_entries),
             "measurements_count": count("measurements", lambda: self.measurements),

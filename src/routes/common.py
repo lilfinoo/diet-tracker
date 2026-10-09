@@ -134,42 +134,54 @@ def admin_required(f):
     return decorated_function
 
 
-def premium_required(_func=None, *, allow_trial=False):
+def premium_required(_func=None, *, allow_trial=False, trial_kind=None):
     def decorator(f):
         @wraps(f)
         @login_required
         def decorated_function(*args, **kwargs):
             from flask import g
             uses_trial = not g.user.has_entitlement("premium")
-            if uses_trial and not allow_trial:
-                record_event("premium_limit_reached", user_id=g.user.id, commit=True)
-                return jsonify({"error": "Acesso negado: Requer status Premium", "code": "premium_required"}), 403
+            kind = trial_kind
+            # Only image analysis is part of the free photo allowance.
+            if kind == "photos":
+                body = request.get_json(silent=True) or {}
+                image = body.get("image") if isinstance(body, dict) else None
+                if not isinstance(image, dict) or not image.get("data"):
+                    kind = None
+            if uses_trial and (not allow_trial or kind not in {"plans", "photos"}):
+                return jsonify({"error": "Este recurso de IA requer Premium.", "code": "premium_required"}), 403
             reserved_trial = False
             if uses_trial:
+                column = User.free_plan_uses if kind == "plans" else User.free_photo_uses
+                limit = 1 if kind == "plans" else 3
                 reserved_trial = bool(User.query.filter(
-                    User.id == g.user.id,
-                    User.ai_trial_uses < 3,
-                ).update({User.ai_trial_uses: User.ai_trial_uses + 1}, synchronize_session=False))
+                    User.id == g.user.id, column < limit,
+                ).update({column: column + 1}, synchronize_session=False))
                 db.session.commit()
                 if not reserved_trial:
                     record_event("premium_limit_reached", user_id=g.user.id, commit=True)
-                    return jsonify({"error": "Acesso negado: Requer status Premium", "code": "premium_required"}), 403
+                    return jsonify({"error": "Você já utilizou esta experiência gratuita. Assine Premium para continuar.",
+                                    "code": "premium_required", "quota_kind": kind}), 403
             try:
                 response = current_app.make_response(f(*args, **kwargs))
             except Exception:
                 if reserved_trial:
-                    User.query.filter(User.id == g.user.id, User.ai_trial_uses > 0).update(
-                        {User.ai_trial_uses: User.ai_trial_uses - 1},
-                        synchronize_session=False,
+                    db.session.rollback()
+                    User.query.filter(User.id == g.user.id, column > 0).update(
+                        {column: column - 1}, synchronize_session=False,
                     )
                     db.session.commit()
                 raise
             if reserved_trial and 200 <= response.status_code < 300:
+                # Retain the legacy total for existing administrative reports.
+                User.query.filter(User.id == g.user.id).update(
+                    {User.ai_trial_uses: User.ai_trial_uses + 1}, synchronize_session=False,
+                )
                 record_event("free_premium_use", user_id=g.user.id, commit=True)
             elif reserved_trial:
-                User.query.filter(User.id == g.user.id, User.ai_trial_uses > 0).update(
-                    {User.ai_trial_uses: User.ai_trial_uses - 1},
-                    synchronize_session=False,
+                db.session.rollback()
+                User.query.filter(User.id == g.user.id, column > 0).update(
+                    {column: column - 1}, synchronize_session=False,
                 )
                 db.session.commit()
             return response

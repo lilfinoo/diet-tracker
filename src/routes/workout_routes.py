@@ -335,7 +335,7 @@ def _validated_workout_changes(plan, raw_changes):
 @workout_bp.route("/workout_plans/<int:plan_id>/suggest_changes", methods=["POST"])
 @rate_limit("ai", 8, 60)
 @ai_consent_required
-@premium_required(allow_trial=True)
+@premium_required
 def suggest_workout_plan_changes(plan_id):
     plan = _editable_workout_plan(plan_id)
     data = json_body()
