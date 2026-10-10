@@ -177,6 +177,7 @@ def test_authoritative_meal_and_workout_events_are_emitted_once(app, client):
 
     with app.app_context():
         user = User.query.filter_by(username="analytics-user").one()
+        user.is_premium = True
         plan = WorkoutPlan(user_id=user.id, title="Treino", status="published", source="manual")
         db.session.add(plan)
         db.session.flush()

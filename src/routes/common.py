@@ -134,7 +134,7 @@ def admin_required(f):
     return decorated_function
 
 
-def premium_required(_func=None, *, allow_trial=False, trial_kind=None):
+def premium_required(_func=None, *, allow_trial=False, trial_kind=None, message="Este recurso de IA requer Premium."):
     def decorator(f):
         @wraps(f)
         @login_required
@@ -149,7 +149,7 @@ def premium_required(_func=None, *, allow_trial=False, trial_kind=None):
                 if not isinstance(image, dict) or not image.get("data"):
                     kind = None
             if uses_trial and (not allow_trial or kind not in {"plans", "photos"}):
-                return jsonify({"error": "Este recurso de IA requer Premium.", "code": "premium_required"}), 403
+                return jsonify({"error": message, "code": "premium_required"}), 403
             reserved_trial = False
             if uses_trial:
                 column = User.free_plan_uses if kind == "plans" else User.free_photo_uses

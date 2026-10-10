@@ -27,7 +27,7 @@ def workout_today():
 
 
 @workout_bp.route("/workout_plans/<int:plan_id>/current", methods=["PUT"])
-@login_required
+@premium_required(message="Assine Premium para aplicar seu plano de treino.")
 def set_current_workout_plan(plan_id):
     user = g.user
     data = json_body()
@@ -71,7 +71,7 @@ def set_current_workout_plan(plan_id):
 
 
 @workout_bp.route("/workout_plans/<int:plan_id>/current/adapt", methods=["POST"])
-@login_required
+@premium_required(message="Assine Premium para aplicar seu plano de treino.")
 def adapt_current_workout_plan(plan_id):
     user = g.user
     data = json_body()

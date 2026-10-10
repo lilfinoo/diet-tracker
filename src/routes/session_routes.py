@@ -20,7 +20,7 @@ from src.models.user import (
     WorkoutSetPerformance,
     db,
 )
-from src.routes.common import _activity_list_item, _ensure_user_workout_history, _owned_active_session, _performed_sets_payload, _session_exercise, _workout_session_summary, idempotent_mutation, json_body, login_required
+from src.routes.common import _activity_list_item, _ensure_user_workout_history, _owned_active_session, _performed_sets_payload, _session_exercise, _workout_session_summary, idempotent_mutation, json_body, login_required, premium_required
 from src.services.achievements import evaluate_achievements, reconcile_achievements, serialize_unlock
 from src.services.analytics import record_event
 from src.services.personal_records import (
@@ -115,7 +115,7 @@ def get_active_workout_session(plan_id, day_id):
 
 
 @session_bp.route("/workout_plans/<int:plan_id>/days/<int:day_id>/sessions", methods=["POST"])
-@login_required
+@premium_required(message="Assine Premium para iniciar seu treino.")
 def start_workout_session(plan_id, day_id):
     plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=g.user.id, status="published").with_for_update().first()
     day = WorkoutDay.query.filter_by(id=day_id, workout_plan_id=plan.id if plan else None).first()
