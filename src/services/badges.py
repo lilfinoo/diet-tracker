@@ -121,9 +121,17 @@ def _pioneer_rank_for_user(user):
         .all()
     ]
     try:
-        return ordered_ids.index(user.id) + 1
+        rank = ordered_ids.index(user.id) + 1
     except ValueError:
         return None
+    # Account deletion changes positions, but existing pioneer ranks stay fixed.
+    occupied = {
+        item[0] for item in UserBadge.query.with_entities(UserBadge.badge_rank)
+        .filter_by(badge_code="pioneiro").all()
+    }
+    while rank in occupied:
+        rank += 1
+    return rank if rank <= PIONEER_LIMIT else None
 
 
 def grant_signup_badges(user):
