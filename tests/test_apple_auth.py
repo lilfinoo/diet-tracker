@@ -172,3 +172,20 @@ def test_exchange_encrypts_token_and_revocation_uses_private_credentials(app, mo
 
 def test_malformed_signup_token_is_rejected(client, apple_ready):
     assert client.post("/api/auth/apple", json={"signup_token": {"forged": True}}).status_code == 401
+
+
+def test_fresh_apple_signup_after_deletion_preserves_other_pioneer_ranks(client, app, apple_ready, monkeypatch):
+    first_token = authenticate(client).get_json()["signup_token"]
+    assert signup(client, first_token).status_code == 201
+    other_client = app.test_client()
+    assert signup(other_client, authenticate(other_client, "other-sub").get_json()["signup_token"], "other-user").status_code == 201
+    monkeypatch.setattr(apple_auth, "revoke_identity", Mock())
+    assert client.delete("/api/account", json={"username": "apple-user", "confirm_delete": True}).status_code == 200
+    monkeypatch.setattr(apple_auth, "verify_identity", lambda credential, nonce: {"sub": credential})
+    token = authenticate(client).get_json()["signup_token"]
+    response = signup(client, token)
+    assert response.status_code == 201
+    with app.app_context():
+        assert OAuthIdentity.query.count() == 2
+        other = User.query.filter_by(username="other-user").one()
+        assert next(badge.badge_rank for badge in other.badges if badge.badge_code == "pioneiro") == 2
