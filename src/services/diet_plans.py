@@ -520,8 +520,8 @@ def normalize_manual_diet(data, questionnaire):
 
 def correction_feedback(error, candidate=None, targets=None):
     feedback = {
-        "instruction": "Ajuste as porções numericamente para que CADA dia fique dentro de todas as faixas permitidas. Preserve alimentos e restrições sempre que possível; não apenas troque o texto. Recalcule os quatro totais depois do ajuste.",
-        "validation_errors": dict(list(error.errors.items())[:20]),
+        "instruction": "Ajuste as porções numericamente para que CADA dia fique dentro de todas as faixas permitidas. Preserve dias já válidos, alimentos e restrições sempre que possível; não apenas troque o texto. Não altere estimativas nutricionais sem ajustar os alimentos e suas porções. Recalcule os quatro totais depois do ajuste, mantendo coerência entre calorias e energia dos macros.",
+        "validation_errors": dict(error.errors),
     }
     if candidate:
         feedback["previous_plan"] = candidate
@@ -539,4 +539,29 @@ def correction_feedback(error, candidate=None, targets=None):
             }
             for nutrient, target_name in target_names.items()
         }
+        feedback["allowed_daily_ranges"]["calories"]["min"] = max(
+            feedback["allowed_daily_ranges"]["calories"]["min"], targets["bmr"] * 0.90
+        )
+        feedback["daily_totals"] = []
+        if isinstance(candidate, dict):
+            days = candidate.get("days") if candidate.get("type") == "diet_plan" else [candidate]
+            for day_number, day in enumerate(days if isinstance(days, list) else [], start=1):
+                meals = day.get("meals") if isinstance(day, dict) else None
+                if not isinstance(meals, list) or not meals or any(not isinstance(meal, dict) for meal in meals):
+                    continue
+                errors = {}
+                totals = {
+                    nutrient: round(sum(_macro(meal.get(nutrient), nutrient, errors) for meal in meals), 1)
+                    for nutrient in target_names
+                }
+                if errors:
+                    continue
+                feedback["daily_totals"].append({
+                    "day_number": day_number,
+                    "totals": totals,
+                    "target_differences": {
+                        nutrient: round(targets[target_name] - totals[nutrient], 1)
+                        for nutrient, target_name in target_names.items()
+                    },
+                })
     return feedback

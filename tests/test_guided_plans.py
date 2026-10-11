@@ -1126,6 +1126,33 @@ def test_guided_diet_retries_with_validation_feedback(app, client, monkeypatch):
         assert DietPlan.query.count() == 1
 
 
+def test_guided_diet_preserves_valid_days_during_correction(app, client, monkeypatch):
+    register_premium(app, client)
+    calls = []
+
+    def generate(*args):
+        calls.append(args[3])
+        result = generated_diet(args[2])
+        invalid_day = 0 if len(calls) == 1 else 1
+        result["days"][invalid_day]["meals"][0]["calories"] = 0
+        if len(calls) > 1:
+            result["days"][2]["meals"][0]["items"] = ["Cerveja"]
+        return result
+
+    monkeypatch.setattr("src.routes.plan_routes.generate_diet_plan", generate)
+
+    response = client.post("/api/diet_plans/generate", json=diet_questionnaire())
+
+    assert response.status_code == 201
+    assert len(calls) == 2
+    meals = response.get_json()["plan"]["meals"]
+    assert len(meals) == 9
+    assert all(meal["calories"] > 0 for meal in meals)
+    assert all("Cerveja" not in meal["items"] for meal in meals)
+    with app.app_context():
+        assert DietPlan.query.count() == 1
+
+
 def test_guided_diet_does_not_persist_after_invalid_attempts(app, client, monkeypatch):
     register_premium(app, client)
     calls = {"count": 0}

@@ -122,20 +122,39 @@ def create_guided_diet_plan():
         return queued
 
     correction = None
+    validated_days = {}
     max_attempts = current_app.config["GEMINI_DIET_VALIDATION_ATTEMPTS"]
     for attempt in range(1, max_attempts + 1):
         try:
             generated = generate_diet_plan(questionnaire, profile, nutrition_targets, correction)
+            if isinstance(generated, dict) and generated.get("type") == "diet_plan":
+                days = generated.get("days")
+                if isinstance(days, list) and len(days) == 3:
+                    days = list(days)
+                    for day_index, day in enumerate(days):
+                        if day_index in validated_days:
+                            days[day_index] = validated_days[day_index]
+                            continue
+                        try:
+                            normalize_diet_day(
+                                {"type": "diet_plan_day", "meals": day.get("meals") if isinstance(day, dict) else None},
+                                questionnaire, nutrition_targets,
+                            )
+                        except PlanValidationError:
+                            continue
+                        validated_days[day_index] = day
+                    generated = {**generated, "days": days}
             plan_data = normalize_diet_output(generated, questionnaire, nutrition_targets)
             break
         except PlanValidationError as error:
             current_app.logger.warning(
-                "Invalid generated diet plan (attempt %s/%s)",
+                "Invalid generated diet plan (attempt %s/%s): %s",
                 attempt,
                 max_attempts,
+                sorted(error.errors),
             )
             if attempt == max_attempts:
-                return jsonify({"error": "A dieta não atingiu as metas nutricionais. Tente novamente."}), 502
+                return jsonify({"error": "Não conseguimos concluir sua dieta agora. Suas escolhas foram mantidas; tente novamente em alguns instantes."}), 502
             correction = correction_feedback(error, generated, nutrition_targets)
         except AIResponseError:
             current_app.logger.warning("Diet plan AI returned invalid output (attempt %s/%s)", attempt, max_attempts)
