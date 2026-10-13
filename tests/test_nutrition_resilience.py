@@ -22,7 +22,7 @@ def test_nutrition_fallback_preserves_photo_and_description(app, monkeypatch):
     monkeypatch.setattr(ai, '_completion', completion)
     monkeypatch.setattr(ai.time, 'sleep', lambda _: None)
     with app.app_context():
-        app.config.update(GEMINI_STRUCTURED_MODEL='primary', GEMINI_MODEL='fallback')
+        app.config.update(GEMINI_NUTRITION_MODEL='primary', GEMINI_MODEL='fallback')
         result = ai.calculate_nutrition('Arroz e feijão', b'photo', 'image/jpeg')
     assert result['calories'] == 100
     assert [kwargs['model'] for _, kwargs in calls] == ['primary', 'fallback']

@@ -53,6 +53,7 @@ class Config:
     GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
     GEMINI_CHAT_MODEL = os.getenv("GEMINI_CHAT_MODEL", "gemini-flash-lite-latest")
     GEMINI_STRUCTURED_MODEL = os.getenv("GEMINI_STRUCTURED_MODEL", "gemini-flash-lite-latest")
+    GEMINI_NUTRITION_MODEL = os.getenv("GEMINI_NUTRITION_MODEL", "gemini-3.1-flash-lite")
     GEMINI_PLAN_MODEL = os.getenv("GEMINI_PLAN_MODEL", "gemini-flash-latest")
     GEMINI_WORKOUT_MODEL = os.getenv("GEMINI_WORKOUT_MODEL", GEMINI_STRUCTURED_MODEL)
     GEMINI_WORKOUT_FALLBACK_MODEL = os.getenv(

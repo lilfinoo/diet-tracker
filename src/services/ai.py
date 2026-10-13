@@ -197,7 +197,7 @@ Assuma porções médias brasileiras se não houver referência de tamanho."""
         "quantidades inferidas como aproximadas. Não apresente suposições como certezas. "
         "Se não conseguir identificar alimentos, retorne description vazia."
     )
-    primary_model = current_app.config["GEMINI_STRUCTURED_MODEL"]
+    primary_model = current_app.config["GEMINI_NUTRITION_MODEL"]
     fallback_model = current_app.config["GEMINI_MODEL"]
     deadline = time.monotonic() + 22
     for attempt, model in enumerate((primary_model, fallback_model)):
