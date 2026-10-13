@@ -8,7 +8,8 @@ from datetime import datetime
 from flask import Blueprint, current_app, g, jsonify, session
 
 from src.legal import (
-    AI_CONSENT_VERSION,
+    AI_OPENAI_CONSENT_VERSION,
+    ai_consent_version_for_request,
     legal_versions_payload,
     record_consent,
 )
@@ -36,7 +37,10 @@ def _consent_payload(user):
     return {
         "versions": legal_versions_payload(),
         "ai": {
-            "accepted": user.has_current_ai_consent(),
+            "accepted": user.has_current_ai_consent() and (
+                ai_consent_version_for_request() != AI_OPENAI_CONSENT_VERSION
+                or user.ai_consent_version == AI_OPENAI_CONSENT_VERSION
+            ),
             "version": user.ai_consent_version,
             "accepted_at": user.ai_consent_at.isoformat() if user.ai_consent_at else None,
         },
@@ -56,12 +60,13 @@ def update_consents():
     if "ai_consent" in data:
         if not isinstance(data["ai_consent"], bool):
             return jsonify({"error": "Consentimento de IA inválido."}), 400
-        if data["ai_consent"] and data.get("ai_consent_version") != AI_CONSENT_VERSION:
+        expected_version = ai_consent_version_for_request()
+        if (data["ai_consent"] or "ai_consent_version" in data) and data.get("ai_consent_version") != expected_version:
             return jsonify({"error": "A versão do consentimento de IA está desatualizada."}), 400
         record_consent(
             g.user,
             "ai",
-            AI_CONSENT_VERSION,
+            data.get("ai_consent_version") or expected_version,
             data["ai_consent"],
             "account_settings",
         )

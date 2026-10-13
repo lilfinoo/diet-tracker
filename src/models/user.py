@@ -135,9 +135,9 @@ class User(db.Model):
         return False
 
     def has_current_ai_consent(self):
-        from src.legal import AI_CONSENT_VERSION
+        from src.legal import AI_CONSENT_VERSION, AI_OPENAI_CONSENT_VERSION
 
-        return bool(self.ai_consent_at and self.ai_consent_version == AI_CONSENT_VERSION)
+        return bool(self.ai_consent_at and self.ai_consent_version in {AI_CONSENT_VERSION, AI_OPENAI_CONSENT_VERSION})
 
     def ban_user(self):
         self.is_banned = True

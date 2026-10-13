@@ -10,7 +10,7 @@ RESULT = json.dumps({'description': 'Arroz, porção aproximada', 'calories': 10
                      'protein': 2, 'carbs': 20, 'fat': 1})
 
 
-def test_nutrition_fallback_preserves_photo_and_description(app, monkeypatch):
+def test_nutrition_retry_preserves_photo_and_description(app, monkeypatch):
     calls = []
 
     def completion(*args, **kwargs):
@@ -25,7 +25,7 @@ def test_nutrition_fallback_preserves_photo_and_description(app, monkeypatch):
         app.config.update(GEMINI_NUTRITION_MODEL='primary', GEMINI_MODEL='fallback')
         result = ai.calculate_nutrition('Arroz e feijão', b'photo', 'image/jpeg')
     assert result['calories'] == 100
-    assert [kwargs['model'] for _, kwargs in calls] == ['primary', 'fallback']
+    assert [kwargs['model'] for _, kwargs in calls] == ['primary', 'primary']
     for args, kwargs in calls:
         assert 'Arroz e feijão' in args[1]
         assert kwargs['image_bytes'] == b'photo'

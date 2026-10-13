@@ -5,7 +5,7 @@ import time
 from typing import Optional
 
 import httpx
-from flask import current_app
+from flask import current_app, g, has_request_context
 from google import genai
 from google.genai import types
 
@@ -34,6 +34,10 @@ class AIQuotaExceededError(AIServiceError):
 
 class AIServiceUnavailableError(AIServiceError):
     """Raised when Gemini temporarily cannot accept a request."""
+
+
+class AIRefusalError(AIServiceError):
+    """A provider refusal must not be bypassed through another provider."""
 
 
 def _provider_error_category(error):
@@ -79,7 +83,60 @@ def _json_object(content: str) -> dict:
     return data
 
 
-def _completion(
+def _openai_fallback_allowed():
+    from src.legal import AI_OPENAI_CONSENT_VERSION
+
+    user = getattr(g, "user", None) if has_request_context() else None
+    return bool(current_app.config.get("OPENAI_API_KEY") and user
+                and user.ai_consent_version == AI_OPENAI_CONSENT_VERSION
+                and user.has_current_ai_consent())
+
+
+def _completion(system_instruction, prompt, max_tokens, temperature, json_response=False,
+                model=None, json_schema=None, image_bytes=None, mime_type=None,
+                request_timeout=None, fallback_timeout=None, fallback_only=False):
+    allowed = _openai_fallback_allowed()
+    deadline = getattr(g, "ai_generation_deadline", None) if has_request_context() else None
+    if deadline is not None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AIServiceUnavailableError("A geração excedeu o tempo de espera.")
+        request_timeout = min(request_timeout or 25, remaining)
+    if not (allowed and fallback_only):
+        try:
+            result = _gemini_completion(
+                system_instruction, prompt, max_tokens, temperature, json_response=json_response,
+                model=model, json_schema=json_schema, image_bytes=image_bytes, mime_type=mime_type,
+                request_timeout=request_timeout,
+            )
+            if json_response:
+                _json_object(result)
+            return result
+        except AIRefusalError:
+            raise
+        except AIServiceError:
+            if not allowed:
+                raise
+            current_app.logger.warning("Gemini generation failed; trying authorized OpenAI fallback")
+    from src.services.openai_fallback import completion
+
+    timeout = fallback_timeout or request_timeout or 60
+    if deadline is not None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AIServiceUnavailableError("A geração excedeu o tempo de espera.")
+        timeout = min(timeout, remaining)
+    result = completion(
+        system_instruction, prompt, max_tokens, temperature, json_response=json_response,
+        json_schema=json_schema, image_bytes=image_bytes, mime_type=mime_type,
+        timeout=timeout,
+    )
+    if json_response:
+        _json_object(result)
+    return result
+
+
+def _gemini_completion(
     system_instruction: str,
     prompt: str,
     max_tokens: int,
@@ -128,6 +185,10 @@ def _completion(
         candidate = next(iter(response.candidates or []), None)
         finish_reason = getattr(candidate, "finish_reason", None)
         finish_reason_name = getattr(finish_reason, "name", str(finish_reason))
+        blocked = getattr(getattr(response, "prompt_feedback", None), "block_reason", None)
+        blocked_name = getattr(blocked, "name", str(blocked))
+        if finish_reason_name in {"SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST"} or blocked_name in {"SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "OTHER"}:
+            raise AIRefusalError("A IA não pode concluir esta solicitação.")
         usage = getattr(response, "usage_metadata", None)
         current_app.logger.info(
             "Gemini response model=%s finish_reason=%s usage=%s",
@@ -198,9 +259,11 @@ Assuma porções médias brasileiras se não houver referência de tamanho."""
         "Se não conseguir identificar alimentos, retorne description vazia."
     )
     primary_model = current_app.config["GEMINI_NUTRITION_MODEL"]
-    fallback_model = current_app.config["GEMINI_MODEL"]
+    # Retry the verified model instead of the unhealthy moving Flash alias.
+    fallback_model = primary_model
     deadline = time.monotonic() + 22
-    for attempt, model in enumerate((primary_model, fallback_model)):
+    models = (primary_model,) if _openai_fallback_allowed() else (primary_model, fallback_model)
+    for attempt, model in enumerate(models):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise AIServiceUnavailableError("A análise excedeu o tempo de espera.")
@@ -218,7 +281,7 @@ Assuma porções médias brasileiras se não houver referência de tamanho."""
             )
             break
         except AIServiceUnavailableError:
-            if attempt == 1:
+            if attempt == len(models) - 1:
                 raise
             current_app.logger.warning("Nutrition model %s unavailable; trying %s", model, fallback_model)
             time.sleep(0.5)
@@ -301,6 +364,8 @@ def _profile_context(profile):
 
 
 def generate_workout_plan(questionnaire: dict, profile, correction=None, contract=None) -> dict:
+    if has_request_context() and not hasattr(g, "ai_generation_deadline"):
+        g.ai_generation_deadline = time.monotonic() + 150
     contract = contract or build_workout_contract(questionnaire)
     day_specs = contract["effective"]["days"]
     prompt_catalog = contract["exercise_catalog"]
@@ -443,8 +508,8 @@ Corrija esses dias usando os respectivos required_days. Não retorne nem altere 
     contents = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     primary_model = current_app.config["GEMINI_WORKOUT_MODEL"]
     fallback_model = current_app.config["GEMINI_WORKOUT_FALLBACK_MODEL"]
-    models = [primary_model] + ([fallback_model] if fallback_model and fallback_model != primary_model else [])
-    unavailable_attempts = max(1, current_app.config["GEMINI_WORKOUT_UNAVAILABLE_RETRIES"])
+    models = [primary_model] + ([fallback_model] if fallback_model and fallback_model != primary_model and not _openai_fallback_allowed() else [])
+    unavailable_attempts = 1 if _openai_fallback_allowed() else max(1, current_app.config["GEMINI_WORKOUT_UNAVAILABLE_RETRIES"])
     last_error = None
 
     for attempt in range(unavailable_attempts):
@@ -458,6 +523,9 @@ Corrija esses dias usando os respectivos required_days. Não retorne nem altere 
                     json_response=True,
                     model=model,
                     json_schema=schema,
+                    request_timeout=25,
+                    fallback_timeout=60,
+                    fallback_only=bool(correction),
                 )
                 return _json_object(response)
             except AIServiceUnavailableError as error:
@@ -516,7 +584,9 @@ def _diet_meal_schema(include_optional=True):
 
 
 def _generate_diet_json(system_instruction, payload, schema):
-    attempts = max(1, current_app.config["GEMINI_DIET_RETRY_ATTEMPTS"])
+    if has_request_context() and not hasattr(g, "ai_generation_deadline"):
+        g.ai_generation_deadline = time.monotonic() + 150
+    attempts = 1 if _openai_fallback_allowed() else max(1, current_app.config["GEMINI_DIET_RETRY_ATTEMPTS"])
     for attempt in range(1, attempts + 1):
         try:
             return _json_object(_completion(
@@ -527,6 +597,9 @@ def _generate_diet_json(system_instruction, payload, schema):
                 json_response=True,
                 model=current_app.config["GEMINI_DIET_PLAN_MODEL"],
                 json_schema=schema,
+                request_timeout=25,
+                fallback_timeout=60,
+                fallback_only=bool(payload.get("correction")),
             ))
         except AIServiceUnavailableError:
             if attempt == attempts:

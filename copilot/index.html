@@ -115,7 +115,7 @@
                                 <button type="button" class="field-reveal" data-reveal-target="confirmPassword" aria-label="Mostrar confirmação de senha"><i class="fas fa-eye"></i></button>
                             </div>
                         </div>
-                        <label class="legal-check"><input type="checkbox" id="registerAiConsent"><span>Autorizo enviar ao Google Gemini minhas mensagens, fotos de refeições e dados de perfil, alimentação, medidas e treino usados para gerar análises e planos. Posso revogar em Perfil → Privacidade e IA.</span></label>
+                        <label class="legal-check"><input type="checkbox" id="registerAiConsent"><span>Autorizo enviar ao Google Gemini e, se houver falha, à OpenAI minhas mensagens, fotos de refeições e dados de perfil, alimentação, medidas e treino usados para gerar análises e planos. Posso revogar em Perfil → Privacidade e IA.</span></label>
                         <button type="submit" class="btn-primary btn-primary--block">
                             <i class="fas fa-user-plus"></i>
                             Criar Conta
@@ -136,7 +136,7 @@
                         <form id="googleUsernameForm" class="auth-form google-username-form">
                             <label for="googleUsername">Nome de usuário</label>
                             <input type="text" id="googleUsername" autocomplete="username" maxlength="80" required placeholder="Como você quer ser chamado?">
-                            <label class="legal-check"><input type="checkbox" id="googleAiConsent"><span>Autorizo enviar ao Google Gemini minhas mensagens, fotos de refeições e dados de perfil, alimentação, medidas e treino usados para gerar análises e planos. Posso revogar em Perfil → Privacidade e IA.</span></label>
+                            <label class="legal-check"><input type="checkbox" id="googleAiConsent"><span>Autorizo enviar ao Google Gemini e, se houver falha, à OpenAI minhas mensagens, fotos de refeições e dados de perfil, alimentação, medidas e treino usados para gerar análises e planos. Posso revogar em Perfil → Privacidade e IA.</span></label>
                             <button type="submit" id="googleSignupSubmit" class="btn-primary btn-primary--block">Concluir cadastro</button>
                         </form>
                     </section>
@@ -556,7 +556,7 @@
             <div class="modal-content account-sheet">
                 <div class="modal-header"><div><span class="content-kicker">Sua conta</span><h3 id="privacySettingsTitle">Privacidade e IA</h3><p>Gerencie a autorização para usar recursos de IA.</p></div><button type="button" class="btn-close" onclick="closeAppModal(document.getElementById('privacySettingsModal'))" aria-label="Fechar">&times;</button></div>
                 <div id="consentStatus" class="account-consent-status"></div>
-                <label class="legal-check"><input type="checkbox" id="accountAiConsent"><span>Autorizo enviar ao Google Gemini minhas mensagens, fotos de refeições e dados de perfil, alimentação, medidas e treino usados para gerar análises e planos. A revogação bloqueia novas solicitações à IA.</span></label>
+                <label class="legal-check"><input type="checkbox" id="accountAiConsent"><span>Autorizo enviar ao Google Gemini e, se houver falha, à OpenAI minhas mensagens, fotos de refeições e dados de perfil, alimentação, medidas e treino usados para gerar análises e planos. A revogação bloqueia novas solicitações à IA.</span></label>
                 <div class="modal-actions"><button type="button" class="btn-primary" onclick="savePrivacySettings()">Salvar escolhas</button></div>
             </div>
         </div>

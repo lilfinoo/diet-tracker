@@ -984,11 +984,17 @@ function hasAiAccess(kind = 'premium') {
     return false;
 }
 
+function aiProviderHeaders() {
+    // Older cached HTML must never advertise a consent notice it cannot show.
+    return getElement('accountAiConsent')?.parentElement?.textContent.includes('OpenAI')
+        ? { 'X-AI-Providers': 'gemini,openai' } : {};
+}
+
 async function initializeGoogleAuth() {
     if (googleAuthReady) return googleAuthReady;
     googleAuthReady = (async () => {
     try {
-        const response = await window.fetchWithTimeout(`${API_BASE}/auth/config`);
+        const response = await window.fetchWithTimeout(`${API_BASE}/auth/config`, { headers: aiProviderHeaders() });
         const config = response.ok ? await response.json() : {};
         legalVersions = config.legal || null;
         if (config.apple_enabled) initializeAppleAuth();
@@ -1201,7 +1207,7 @@ async function finishGoogleSignup(event) {
     try {
         const response = await fetch(`${API_BASE}/auth/${socialSignupProvider}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...aiProviderHeaders() },
             credentials: 'include',
             body: JSON.stringify({
                 signup_token: googleSignupToken,
@@ -2110,7 +2116,8 @@ async function handleRegister(e) {
         const response = await window.fetchWithTimeout(`${API_BASE}/register`, {
             method: "POST",
             headers: {
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                ...aiProviderHeaders()
             },
             credentials: "include",
             body: JSON.stringify({
@@ -2140,7 +2147,7 @@ async function handleRegister(e) {
 async function openPrivacySettings() {
     if (!currentUser) return;
     try {
-        const response = await fetch(`${API_BASE}/account/consents`, { credentials: 'include' });
+        const response = await fetch(`${API_BASE}/account/consents`, { credentials: 'include', headers: aiProviderHeaders() });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Não foi possível carregar os consentimentos.');
         legalVersions = data.versions;
@@ -2157,7 +2164,7 @@ async function savePrivacySettings() {
     try {
         const response = await fetch(`${API_BASE}/account/consents`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...aiProviderHeaders() },
             credentials: 'include',
             body: JSON.stringify({
                 ai_consent: Boolean(getElement('accountAiConsent')?.checked),

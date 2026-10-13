@@ -1399,7 +1399,7 @@
             result = await apiRequest(path, {
                 method: "POST",
                 body: buildWizardPayload(type),
-                timeout: 110_000,
+                timeout: 180_000,
                 offlineMessage: `Sem conexão. Não foi possível confirmar se o plano de ${type === "diet" ? "alimentação" : "treino"} foi criado.`,
                 jobLabel: type === "diet" ? "plano alimentar" : "treino",
                 onQueued: (job) => {

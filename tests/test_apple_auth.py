@@ -156,6 +156,19 @@ def test_signup_requires_consent_choice(client, apple_ready):
     assert client.post("/api/auth/apple", json={"signup_token": "forged", "username": "apple-user", "ai_consent": False}).status_code == 401
 
 
+def test_signup_openai_consent_requires_capable_client(client, app, apple_ready):
+    from src.legal import AI_OPENAI_CONSENT_VERSION
+    from src.models.user import ConsentRecord
+    token = authenticate(client).get_json()["signup_token"]
+    body = {"signup_token": token, "username": "apple-new-provider", "ai_consent": True,
+            "ai_consent_version": AI_OPENAI_CONSENT_VERSION}
+    assert client.post("/api/auth/apple", json=body).status_code == 400
+    assert client.post("/api/auth/apple", json=body, headers={"X-AI-Providers": "gemini,openai"}).status_code == 201
+    with app.app_context():
+        assert User.query.one().ai_consent_version == AI_OPENAI_CONSENT_VERSION
+        assert ConsentRecord.query.one().version == AI_OPENAI_CONSENT_VERSION
+
+
 def test_signup_token_cannot_recreate_deleted_account(client, app, apple_ready, monkeypatch):
     token = authenticate(client).get_json()["signup_token"]
     assert signup(client, token).status_code == 201

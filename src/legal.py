@@ -1,10 +1,18 @@
 from datetime import datetime
+from flask import has_request_context, request
 
 
 TERMS_VERSION = "2026-10-07"
 PRIVACY_VERSION = "2026-10-07"
 AI_CONSENT_VERSION = "2026-10-06"
+AI_OPENAI_CONSENT_VERSION = "2026-10-13"
 PROFESSIONAL_SHARING_VERSION = "draft-2026-08-29"
+
+
+def ai_consent_version_for_request():
+    if has_request_context() and request.headers.get("X-AI-Providers") == "gemini,openai":
+        return AI_OPENAI_CONSENT_VERSION
+    return AI_CONSENT_VERSION
 
 
 def record_consent(user, document_type, version, granted, source):
@@ -32,6 +40,6 @@ def record_consent(user, document_type, version, granted, source):
 
 def legal_versions_payload():
     return {
-        "ai": {"version": AI_CONSENT_VERSION},
+        "ai": {"version": ai_consent_version_for_request()},
         "professional_sharing": {"version": PROFESSIONAL_SHARING_VERSION},
     }
