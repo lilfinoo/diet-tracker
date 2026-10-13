@@ -399,7 +399,10 @@ def generate_workout_plan(questionnaire: dict, profile, correction=None, contrac
         "questionnaire": questionnaire,
         "profile": _profile_context(profile),
         "required_days": required_days,
-        "exercise_catalog": prompt_catalog,
+        "exercise_catalog": {
+            "columns": list(prompt_catalog[0]) if prompt_catalog else [],
+            "rows": [[item[column] for column in prompt_catalog[0]] for item in prompt_catalog],
+        },
         "contract_quality": contract["quality"],
         "contract_adaptations": contract["adaptations"],
         "contract_warnings": contract["warnings"],
@@ -473,6 +476,7 @@ def generate_workout_plan(questionnaire: dict, profile, correction=None, contrac
         },
     }
     system_instruction = """Você monta programas individualizados de musculação em português com base em treinamento resistido e anatomia funcional.
+exercise_catalog é uma tabela: columns identifica os campos de cada posição nas rows.
 Use SOMENTE catalog_key presente em exercise_catalog. Siga exatamente required_days, focus_guidance, required_groups, allowed_groups, required_training_roles e a ordem dos dias. Cada lista interna de required_groups e required_training_roles representa alternativas: escolha ao menos uma opção de cada lista. Nunca invente exercício, ID ou equipamento.
 Quando required_day contiver slots, preencha cada slot exatamente uma vez com um catalog_key da respectiva allowed_catalog_keys e retorne o slot_id em cada exercício. A quantidade e a distribuição já estão decididas pelos slots; não adicione, remova ou troque slots.
 

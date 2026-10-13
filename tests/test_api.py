@@ -488,6 +488,9 @@ def test_workout_retry_sends_only_invalid_days_and_previous_plan(app, monkeypatc
         ai.generate_workout_plan(questionnaire, None, correction)
 
     assert captured["payload"]["repair"] == correction
+    catalog = captured["payload"]["exercise_catalog"]
+    restored_catalog = [dict(zip(catalog["columns"], row, strict=True)) for row in catalog["rows"]]
+    assert restored_catalog == ai.build_workout_contract(questionnaire)["exercise_catalog"]
     assert [day["day_number"] for day in captured["payload"]["required_days"]] == [1, 4]
     assert captured["payload"]["required_days"][0]["selection_limits"]["unique_catalog_keys"] is True
     assert captured["payload"]["required_days"][0]["selection_limits"]["max_per_group"]["horizontal_push"] == 4
