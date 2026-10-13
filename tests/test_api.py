@@ -272,6 +272,9 @@ def test_gemini_failure_log_excludes_provider_message(app, monkeypatch, caplog):
     class Client:
         models = Models()
 
+        def close(self):
+            return None
+
         def __enter__(self):
             return self
 

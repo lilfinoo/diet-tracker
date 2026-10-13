@@ -91,7 +91,11 @@ def test_nutrition_http_timeout_disables_hidden_sdk_retries(app, monkeypatch):
         def __exit__(self, *args):
             pass
 
+        def close(self):
+            pass
+
         def generate_content(self, **kwargs):
+            captured['config'] = kwargs['config']
             return SimpleNamespace(candidates=[SimpleNamespace(finish_reason='STOP', content=SimpleNamespace(
                 parts=[SimpleNamespace(text=RESULT, thought=False)]))], usage_metadata=None)
 
@@ -99,8 +103,8 @@ def test_nutrition_http_timeout_disables_hidden_sdk_retries(app, monkeypatch):
     with app.app_context():
         app.config['GEMINI_API_KEY'] = 'test-key'
         ai._completion('system', 'prompt', 1024, 0.3, request_timeout=10)
-    assert captured['http_options'].timeout == 10000
-    assert captured['http_options'].retry_options.attempts == 1
+    assert captured['config'].http_options.timeout == 10000
+    assert captured['config'].http_options.retry_options.attempts == 1
 
 
 @pytest.mark.parametrize('recover', [True, False])

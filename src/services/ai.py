@@ -2,7 +2,9 @@ import json
 import math
 import re
 import time
+from threading import Lock
 from typing import Optional
+import weakref
 
 import httpx
 from flask import current_app, g, has_request_context
@@ -14,6 +16,21 @@ from src.services.workout_plans import (
     build_workout_contract,
     catalog_by_key,
 )
+
+
+_gemini_client_lock = Lock()
+
+
+def _gemini_client(api_key):
+    app = current_app._get_current_object()
+    with _gemini_client_lock:
+        clients = app.extensions.setdefault("fit_tracker_gemini_clients", {})
+        client = clients.get(api_key)
+        if client is None:
+            client = genai.Client(api_key=api_key)
+            clients[api_key] = client
+            weakref.finalize(app, client.close)
+        return client
 
 
 class AIServiceError(Exception):
@@ -158,30 +175,32 @@ def _gemini_completion(
         "max_output_tokens": max_tokens,
         "response_mime_type": "application/json" if json_response else "text/plain",
     }
+    if json_response:
+        config_options["system_instruction"] += "\nRetorne JSON compacto, sem recuos ou espaços desnecessários fora dos valores de texto. Preserve todos os campos e instruções."
     if json_schema:
         config_options["response_json_schema"] = json_schema
-    config = types.GenerateContentConfig(**config_options)
     timeout = request_timeout if request_timeout is not None else current_app.config.get("GEMINI_TIMEOUT", 90)
     timeout_ms = timeout * 1000
     http_options = types.HttpOptions(timeout=int(timeout_ms))
     if request_timeout is not None:
         # Nutrition owns its short retry window; SDK retries must not extend it.
         http_options.retry_options = types.HttpRetryOptions(attempts=1)
+    config_options["http_options"] = http_options
+    config = types.GenerateContentConfig(**config_options)
     try:
-        # Keep the HTTP client alive until the synchronous request has completed.
-        with genai.Client(api_key=api_key, http_options=http_options) as client:
-            if image_bytes and mime_type:
-                contents = [
-                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                    types.Part.from_text(text=prompt),
-                ]
-            else:
-                contents = prompt
-            response = client.models.generate_content(
-                model=model or current_app.config["GEMINI_MODEL"],
-                contents=contents,
-                config=config,
-            )
+        client = _gemini_client(api_key)
+        if image_bytes and mime_type:
+            contents = [
+                types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                types.Part.from_text(text=prompt),
+            ]
+        else:
+            contents = prompt
+        response = client.models.generate_content(
+            model=model or current_app.config["GEMINI_MODEL"],
+            contents=contents,
+            config=config,
+        )
         candidate = next(iter(response.candidates or []), None)
         finish_reason = getattr(candidate, "finish_reason", None)
         finish_reason_name = getattr(finish_reason, "name", str(finish_reason))
