@@ -89,6 +89,7 @@ def _completion(
     json_schema=None,
     image_bytes=None,
     mime_type=None,
+    request_timeout=None,
 ) -> str:
     api_key = current_app.config["GEMINI_API_KEY"]
     if not api_key:
@@ -103,11 +104,15 @@ def _completion(
     if json_schema:
         config_options["response_json_schema"] = json_schema
     config = types.GenerateContentConfig(**config_options)
-    timeout = current_app.config.get("GEMINI_TIMEOUT", 90)
+    timeout = request_timeout if request_timeout is not None else current_app.config.get("GEMINI_TIMEOUT", 90)
     timeout_ms = timeout * 1000
+    http_options = types.HttpOptions(timeout=int(timeout_ms))
+    if request_timeout is not None:
+        # Nutrition owns its short retry window; SDK retries must not extend it.
+        http_options.retry_options = types.HttpRetryOptions(attempts=1)
     try:
         # Keep the HTTP client alive until the synchronous request has completed.
-        with genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=timeout_ms)) as client:
+        with genai.Client(api_key=api_key, http_options=http_options) as client:
             if image_bytes and mime_type:
                 contents = [
                     types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
@@ -192,18 +197,32 @@ Assuma porções médias brasileiras se não houver referência de tamanho."""
         "quantidades inferidas como aproximadas. Não apresente suposições como certezas. "
         "Se não conseguir identificar alimentos, retorne description vazia."
     )
-    data = _json_object(
-        _completion(
-            "Você é nutricionista. Retorne somente JSON válido.",
-            prompt,
-            1024,
-            0.3,
-            json_response=True,
-            model=current_app.config["GEMINI_STRUCTURED_MODEL"],
-            image_bytes=image_bytes,
-            mime_type=mime_type,
-        )
-    )
+    primary_model = current_app.config["GEMINI_STRUCTURED_MODEL"]
+    fallback_model = current_app.config["GEMINI_MODEL"]
+    deadline = time.monotonic() + 22
+    for attempt, model in enumerate((primary_model, fallback_model)):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AIServiceUnavailableError("A análise excedeu o tempo de espera.")
+        try:
+            content = _completion(
+                "Você é nutricionista. Retorne somente JSON válido.",
+                prompt,
+                1024,
+                0.3,
+                json_response=True,
+                model=model,
+                image_bytes=image_bytes,
+                mime_type=mime_type,
+                request_timeout=min(10, remaining),
+            )
+            break
+        except AIServiceUnavailableError:
+            if attempt == 1:
+                raise
+            current_app.logger.warning("Nutrition model %s unavailable; trying %s", model, fallback_model)
+            time.sleep(0.5)
+    data = _json_object(content)
     try:
         description = data.get("description", "")
         if not isinstance(description, str) or len(description) > 2000:
