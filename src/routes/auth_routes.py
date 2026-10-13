@@ -1,12 +1,14 @@
 from datetime import datetime, timedelta
 import hashlib
 import secrets
+from time import perf_counter
 import jwt
 import requests
 from itsdangerous import URLSafeTimedSerializer
 from src.services import apple_auth as apple_auth_service
 import logging
-from flask import Blueprint, current_app, jsonify, request, session
+from flask import Blueprint, current_app, g, jsonify, request, session
+from google.auth.exceptions import TransportError
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 from itsdangerous import BadSignature, SignatureExpired
@@ -23,21 +25,40 @@ from src.services.rate_limit import rate_limit
 auth_bp = Blueprint("auth", __name__)
 
 
+@auth_bp.before_request
+def start_auth_timing():
+    g.auth_started_at = perf_counter()
+
+
 @auth_bp.after_request
 def log_session_diagnostic(response):
-    if request.endpoint in {"auth.login", "auth.register", "auth.google_auth", "auth.check_session", "auth.logout"}:
+    if request.endpoint in {"auth.login", "auth.register", "auth.google_auth", "auth.check_session", "auth.logout", "auth.auth_config", "auth.apple_challenge", "auth.apple_login"}:
         payload = response.get_json(silent=True) or {}
         logger = current_app.logger.getChild("auth")
         logger.setLevel(logging.INFO)
         logger.info(
-            "[Auth] endpoint=%s status=%s cookie_present=%s session_user_present=%s confirmed=%s",
+            "[Auth] endpoint=%s status=%s duration_ms=%.1f code=%s cookie_present=%s session_user_present=%s confirmed=%s",
             request.endpoint, response.status_code,
+            (perf_counter() - g.get("auth_started_at", perf_counter())) * 1000, payload.get("code"),
             current_app.config.get("SESSION_COOKIE_NAME", "session") in request.cookies,
             bool(session.get("user_id")), payload.get("logged_in") is True,
         )
     if request.endpoint in {"auth.auth_config", "auth.apple_challenge", "auth.apple_login"}:
         response.headers["Cache-Control"] = "no-store"
     return response
+
+
+class _BoundedGoogleRequest(google_requests.Request):
+    def __call__(self, *args, **kwargs):
+        kwargs["timeout"] = 10
+        return super().__call__(*args, **kwargs)
+
+
+def _signup_conflict(username):
+    # The transaction was rolled back: never link distinct identities by email.
+    if User.query.filter_by(username=username).first():
+        return jsonify({"error": "Nome de usuário já existe", "code": "username_taken"}), 409
+    return jsonify({"error": "O cadastro foi atualizado em outra solicitação. Entre novamente para continuar.", "code": "signup_conflict"}), 409
 
 
 def _account_fields(data, default_name):
@@ -82,6 +103,8 @@ def google_auth():
     signup_token = data.get("signup_token")
 
     if signup_token:
+        if not isinstance(signup_token, str) or len(signup_token) > 20000:
+            return jsonify({"error": "Token de cadastro inválido", "code": "invalid_signup_token"}), 401
         consent_error = _validate_signup_consents(data)
         if consent_error:
             return consent_error
@@ -127,21 +150,21 @@ def google_auth():
         )
         identity = OAuthIdentity(user=user, last_login_at=datetime.utcnow(), **claims)
         db.session.add_all((user, identity))
-        db.session.flush()
-        _record_signup_consents(user, data)
-        grant_signup_badges(user)
-        anonymous_id, analytics_properties = analytics_context(data.get("analytics"))
-        record_event(
-            "signup_completed",
-            user_id=user.id,
-            anonymous_id=anonymous_id,
-            properties=analytics_properties,
-        )
         try:
+            db.session.flush()
+            _record_signup_consents(user, data)
+            grant_signup_badges(user)
+            anonymous_id, analytics_properties = analytics_context(data.get("analytics"))
+            record_event(
+                "signup_completed",
+                user_id=user.id,
+                anonymous_id=anonymous_id,
+                properties=analytics_properties,
+            )
             db.session.commit()
         except IntegrityError:
             db.session.rollback()
-            return jsonify({"error": "Nome de usuário já existe", "code": "username_taken"}), 409
+            return _signup_conflict(username)
         _start_session(user)
         return jsonify({"message": "Usuário criado com sucesso", "user": user.session_dict(), "csrf_token": _csrf_token()}), 201
 
@@ -151,15 +174,19 @@ def google_auth():
         return jsonify({"error": "Login Google não configurado"}), 503
     if not credential:
         return jsonify({"error": "Credential Google é obrigatória"}), 400
+    if not isinstance(credential, str) or len(credential) > 20000:
+        return jsonify({"error": "Token Google inválido"}), 401
     try:
         payload = google_id_token.verify_oauth2_token(
             credential,
-            google_requests.Request(),
+            _BoundedGoogleRequest(),
             client_id,
         )
         claims = _google_identity_claims(payload)
     except ValueError:
         return jsonify({"error": "Token Google inválido"}), 401
+    except (TransportError, requests.RequestException):
+        return jsonify({"error": "Google indisponível no momento. Tente entrar novamente.", "code": "provider_unavailable"}), 503
 
     identity = OAuthIdentity.query.filter_by(
         provider="google", issuer=claims["issuer"], subject=claims["subject"]
@@ -208,7 +235,7 @@ def apple_login():
     serializer = URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt="apple-signup")
     signup_token = data.get("signup_token")
     if signup_token and (not isinstance(signup_token, str) or len(signup_token) > 20000):
-        return jsonify({"error": "Cadastro Apple expirado ou inválido"}), 401
+        return jsonify({"error": "Cadastro Apple inválido"}), 401
     if signup_token:
         consent_error = _validate_signup_consents(data)
         if consent_error:
@@ -220,25 +247,25 @@ def apple_login():
             if not AppleAuthChallenge.query.filter_by(nonce_hash=hashlib.sha256(signup_token.encode()).hexdigest()).filter(AppleAuthChallenge.expires_at > datetime.utcnow()).first():
                 raise BadSignature("Used signup token")
         except BadSignature:
-            return jsonify({"error": "Cadastro Apple expirado ou inválido"}), 401
+            return jsonify({"error": "Cadastro Apple expirado ou inválido. Entre com Apple novamente.", "code": "invalid_signup_token"}), 401
     else:
         nonce = data.get("nonce")
         expected = session.pop("apple_nonce", None)
         if not isinstance(nonce, str) or not expected or not secrets.compare_digest(nonce, expected):
-            return jsonify({"error": "Solicitação Apple inválida"}), 401
+            return jsonify({"error": "Solicitação Apple inválida. Entre com Apple novamente.", "code": "invalid_apple_challenge"}), 401
         consumed = AppleAuthChallenge.query.filter_by(nonce_hash=hashlib.sha256(nonce.encode()).hexdigest()).filter(
             AppleAuthChallenge.expires_at > datetime.utcnow()
         ).delete()
         db.session.commit()
         if consumed != 1:
-            return jsonify({"error": "Solicitação Apple expirada ou já utilizada"}), 401
+            return jsonify({"error": "Solicitação Apple expirada ou já utilizada. Entre com Apple novamente.", "code": "invalid_apple_challenge"}), 401
         try:
             payload = apple_auth_service.verify_identity(data.get("credential"), nonce)
             encrypted_token = apple_auth_service.exchange_code(data.get("authorization_code"), payload["sub"], nonce)
         except (ValueError, jwt.InvalidTokenError):
             return jsonify({"error": "Credencial Apple inválida"}), 401
         except (requests.RequestException, jwt.PyJWKClientError):
-            return jsonify({"error": "Apple indisponível. Tente novamente."}), 503
+            return jsonify({"error": "Apple indisponível no momento. Tente entrar novamente.", "code": "provider_unavailable"}), 503
         email = payload.get("email")
         claims = {"provider": "apple", "issuer": apple_auth_service.APPLE_ISSUER, "subject": payload["sub"],
                   "email": email[:320] if isinstance(email, str) else None,
@@ -251,7 +278,7 @@ def apple_login():
             consumed = AppleAuthChallenge.query.filter_by(nonce_hash=hashlib.sha256(signup_token.encode()).hexdigest()).filter(AppleAuthChallenge.expires_at > datetime.utcnow()).delete()
             if consumed != 1:
                 db.session.rollback()
-                return jsonify({"error": "Cadastro Apple expirado ou já utilizado"}), 401
+                return jsonify({"error": "Cadastro Apple expirado ou já utilizado. Entre com Apple novamente.", "code": "invalid_signup_token"}), 401
         if identity.user.is_banned:
             session.clear()
             return jsonify({"error": "Sua conta foi banida."}), 403
@@ -273,7 +300,7 @@ def apple_login():
     consumed = AppleAuthChallenge.query.filter_by(nonce_hash=hashlib.sha256(signup_token.encode()).hexdigest()).filter(AppleAuthChallenge.expires_at > datetime.utcnow()).delete()
     if consumed != 1:
         db.session.rollback()
-        return jsonify({"error": "Cadastro Apple expirado ou já utilizado"}), 401
+        return jsonify({"error": "Cadastro Apple expirado ou já utilizado. Entre com Apple novamente.", "code": "invalid_signup_token"}), 401
     user = User(username=username, name=claims["display_name"] or username,
                 email=claims["email"] if claims["email_verified"] else None)
     identity = OAuthIdentity(user=user, last_login_at=datetime.utcnow(), **claims)
@@ -287,7 +314,7 @@ def apple_login():
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
-        return jsonify({"error": "Cadastro já utilizado ou nome de usuário indisponível"}), 409
+        return _signup_conflict(username)
     _start_session(user)
     return jsonify({"message": "Usuário criado com sucesso", "user": user.session_dict(), "csrf_token": _csrf_token()}), 201
 
@@ -316,17 +343,17 @@ def register():
     user = User(username=username, name=name, email=email)
     user.set_password(password)
     db.session.add(user)
-    db.session.flush()
-    _record_signup_consents(user, data)
-    grant_signup_badges(user)
-    anonymous_id, analytics_properties = analytics_context(data.get("analytics"))
-    record_event(
-        "signup_completed",
-        user_id=user.id,
-        anonymous_id=anonymous_id,
-        properties=analytics_properties,
-    )
     try:
+        db.session.flush()
+        _record_signup_consents(user, data)
+        grant_signup_badges(user)
+        anonymous_id, analytics_properties = analytics_context(data.get("analytics"))
+        record_event(
+            "signup_completed",
+            user_id=user.id,
+            anonymous_id=anonymous_id,
+            properties=analytics_properties,
+        )
         db.session.commit()
     except IntegrityError:
         db.session.rollback()

@@ -116,6 +116,39 @@ def test_invalid_token_and_unavailable_apple(client, apple_ready, monkeypatch):
     assert authenticate(client).status_code == 503
 
 
+def test_apple_provider_timeout_requires_fresh_challenge(client, app, apple_ready, monkeypatch):
+    import requests
+    exchange = Mock(side_effect=requests.Timeout("private-code"))
+    monkeypatch.setattr(apple_auth, "exchange_code", exchange)
+    nonce = client.post("/api/auth/apple/challenge").get_json()["nonce"]
+    body = {"credential": "subject", "nonce": nonce, "authorization_code": "private-code"}
+    failed = client.post("/api/auth/apple", json=body)
+    assert failed.status_code == 503
+    assert failed.get_json()["code"] == "provider_unavailable"
+    assert "private-code" not in failed.get_data(as_text=True)
+    # The single-use nonce cannot be retried blindly after a provider timeout.
+    assert client.post("/api/auth/apple", json=body).get_json()["code"] == "invalid_apple_challenge"
+    exchange.side_effect = None
+    exchange.return_value = "encrypted-token"
+    assert authenticate(client).status_code == 409
+    with app.app_context():
+        assert User.query.count() == 0
+
+
+def test_apple_signup_flush_conflict_does_not_consume_token(client, app, apple_ready, monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+    token = authenticate(client).get_json()["signup_token"]
+    real_flush = db.session.flush
+    monkeypatch.setattr(db.session, "flush", Mock(side_effect=IntegrityError("insert", {}, Exception("collision"))))
+    response = signup(client, token)
+    assert response.status_code == 409
+    assert response.get_json()["code"] == "signup_conflict"
+    monkeypatch.setattr(db.session, "flush", real_flush)
+    with app.app_context():
+        assert User.query.count() == 0
+    assert signup(client, token).status_code == 201
+
+
 def test_signup_requires_consent_choice(client, apple_ready):
     token = authenticate(client).get_json()["signup_token"]
     response = client.post("/api/auth/apple", json={"signup_token": token, "username": "apple-user"})
@@ -129,6 +162,23 @@ def test_signup_token_cannot_recreate_deleted_account(client, app, apple_ready, 
     monkeypatch.setattr(apple_auth, "revoke_identity", Mock())
     assert client.delete("/api/account", json={"username": "apple-user", "confirm_delete": True}).status_code == 200
     assert signup(client, token).status_code == 401
+
+
+def test_fresh_apple_signup_after_deletion_preserves_other_pioneer_ranks(client, app, apple_ready, monkeypatch):
+    first_token = authenticate(client).get_json()["signup_token"]
+    assert signup(client, first_token).status_code == 201
+    other_client = app.test_client()
+    assert signup(other_client, authenticate(other_client, "other-sub").get_json()["signup_token"], "other-user").status_code == 201
+    monkeypatch.setattr(apple_auth, "revoke_identity", Mock())
+    assert client.delete("/api/account", json={"username": "apple-user", "confirm_delete": True}).status_code == 200
+    monkeypatch.setattr(apple_auth, "verify_identity", lambda credential, nonce: {"sub": credential})
+    token = authenticate(client).get_json()["signup_token"]
+    response = signup(client, token)
+    assert response.status_code == 201
+    with app.app_context():
+        assert OAuthIdentity.query.count() == 2
+        other = User.query.filter_by(username="other-user").one()
+        assert next(badge.badge_rank for badge in other.badges if badge.badge_code == "pioneiro") == 2
 
 
 def test_signup_username_retry_preserves_token(client, app, apple_ready):
@@ -172,20 +222,3 @@ def test_exchange_encrypts_token_and_revocation_uses_private_credentials(app, mo
 
 def test_malformed_signup_token_is_rejected(client, apple_ready):
     assert client.post("/api/auth/apple", json={"signup_token": {"forged": True}}).status_code == 401
-
-
-def test_fresh_apple_signup_after_deletion_preserves_other_pioneer_ranks(client, app, apple_ready, monkeypatch):
-    first_token = authenticate(client).get_json()["signup_token"]
-    assert signup(client, first_token).status_code == 201
-    other_client = app.test_client()
-    assert signup(other_client, authenticate(other_client, "other-sub").get_json()["signup_token"], "other-user").status_code == 201
-    monkeypatch.setattr(apple_auth, "revoke_identity", Mock())
-    assert client.delete("/api/account", json={"username": "apple-user", "confirm_delete": True}).status_code == 200
-    monkeypatch.setattr(apple_auth, "verify_identity", lambda credential, nonce: {"sub": credential})
-    token = authenticate(client).get_json()["signup_token"]
-    response = signup(client, token)
-    assert response.status_code == 201
-    with app.app_context():
-        assert OAuthIdentity.query.count() == 2
-        other = User.query.filter_by(username="other-user").one()
-        assert next(badge.badge_rank for badge in other.badges if badge.badge_code == "pioneiro") == 2
