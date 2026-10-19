@@ -29,6 +29,8 @@ class User(db.Model):
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
     ai_trial_uses = db.Column(db.Integer, default=0, nullable=False)
     free_plan_uses = db.Column(db.Integer, default=0, nullable=False)
+    free_workout_plan_uses = db.Column(db.Integer, default=0, nullable=False)
+    free_diet_plan_uses = db.Column(db.Integer, default=0, nullable=False)
     free_photo_uses = db.Column(db.Integer, default=0, nullable=False)
     terms_version = db.Column(db.String(40), nullable=True)
     terms_accepted_at = db.Column(db.DateTime, nullable=True)
@@ -79,6 +81,7 @@ class User(db.Model):
         order_by="ProfileHighlight.position",
     )
     ai_tasks = db.relationship("AITask", back_populates="user", cascade="all, delete-orphan")
+    push_devices = db.relationship("PushDevice", back_populates="user", cascade="all, delete-orphan")
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password, method="pbkdf2:sha256")
@@ -178,6 +181,8 @@ class User(db.Model):
             "ai_trial_uses": self.ai_trial_uses,
             "free_plan_uses": self.free_plan_uses,
             "free_photo_uses": self.free_photo_uses,
+            "free_workout_plan_uses": self.free_workout_plan_uses,
+            "free_diet_plan_uses": self.free_diet_plan_uses,
             "has_password": bool(self.password_hash),
             "is_public": bool(self.profile and self.profile.is_public),
             "avatar_url": (
@@ -227,6 +232,8 @@ class User(db.Model):
             "ai_trial_uses": self.ai_trial_uses,
             "free_plan_uses": self.free_plan_uses,
             "free_photo_uses": self.free_photo_uses,
+            "free_workout_plan_uses": self.free_workout_plan_uses,
+            "free_diet_plan_uses": self.free_diet_plan_uses,
             "has_password": bool(self.password_hash),
             "diet_entries_count": count("diet_entries", lambda: self.diet_entries),
             "measurements_count": count("measurements", lambda: self.measurements),
@@ -1788,3 +1795,14 @@ class AppleAuthChallenge(db.Model):
 
     nonce_hash = db.Column(db.String(64), primary_key=True)
     expires_at = db.Column(db.DateTime, nullable=False, index=True)
+
+
+class PushDevice(db.Model):
+    __tablename__ = "push_device"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    installation_id = db.Column(db.String(36), nullable=False, unique=True)
+    token = db.Column(db.String(512), nullable=False, unique=True)
+    environment = db.Column(db.String(16), nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    user = db.relationship("User", back_populates="push_devices")

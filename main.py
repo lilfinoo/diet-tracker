@@ -20,6 +20,7 @@ from src.routes.auth_routes import auth_bp
 from src.routes.account_routes import account_bp
 from src.routes.analytics_routes import analytics_bp
 from src.routes.ai_task_routes import ai_task_bp
+from src.routes.push_routes import push_bp
 from src.routes.adherence_routes import adherence_bp
 from src.routes.diet_daily_routes import diet_daily_bp
 from src.routes.billing_routes import billing_bp
@@ -102,6 +103,7 @@ def create_app(config_class=None):
     app.register_blueprint(account_bp, url_prefix="/api")
     app.register_blueprint(analytics_bp, url_prefix="/api")
     app.register_blueprint(ai_task_bp, url_prefix="/api")
+    app.register_blueprint(push_bp, url_prefix="/api")
     app.register_blueprint(billing_bp, url_prefix="/api")
     app.register_blueprint(plan_bp, url_prefix="/api")
     app.register_blueprint(admin_bp, url_prefix="/api")

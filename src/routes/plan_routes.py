@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from src.models.user import ChatMessage, DietAdherenceDay, DietMealCheckIn, DietMealDailyState, DietPlan, DietPlanMeal, UserProfile, WorkoutDay, WorkoutExercise, WorkoutPlan, db
-from src.routes.common import ai_consent_required, chat_plan_intent, coerce_numbers, json_body, login_required, page_query, premium_required
+from src.routes.common import ai_consent_required, chat_plan_intent, coerce_numbers, idempotent_mutation, json_body, login_required, page_query, premium_required
 from src.services.ai import (
     AIQuotaExceededError,
     AIResponseError,
@@ -101,11 +101,15 @@ def chat_history():
 
 @plan_bp.route("/diet_plans/generate", methods=["POST"])
 @rate_limit("ai", 8, 60)
+@login_required
+@idempotent_mutation
 @ai_consent_required
-@premium_required(allow_trial=True, trial_kind="plans")
+@premium_required(allow_trial=True, trial_kind="diet_plans")
 def create_guided_diet_plan():
     user = g.user
     data = json_body()
+    if not user.has_entitlement("premium") and any(data.get(field) for field in ['preferred_foods', 'disliked_foods']):
+        return jsonify({"error": "Estas preferências são exclusivas do Premium.", "code": "premium_required"}), 403
     try:
         questionnaire = validate_diet_questionnaire(data)
     except PlanValidationError as error:
@@ -113,6 +117,8 @@ def create_guided_diet_plan():
     profile = UserProfile.query.filter_by(user_id=user.id).first()
     try:
         questionnaire = merge_profile_restrictions(questionnaire, profile)
+        if not user.has_entitlement("premium"):
+            questionnaire["profile_avoidances"] = []
         nutrition_targets = calculate_nutrition_targets(profile, questionnaire)
     except PlanValidationError as error:
         return jsonify({"error": "Revise seu perfil e as metas nutricionais.", "fields": error.errors}), 400
@@ -232,11 +238,15 @@ def get_workout_recommendation():
 
 @plan_bp.route("/workout_plans/generate", methods=["POST"])
 @rate_limit("ai", 8, 60)
+@login_required
+@idempotent_mutation
 @ai_consent_required
-@premium_required(allow_trial=True, trial_kind="plans")
+@premium_required(allow_trial=True, trial_kind="workout_plans")
 def create_guided_workout_plan():
     user = g.user
     data = json_body()
+    if not user.has_entitlement("premium") and any(data.get(field) for field in ['priorities', 'avoid_exercises']):
+        return jsonify({"error": "Estas preferências são exclusivas do Premium.", "code": "premium_required"}), 403
     try:
         questionnaire = validate_workout_questionnaire(data)
     except PlanValidationError as error:
@@ -592,3 +602,39 @@ def replace_diet_day(plan_id, day_index):
         db.session.add(DietPlanMeal(diet_plan_id=plan.id, day_of_week=f"Dia {day_index}", **{key: meal_data[key] for key in allowed if key in meal_data}))
     db.session.commit()
     return jsonify({"message": "Cardápio do dia atualizado.", "plan": plan.to_dict_full()}), 200
+
+
+@plan_bp.route("/diet_plans/manual", methods=["POST"])
+@login_required
+def create_manual_diet():
+    data = json_body()
+    title = str(data.get("title", "")).strip()
+    meals = data.get("meals")
+    if not 1 <= len(title) <= 120 or not isinstance(meals, list) or not 1 <= len(meals) <= 24:
+        return jsonify({"error": "Informe um título e entre 1 e 24 refeições."}), 400
+    normalized = []
+    for order, meal in enumerate(meals, 1):
+        if not isinstance(meal, dict):
+            return jsonify({"error": "Refeição inválida."}), 400
+        description = str(meal.get("description") or "").strip()
+        meal_type = str(meal.get("meal_type") or "").strip()
+        day = meal.get("day_of_week") or "Dia 1"
+        if not description or len(description) > 2000 or not meal_type or len(meal_type) > 50 or day not in {"Dia 1", "Dia 2", "Dia 3"}:
+            return jsonify({"error": "Revise o dia, nome e descrição das refeições."}), 400
+        values = coerce_numbers(meal, ("calories", "protein", "carbs", "fat"))
+        for field in ("calories", "protein", "carbs", "fat"):
+            value = values.get(field)
+            if value is not None and not 0 <= value <= (20000 if field == "calories" else 5000):
+                return jsonify({"error": "Valor nutricional inválido."}), 400
+        normalized.append({"day_of_week": day, "meal_type": meal_type, "description": description,
+                           "order": order, **{field: values.get(field) for field in ("calories", "protein", "carbs", "fat")}})
+    plan = DietPlan(user_id=g.user.id, author_user_id=g.user.id, published_by_user_id=g.user.id,
+                    published_at=datetime.utcnow(), status="published", source="manual", title=title,
+                    description=str(data.get("description") or "")[:2000], schema_version=3,
+                    plan_mode="rotation_3_day", meals_per_day=len([m for m in normalized if m["day_of_week"] == "Dia 1"]))
+    db.session.add(plan)
+    db.session.flush()
+    for meal in normalized:
+        db.session.add(DietPlanMeal(diet_plan_id=plan.id, **meal))
+    db.session.commit()
+    return jsonify({"plan_id": plan.id, "plan": plan.to_dict_full()}), 201

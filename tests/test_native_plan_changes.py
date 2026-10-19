@@ -61,6 +61,7 @@ def test_ai_proposal_requires_separate_confirmation(app, client, monkeypatch):
     from src.legal import AI_CONSENT_VERSION
     with app.app_context():
         user = create_user("draft-plan-owner")
+        user.is_premium = True
         user.ai_consent_at = datetime.utcnow()
         user.ai_consent_version = AI_CONSENT_VERSION
         plan, _, exercises = create_plan(user, ("supino_reto_halteres",))
@@ -117,6 +118,7 @@ def test_ai_proposal_cannot_modify_another_day(app, client, monkeypatch):
     from src.models.user import WorkoutDay
     with app.app_context():
         user = create_user("scope-plan-owner")
+        user.is_premium = True
         user.ai_consent_at = datetime.utcnow()
         user.ai_consent_version = AI_CONSENT_VERSION
         plan, day, exercises = create_plan(user)

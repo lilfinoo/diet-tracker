@@ -1,9 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import math
 from time import perf_counter
+from zoneinfo import ZoneInfo
 
 from flask import Blueprint, abort, current_app, g, jsonify, request
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import joinedload, selectinload
 
 from src.models.user import (
@@ -20,7 +22,7 @@ from src.models.user import (
     WorkoutSetPerformance,
     db,
 )
-from src.routes.common import _activity_list_item, _ensure_user_workout_history, _owned_active_session, _performed_sets_payload, _session_exercise, _workout_session_summary, idempotent_mutation, json_body, login_required, premium_required
+from src.routes.common import _activity_list_item, _ensure_user_workout_history, _owned_active_session, _performed_sets_payload, _session_exercise, _workout_session_summary, idempotent_mutation, json_body, login_required
 from src.services.achievements import evaluate_achievements, reconcile_achievements, serialize_unlock
 from src.services.analytics import record_event
 from src.services.personal_records import (
@@ -115,7 +117,7 @@ def get_active_workout_session(plan_id, day_id):
 
 
 @session_bp.route("/workout_plans/<int:plan_id>/days/<int:day_id>/sessions", methods=["POST"])
-@premium_required(message="Assine Premium para iniciar seu treino.")
+@login_required
 def start_workout_session(plan_id, day_id):
     plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=g.user.id, status="published").with_for_update().first()
     day = WorkoutDay.query.filter_by(id=day_id, workout_plan_id=plan.id if plan else None).first()
@@ -264,7 +266,7 @@ def complete_session_exercise(session_id, exercise_id):
     data = request.get_json(silent=True)
     performed_sets = _performed_sets_payload(data)
     completion_mode = data.get("completion_mode", "performed") if isinstance(data, dict) else "performed"
-    if completion_mode not in ("performed", "planned") or (completion_mode == "planned" and performed_sets):
+    if completion_mode not in {"performed", "planned"} or (completion_mode == "planned" and performed_sets):
         return jsonify({"error": "Modo de conclusão inválido."}), 400
     completion = WorkoutSessionExerciseCompletion.query.filter_by(
         workout_session_id=session_record.id,
@@ -435,13 +437,21 @@ def finish_workout_session(session_id):
 @session_bp.route("/activities", methods=["GET"])
 @login_required
 def list_activities():
+    selected_date = None
+    if request.args.get("date") is not None:
+        try:
+            selected_date = datetime.strptime(request.args["date"], "%Y-%m-%d").date()
+            if selected_date.isoformat() != request.args["date"]:
+                raise ValueError
+        except ValueError:
+            abort(400, description="Formato de data inválido")
     _ensure_user_workout_history(g.user.id)
     try:
         limit = min(max(int(request.args.get("limit", 20)), 1), 50)
         offset = max(int(request.args.get("offset", 0)), 0)
     except ValueError:
         abort(400, description="Paginação inválida")
-    sessions = (
+    query = (
         WorkoutSession.query.filter(
             WorkoutSession.user_id == g.user.id,
             WorkoutSession.completed_at.isnot(None),
@@ -455,12 +465,24 @@ def list_activities():
             selectinload(WorkoutSession.completions)
             .selectinload(WorkoutSessionExerciseCompletion.performed_sets),
         )
-        .order_by(WorkoutSession.completed_at.desc(), WorkoutSession.id.desc())
+    )
+    if selected_date is not None:
+        local_start = datetime.combine(selected_date, datetime.min.time(), tzinfo=ZoneInfo(user_timezone(g.user.id)))
+        utc_start = local_start.astimezone(timezone.utc).replace(tzinfo=None)
+        utc_end = (local_start + timedelta(days=1)).astimezone(timezone.utc).replace(tzinfo=None)
+        query = query.filter(or_(
+            WorkoutSession.completed_local_date == selected_date,
+            and_(WorkoutSession.completed_local_date.is_(None),
+                 WorkoutSession.completed_at >= utc_start, WorkoutSession.completed_at < utc_end),
+        ))
+    sessions = (
+        query.order_by(WorkoutSession.completed_at.desc(), WorkoutSession.id.desc())
         .offset(offset)
         .limit(limit + 1)
         .all()
     )
     return jsonify({
+        "date": selected_date.isoformat() if selected_date else None,
         "items": [_activity_list_item(item) for item in sessions[:limit]],
         "limit": limit,
         "offset": offset,

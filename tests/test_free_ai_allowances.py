@@ -16,28 +16,29 @@ def signup(client):
 
 def add_plan_routes(app):
     @app.post("/test/plan-a")
-    @premium_required(allow_trial=True, trial_kind="plans")
+    @premium_required(allow_trial=True, trial_kind="workout_plans")
     def plan_a():
         return jsonify({"plan": "workout"}), 201
 
     @app.post("/test/plan-b")
-    @premium_required(allow_trial=True, trial_kind="plans")
+    @premium_required(allow_trial=True, trial_kind="diet_plans")
     def plan_b():
         return jsonify({"plan": "diet"}), 201
 
     @app.post("/test/failed-plan")
-    @premium_required(allow_trial=True, trial_kind="plans")
+    @premium_required(allow_trial=True, trial_kind="workout_plans")
     def failed_plan():
         return jsonify({"error": "AI unavailable"}), 503
 
 
-def test_plan_allowance_shared_lifetime_and_survives_relogin(app, client):
+def test_plan_allowances_independent_lifetime_and_survive_relogin(app, client):
     add_plan_routes(app)
     signup(client)
     assert client.post("/test/plan-a").status_code == 201
-    blocked = client.post("/test/plan-b")
+    assert client.post("/test/plan-b").status_code == 201
+    blocked = client.post("/test/plan-a")
     assert blocked.status_code == 403
-    assert blocked.get_json()["quota_kind"] == "plans"
+    assert blocked.get_json()["quota_kind"] == "workout_plans"
     assert client.post("/api/logout").status_code == 200
     assert client.post("/api/login", json={"username": "free-user", "password": "strong-password"}).status_code == 200
     assert client.get("/api/ai/usage").get_json()["plans"]["remaining"] == 0
@@ -69,10 +70,11 @@ def test_photos_separate_from_plan_and_failures_refunded(app, client, monkeypatc
     assert usage["manual_logging"] is True
 
 
-def test_free_text_ai_requires_premium_but_manual_macros_are_optional(app, client):
+def test_free_text_ai_shares_photo_allowance_and_manual_macros_are_optional(app, client, monkeypatch):
+    monkeypatch.setattr("src.routes.profile_routes.calculate_nutrition", lambda *args: {"calories": 100})
     signup(client)
-    assert client.post("/api/diet/ai_macros", json={"description": "banana"}).status_code == 403
-    assert client.get("/api/ai/usage").get_json()["photos"]["used"] == 0
+    assert client.post("/api/diet/ai_macros", json={"description": "banana"}).status_code == 200
+    assert client.get("/api/ai/usage").get_json()["photos"]["used"] == 1
     response = client.post("/api/diet", json={"date": "2026-10-09", "meal_type": "almoço", "description": "banana", "calories": 100})
     assert response.status_code == 201
     entries = client.get("/api/diet?date=2026-10-09").get_json()
@@ -120,10 +122,10 @@ def test_in_flight_plan_reservation_blocks_another_generation(app, client):
     other_client = app.test_client()
 
     @app.post("/test/held-plan")
-    @premium_required(allow_trial=True, trial_kind="plans")
+    @premium_required(allow_trial=True, trial_kind="workout_plans")
     def held_plan():
         # Interleave a second request before the first generation has returned.
-        observed.append(other_client.post("/test/plan-b").status_code)
+        observed.append(other_client.post("/test/plan-a").status_code)
         return jsonify({"plan": "workout"}), 201
 
     signup(client)

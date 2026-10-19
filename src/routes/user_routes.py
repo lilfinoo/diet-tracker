@@ -792,6 +792,7 @@ def _activity_list_item(session_record):
         "plan_name": summary["plan_name"],
         "started_at": summary["started_at"],
         "completed_at": summary["completed_at"],
+        "local_date": session_record.completed_local_date.isoformat() if session_record.completed_local_date else None,
         "duration_seconds": summary["duration_seconds"],
         "exercises_performed": summary["exercises_performed"],
         "total_exercises": summary["total_exercises"],

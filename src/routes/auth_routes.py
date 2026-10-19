@@ -385,6 +385,10 @@ def login():
 @auth_bp.route("/logout", methods=["POST"])
 @login_required
 def logout():
+    if installation_id := session.get("push_installation_id"):
+        from src.models.user import PushDevice
+        PushDevice.query.filter_by(user_id=g.user.id, installation_id=installation_id).delete()
+        db.session.commit()
     session.clear()
     return jsonify({"message": "Logout bem-sucedido"}), 200
 

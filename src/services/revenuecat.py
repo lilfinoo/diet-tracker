@@ -1,4 +1,4 @@
-"""Server-authoritative Apple subscription access through RevenueCat."""
+"""Server-authoritative native subscription access through RevenueCat."""
 from datetime import datetime, timezone
 from urllib.parse import quote
 
@@ -23,7 +23,7 @@ class RevenueCatError(Exception):
 def fetch_subscriber(user_id):
     key = current_app.config.get("REVENUECAT_SECRET_API_KEY")
     if not key:
-        raise RevenueCatError("Compras da Apple ainda não configuradas.", 503)
+        raise RevenueCatError("Compras no aplicativo ainda não configuradas.", 503)
     try:
         response = requests.get(
             "https://api.revenuecat.com/v1/subscribers/" + quote(str(user_id), safe=""),
@@ -76,9 +76,21 @@ def sync_subscription(user):
         if item.strip()
     }
     sandbox_allowed = current_app.config.get("REVENUECAT_ALLOW_SANDBOX", False) or str(user.id) in sandbox_users
+    store = details.get("store")
+    plans = PRODUCT_PLANS if store == "app_store" else {}
+    android_key = current_app.config.get("REVENUECAT_ANDROID_API_KEY")
+    if store == "play_store" and isinstance(android_key, str) and android_key.startswith("goog_"):
+        identifiers = current_app.config.get("REVENUECAT_ANDROID_PRODUCT_IDS") or list(PRODUCT_PLANS)
+        if len(identifiers) == 2 and len(set(identifiers)) == 2:
+            plans = dict(zip(identifiers, PRODUCT_PLANS.values()))
+    plan_code = plans.get(product)
+    if plan_code and details.get("is_sandbox") is True and not sandbox_allowed:
+        raise RevenueCatError(
+            "A compra Sandbox foi aprovada, mas o acesso de teste não está liberado para esta conta. Use uma compra de produção ou habilite este usuário para testes.",
+            409,
+        )
     allowed = (
-        product in PRODUCT_PLANS
-        and details.get("store") == "app_store"
+        plan_code is not None
         and (details.get("is_sandbox") is False or (details.get("is_sandbox") is True and sandbox_allowed))
     )
     active = allowed and end is not None and end > datetime.utcnow()
@@ -90,7 +102,7 @@ def sync_subscription(user):
                                     external_subscription_id=str(user.id))
         db.session.add(subscription)
     subscription.external_customer_id = str(user.id)
-    subscription.plan_code = PRODUCT_PLANS.get(product, subscription.plan_code or "premium_student")
+    subscription.plan_code = plan_code or subscription.plan_code or "premium_student"
     subscription.status = "trialing" if active and details.get("period_type") == "trial" else "active" if active else "expired"
     subscription.current_period_start = _date(entitlement.get("purchase_date"))
     # A rejected sandbox/store must never retain a future canceled period granting access.

@@ -26,14 +26,23 @@ REVENUECAT_SYNC_LOCK = RLock()
 
 @billing_bp.route("/billing/revenuecat/config", methods=["GET"])
 def revenuecat_config():
-    key = current_app.config.get("REVENUECAT_IOS_API_KEY")
-    if not isinstance(key, str) or not key.startswith("appl_"):
+    platform = request.args.get("platform", "ios")
+    if platform not in {"ios", "android"}:
+        return jsonify({"error": "Plataforma de assinatura inválida."}), 400
+    key_name, prefix = ("REVENUECAT_ANDROID_API_KEY", "goog_") if platform == "android" else ("REVENUECAT_IOS_API_KEY", "appl_")
+    key = current_app.config.get(key_name)
+    if not isinstance(key, str) or not key.startswith(prefix):
         key = None
-    return jsonify({
+    payload = {
         "configured": bool(key and current_app.config.get("REVENUECAT_SECRET_API_KEY")),
         "public_api_key": key,
         "entitlement_id": ENTITLEMENT_ID,
-    })
+    }
+    if platform == "android":
+        payload["product_identifiers"] = current_app.config.get("REVENUECAT_ANDROID_PRODUCT_IDS") or [
+            "ai.fittracker.premium.monthly", "ai.fittracker.premium.annual",
+        ]
+    return jsonify(payload)
 
 
 @billing_bp.route("/billing/revenuecat/sync", methods=["POST"])
@@ -48,7 +57,10 @@ def revenuecat_sync():
             db.session.commit()
     except RevenueCatError as error:
         db.session.rollback()
-        return jsonify({"error": str(error)}), error.status_code
+        payload = {"error": str(error)}
+        if error.status_code == 409:
+            payload["code"] = "sandbox_subscription_not_enabled"
+        return jsonify(payload), error.status_code
     except SQLAlchemyError:
         db.session.rollback()
         return jsonify({"error": "Não foi possível atualizar sua assinatura."}), 503
@@ -105,7 +117,7 @@ PREMIUM_PLAN_CODES = {"premium_student", "premium_student_annual"}
 PREMIUM_FEATURES = ["IA sem limite de teste", "Dietas personalizadas", "Treinos personalizados"]
 
 PLANS = (
-    {"code": "free", "name": "Gratuito", "price_brl": 0, "features": ["Diário alimentar", "Medidas e progresso", "1 treino OU dieta e 3 análises de fotos, uma vez por conta"]},
+    {"code": "free", "name": "Gratuito", "price_brl": 0, "features": ["Diário alimentar", "Medidas e progresso", "1 treino e 1 dieta com IA por conta; 3 registros por foto ou descrição; planos manuais livres"]},
     {"code": "premium_student", "name": "Premium Mensal", "price_brl": 20, "cycle": "MONTHLY", "period_label": "/mês", "pix_access_days": 30, "features": PREMIUM_FEATURES},
     {"code": "premium_student_annual", "name": "Premium Anual", "price_brl": 120, "cycle": "YEARLY", "period_label": "/ano", "pix_access_days": 365, "discount_percent": 50, "monthly_equivalent_brl": 10, "features": PREMIUM_FEATURES},
 )

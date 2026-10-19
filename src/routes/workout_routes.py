@@ -27,7 +27,7 @@ def workout_today():
 
 
 @workout_bp.route("/workout_plans/<int:plan_id>/current", methods=["PUT"])
-@premium_required(message="Assine Premium para aplicar seu plano de treino.")
+@login_required
 def set_current_workout_plan(plan_id):
     user = g.user
     data = json_body()
@@ -71,7 +71,7 @@ def set_current_workout_plan(plan_id):
 
 
 @workout_bp.route("/workout_plans/<int:plan_id>/current/adapt", methods=["POST"])
-@premium_required(message="Assine Premium para aplicar seu plano de treino.")
+@login_required
 def adapt_current_workout_plan(plan_id):
     user = g.user
     data = json_body()
@@ -190,6 +190,17 @@ def replace_plan_exercise(plan_id, exercise_id):
     plan = _editable_workout_plan(plan_id)
     exercise = WorkoutExercise.query.filter_by(id=exercise_id, workout_plan_id=plan.id).first_or_404()
     data = json_body()
+    if not data.get("catalog_key"):
+        if data.get("name") is not None and not 2 <= len(str(data["name"]).strip()) <= 100:
+            abort(400, description="Digite um nome entre 2 e 100 caracteres.")
+        plan, _, exercise_map = _version_workout_plan_for_edit(plan)
+        exercise = exercise_map.get(exercise.id, exercise)
+        if data.get("name") is not None and str(exercise.catalog_key or "").startswith("custom:"):
+            exercise.name = str(data["name"]).strip()
+        for field, value in _prescription(data, exercise).items():
+            setattr(exercise, field, value)
+        db.session.commit()
+        return jsonify({"message": "Exercício atualizado.", "plan": plan.to_dict_full()}), 200
     catalog_key = str(data.get("catalog_key", ""))
     catalog_item = catalog_by_key().get(catalog_key)
     if catalog_item:
@@ -376,3 +387,47 @@ def apply_workout_plan_changes(plan_id):
             setattr(exercise, field, value)
     db.session.commit()
     return jsonify({"plan": plan.to_dict_full()}), 200
+
+
+@workout_bp.route("/workout_plans/exercises/catalog", methods=["GET"])
+@login_required
+def manual_workout_catalog():
+    return jsonify({"items": list(catalog_by_key().values())}), 200
+
+
+@workout_bp.route("/workout_plans/manual", methods=["POST"])
+@login_required
+def create_manual_workout():
+    data = json_body()
+    title = str(data.get("title", "")).strip()
+    days = data.get("days")
+    if not 1 <= len(title) <= 120 or not isinstance(days, list) or not 1 <= len(days) <= 7:
+        return jsonify({"error": "Informe um título e entre 1 e 7 treinos."}), 400
+    normalized_days = []
+    for index, day in enumerate(days, 1):
+        if not isinstance(day, dict) or not isinstance(day.get("exercises"), list) or not 1 <= len(day["exercises"]) <= 12:
+            return jsonify({"error": "Cada treino precisa de 1 a 12 exercícios."}), 400
+        exercises = []
+        for order, item in enumerate(day["exercises"], 1):
+            if not isinstance(item, dict):
+                return jsonify({"error": "Exercício inválido."}), 400
+            catalog = catalog_by_key().get(str(item.get("catalog_key", "")))
+            name = catalog["name"] if catalog else str(item.get("name", "")).strip()
+            if not 2 <= len(name) <= 100 or (item.get("catalog_key") and not catalog):
+                return jsonify({"error": "Escolha um exercício do catálogo ou informe seu nome."}), 400
+            exercises.append({
+                "name": name, "catalog_key": catalog["key"] if catalog else f"custom:{uuid.uuid4()}",
+                "movement_pattern": catalog["movement_pattern"] if catalog else "custom",
+                "primary_muscle": catalog["primary_muscle"] if catalog else None,
+                "equipment": catalog["equipment"] if catalog else None,
+                "difficulty": catalog["difficulty"] if catalog else None,
+                "order": order, **_prescription(item),
+            })
+        normalized_days.append({"code": chr(64 + index), "title": str(day.get("title") or f"Treino {index}")[:120],
+                                "focus": str(day.get("focus") or "")[:200], "order": index, "exercises": exercises})
+    questionnaire = {"split_type": "manual", "days_per_week": len(days), "goal": "general_fitness",
+                     "experience_level": "advanced", "session_duration": 60, "equipment": ["full_gym"]}
+    plan = create_workout_plan(g.user, g.user, questionnaire,
+                               {"title": title, "description": str(data.get("description") or "")[:2000], "days": normalized_days})
+    db.session.commit()
+    return jsonify({"plan_id": plan.id, "plan": plan.to_dict_full()}), 201

@@ -142,18 +142,13 @@ def premium_required(_func=None, *, allow_trial=False, trial_kind=None, message=
             from flask import g
             uses_trial = not g.user.has_entitlement("premium")
             kind = trial_kind
-            # Only image analysis is part of the free photo allowance.
-            if kind == "photos":
-                body = request.get_json(silent=True) or {}
-                image = body.get("image") if isinstance(body, dict) else None
-                if not isinstance(image, dict) or not image.get("data"):
-                    kind = None
-            if uses_trial and (not allow_trial or kind not in {"plans", "photos"}):
+            if uses_trial and (not allow_trial or kind not in {"plans", "workout_plans", "diet_plans", "photos"}):
                 return jsonify({"error": message, "code": "premium_required"}), 403
             reserved_trial = False
             if uses_trial:
-                column = User.free_plan_uses if kind == "plans" else User.free_photo_uses
-                limit = 1 if kind == "plans" else 3
+                column = {"plans": User.free_plan_uses, "workout_plans": User.free_workout_plan_uses,
+                          "diet_plans": User.free_diet_plan_uses, "photos": User.free_photo_uses}[kind]
+                limit = 3 if kind == "photos" else 1
                 reserved_trial = bool(User.query.filter(
                     User.id == g.user.id, column < limit,
                 ).update({column: column + 1}, synchronize_session=False))

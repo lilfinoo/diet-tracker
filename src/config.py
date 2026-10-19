@@ -44,6 +44,8 @@ class Config:
     ASAAS_WEBHOOK_TOKEN = os.getenv("ASAAS_WEBHOOK_TOKEN")
     BILLING_ENABLED = os.getenv("BILLING_ENABLED", "false").lower() == "true"
     REVENUECAT_IOS_API_KEY = os.getenv("REVENUECAT_IOS_API_KEY")
+    REVENUECAT_ANDROID_API_KEY = os.getenv("REVENUECAT_ANDROID_API_KEY")
+    REVENUECAT_ANDROID_PRODUCT_IDS = _csv("REVENUECAT_ANDROID_PRODUCT_IDS", "ai.fittracker.premium.monthly,ai.fittracker.premium.annual")
     REVENUECAT_SECRET_API_KEY = os.getenv("REVENUECAT_SECRET_API_KEY")
     REVENUECAT_WEBHOOK_AUTHORIZATION = os.getenv("REVENUECAT_WEBHOOK_AUTHORIZATION")
     REVENUECAT_ALLOW_SANDBOX = os.getenv("REVENUECAT_ALLOW_SANDBOX", "false").lower() == "true"
@@ -79,6 +81,7 @@ class Config:
     REDIS_URL = os.getenv("REDIS_URL")
     CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL") or REDIS_URL
     AI_ASYNC_ENABLED = os.getenv("AI_ASYNC_ENABLED", "false").lower() == "true"
+    AI_PLAN_BACKGROUND_ENABLED = os.getenv("AI_PLAN_BACKGROUND_ENABLED", "false").lower() == "true"
     AI_JOB_MAX_RETRIES = int(os.getenv("AI_JOB_MAX_RETRIES", "3"))
     AI_JOB_STALE_SECONDS = int(os.getenv("AI_JOB_STALE_SECONDS", "900"))
     AI_TASK_RETENTION_DAYS = int(os.getenv("AI_TASK_RETENTION_DAYS", "7"))
@@ -121,6 +124,8 @@ class TestConfig(Config):
     GOOGLE_CLIENT_ID = "test-google-client-id"
     ASAAS_API_KEY = None
     REVENUECAT_IOS_API_KEY = None
+    REVENUECAT_ANDROID_API_KEY = None
+    REVENUECAT_ANDROID_PRODUCT_IDS = ["ai.fittracker.premium.monthly", "ai.fittracker.premium.annual"]
     REVENUECAT_SECRET_API_KEY = None
     REVENUECAT_WEBHOOK_AUTHORIZATION = None
     REVENUECAT_ALLOW_SANDBOX = False

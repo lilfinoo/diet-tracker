@@ -39,7 +39,7 @@ def test_sync_uses_session_uuid_and_never_client_entitlement(app, client, monkey
         assert Subscription.query.filter_by(provider='revenuecat').count() == 1
 
 
-@pytest.mark.parametrize('state', [subscriber(expired=True), subscriber(sandbox=True), subscriber(product='fake')])
+@pytest.mark.parametrize('state', [subscriber(expired=True), subscriber(product='fake')])
 def test_unverified_or_expired_cannot_grant(app, client, monkeypatch, state):
     setup_user(app, client)
     monkeypatch.setattr('src.services.revenuecat.fetch_subscriber', lambda uid: state)
@@ -168,9 +168,20 @@ def test_sandbox_only_grants_allowlisted_user(app, client, monkeypatch):
     user_id = setup_user(app, client)
     monkeypatch.setattr('src.services.revenuecat.fetch_subscriber', lambda uid: subscriber(sandbox=True))
     app.config['REVENUECAT_SANDBOX_USER_IDS'] = 'another-user'
-    assert client.post('/api/billing/revenuecat/sync').json['is_premium'] is False
+    response = client.post('/api/billing/revenuecat/sync')
+    assert response.status_code == 409
+    assert response.json['code'] == 'sandbox_subscription_not_enabled'
     app.config['REVENUECAT_SANDBOX_USER_IDS'] = user_id
     assert client.post('/api/billing/revenuecat/sync').json['is_premium'] is True
+
+
+def test_purchase_sync_reports_sandbox_not_enabled_instead_of_false_free_plan(app, client, monkeypatch):
+    setup_user(app, client)
+    monkeypatch.setattr('src.services.revenuecat.fetch_subscriber',
+                        lambda uid: subscriber(sandbox=True))
+    response = client.post('/api/billing/revenuecat/sync')
+    assert response.status_code == 409
+    assert response.json['code'] == 'sandbox_subscription_not_enabled'
 
 
 def test_bad_expiry_rejects_sync_without_writing(app, client, monkeypatch):
@@ -200,3 +211,101 @@ def test_unicode_webhook_header_fails_without_server_error(app, client):
     response = client.post('/api/billing/revenuecat/webhook',
                            headers={'Authorization': 'Bearer inválido'}, json={'event': {}})
     assert response.status_code == 401
+
+
+def test_android_config_uses_play_public_key_and_product_identifiers(app, client):
+    app.config.update(REVENUECAT_SECRET_API_KEY="private", REVENUECAT_IOS_API_KEY="appl_ios",
+                      REVENUECAT_ANDROID_API_KEY="goog_android",
+                      REVENUECAT_ANDROID_PRODUCT_IDS=["play.monthly", "play.annual"])
+    response = client.get("/api/billing/revenuecat/config?platform=android")
+    assert response.status_code == 200
+    assert response.json == {"configured": True, "public_api_key": "goog_android",
+                             "entitlement_id": "fittracker_ai_pro",
+                             "product_identifiers": ["play.monthly", "play.annual"]}
+    assert "private" not in response.text
+    assert "appl_ios" not in response.text
+    assert client.get("/api/billing/revenuecat/config").json["public_api_key"] == "appl_ios"
+
+
+@pytest.mark.parametrize("key", [None, "appl_wrong_store", "sk_private", 123])
+def test_android_config_never_falls_back_to_ios_or_secret_keys(app, client, key):
+    app.config.update(REVENUECAT_SECRET_API_KEY="secret", REVENUECAT_IOS_API_KEY="appl_ios",
+                      REVENUECAT_ANDROID_API_KEY=key)
+    response = client.get("/api/billing/revenuecat/config?platform=android")
+    assert response.status_code == 200
+    assert response.json["configured"] is False
+    assert response.json["public_api_key"] is None
+    assert "appl_ios" not in response.text
+    assert "secret" not in response.text
+
+
+def test_android_public_key_without_server_key_is_not_configured(app, client):
+    app.config.update(REVENUECAT_SECRET_API_KEY=None, REVENUECAT_ANDROID_API_KEY="goog_public")
+    response = client.get("/api/billing/revenuecat/config?platform=android")
+    assert response.json["configured"] is False
+    assert response.json["public_api_key"] == "goog_public"
+    assert response.json["product_identifiers"] == ["ai.fittracker.premium.monthly", "ai.fittracker.premium.annual"]
+
+
+@pytest.mark.parametrize("platform", ["web", "", "ANDROID"])
+def test_revenuecat_config_rejects_unknown_platform(app, client, platform):
+    app.config.update(REVENUECAT_SECRET_API_KEY="private", REVENUECAT_IOS_API_KEY="appl_ios")
+    response = client.get("/api/billing/revenuecat/config", query_string={"platform": platform})
+    assert response.status_code == 400
+    assert "public_api_key" not in response.json
+    assert "private" not in response.text
+
+
+@pytest.mark.parametrize("product, plan", [("play.monthly:standard", "premium_student"),
+                                          ("play.annual:standard", "premium_student_annual")])
+def test_verified_play_purchase_grants_configured_product_plan(app, client, monkeypatch, product, plan):
+    setup_user(app, client)
+    app.config.update(REVENUECAT_ANDROID_API_KEY="goog_public",
+                      REVENUECAT_ANDROID_PRODUCT_IDS=["play.monthly:standard", "play.annual:standard"])
+    state = subscriber(product=product)
+    state["subscriptions"][product]["store"] = "play_store"
+    monkeypatch.setattr("src.services.revenuecat.fetch_subscriber", lambda uid: state)
+    response = client.post("/api/billing/revenuecat/sync", json={"product_identifier": "forged"})
+    assert response.status_code == 200
+    assert response.json["is_premium"] is True
+    assert response.json["subscription"]["plan_code"] == plan
+
+
+@pytest.mark.parametrize("store, product, android_key", [
+    ("stripe", "play.monthly", "goog_public"),
+    ("play_store", "fake", "goog_public"),
+    ("app_store", "play.monthly", "goog_public"),
+    ("play_store", "ai.fittracker.premium.monthly", "goog_public"),
+    ("play_store", "play.monthly", None),
+    ("play_store", "play.monthly", "appl_wrong_store"),
+])
+def test_android_purchase_rejects_wrong_store_product_or_missing_config(app, client, monkeypatch, store, product, android_key):
+    setup_user(app, client)
+    app.config.update(REVENUECAT_ANDROID_API_KEY=android_key,
+                      REVENUECAT_ANDROID_PRODUCT_IDS=["play.monthly", "play.annual"])
+    state = subscriber(product=product)
+    state["subscriptions"][product]["store"] = store
+    monkeypatch.setattr("src.services.revenuecat.fetch_subscriber", lambda uid: state)
+    response = client.post("/api/billing/revenuecat/sync", json={"is_premium": True, "product_identifier": "play.monthly"})
+    assert response.status_code == 200
+    assert response.json["is_premium"] is False
+
+
+def test_play_sandbox_requires_existing_user_allowlist_and_expiry(app, client, monkeypatch):
+    user_id = setup_user(app, client)
+    app.config["REVENUECAT_ANDROID_API_KEY"] = "goog_public"
+    state = subscriber(sandbox=True)
+    state["subscriptions"]["ai.fittracker.premium.monthly"]["store"] = "play_store"
+    monkeypatch.setattr("src.services.revenuecat.fetch_subscriber", lambda uid: state)
+    assert client.post("/api/billing/revenuecat/sync").status_code == 409
+    app.config["REVENUECAT_SANDBOX_USER_IDS"] = user_id
+    assert client.post("/api/billing/revenuecat/sync").json["is_premium"] is True
+    state["entitlements"]["fittracker_ai_pro"]["expires_date"] = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    assert client.post("/api/billing/revenuecat/sync").json["is_premium"] is False
+
+
+def test_ios_config_rejects_google_key(app, client):
+    app.config.update(REVENUECAT_SECRET_API_KEY="private", REVENUECAT_IOS_API_KEY="goog_wrong_store")
+    response = client.get("/api/billing/revenuecat/config")
+    assert response.json["configured"] is False
+    assert response.json["public_api_key"] is None
