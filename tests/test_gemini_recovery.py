@@ -36,7 +36,7 @@ def test_transient_failure_recovers_with_another_gemini_model(recovery, monkeypa
     assert ai._completion('system', 'prompt', 100, .2, model='primary',
                           json_response=True, json_schema=schema,
                           image_bytes=b'image', mime_type='image/png',
-                          request_timeout=10) == '{"ok":true}'
+                          request_timeout=10, thinking_level='minimal') == '{"ok":true}'
     assert [call[1]['model'] for call in calls] == ['primary', 'backup']
     assert calls[0][0] == calls[1][0] == ('system', 'prompt', 100, .2)
     for _, kwargs in calls:
@@ -44,6 +44,7 @@ def test_transient_failure_recovers_with_another_gemini_model(recovery, monkeypa
         assert kwargs['json_response'] is True
         assert kwargs['image_bytes'] == b'image'
         assert kwargs['mime_type'] == 'image/png'
+        assert kwargs['thinking_level'] == 'minimal'
 
 
 def test_primary_success_never_calls_backup(recovery, monkeypatch):

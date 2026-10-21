@@ -31,6 +31,7 @@ def test_nutrition_retry_preserves_photo_and_description(app, monkeypatch):
         assert kwargs['image_bytes'] == b'photo'
         assert kwargs['mime_type'] == 'image/jpeg'
         assert kwargs['request_timeout'] <= 15
+        assert kwargs['thinking_level'] == 'minimal'
 
 
 def test_nutrition_retry_uses_remaining_window(app, monkeypatch):
@@ -121,9 +122,12 @@ def test_nutrition_http_timeout_disables_hidden_sdk_retries(app, monkeypatch):
     monkeypatch.setattr(ai.genai, 'Client', Client)
     with app.app_context():
         app.config['GEMINI_API_KEY'] = 'test-key'
-        ai._completion('system', 'prompt', 1024, 0.3, request_timeout=10)
+        ai._completion('system', 'prompt', 1024, 0.3, request_timeout=10,
+                       thinking_level='minimal')
     assert captured['config'].http_options.timeout == 10000
     assert captured['config'].http_options.retry_options.attempts == 1
+    assert captured['config'].http_options.extra_body == {
+        'generationConfig': {'thinkingConfig': {'thinkingLevel': 'minimal'}}}
 
 
 @pytest.mark.parametrize('recover', [True, False])

@@ -112,7 +112,8 @@ def _openai_fallback_allowed():
 
 def _completion(system_instruction, prompt, max_tokens, temperature, json_response=False,
                 model=None, json_schema=None, image_bytes=None, mime_type=None,
-                request_timeout=None, fallback_timeout=None, fallback_only=False):
+                request_timeout=None, fallback_timeout=None, fallback_only=False,
+                thinking_level=None):
     allowed = _openai_fallback_allowed()
     deadline = getattr(g, "ai_generation_deadline", None) if has_request_context() else None
     timeout = request_timeout or (25 if deadline is not None else current_app.config.get("GEMINI_TIMEOUT", 90))
@@ -135,6 +136,7 @@ def _completion(system_instruction, prompt, max_tokens, temperature, json_respon
                         system_instruction, prompt, max_tokens, temperature, json_response=json_response,
                         model=candidate_model, json_schema=json_schema, image_bytes=image_bytes, mime_type=mime_type,
                         request_timeout=min(timeout, remaining),
+                        thinking_level=thinking_level,
                     )
                     if json_response:
                         _json_object(result)
@@ -178,6 +180,7 @@ def _gemini_completion(
     image_bytes=None,
     mime_type=None,
     request_timeout=None,
+    thinking_level=None,
 ) -> str:
     api_key = current_app.config["GEMINI_API_KEY"]
     if not api_key:
@@ -196,6 +199,8 @@ def _gemini_completion(
     timeout = request_timeout if request_timeout is not None else current_app.config.get("GEMINI_TIMEOUT", 90)
     timeout_ms = timeout * 1000
     http_options = types.HttpOptions(timeout=math.ceil(timeout_ms))
+    if thinking_level is not None:
+        http_options.extra_body = {"generationConfig": {"thinkingConfig": {"thinkingLevel": thinking_level}}}
     if request_timeout is not None:
         # Nutrition owns its short retry window; SDK retries must not extend it.
         http_options.retry_options = types.HttpRetryOptions(attempts=1)
@@ -312,6 +317,7 @@ Assuma porções médias brasileiras se não houver referência de tamanho."""
                 image_bytes=image_bytes,
                 mime_type=mime_type,
                 request_timeout=min(15, remaining),
+                thinking_level="minimal",
             )
             break
         except AIServiceUnavailableError:
