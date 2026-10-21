@@ -104,7 +104,8 @@ def _openai_fallback_allowed():
     from src.legal import AI_OPENAI_CONSENT_VERSION
 
     user = getattr(g, "user", None) if has_request_context() else None
-    return bool(current_app.config.get("OPENAI_API_KEY") and user
+    return bool(current_app.config.get("OPENAI_FALLBACK_ENABLED", True)
+                and current_app.config.get("OPENAI_API_KEY") and user
                 and user.ai_consent_version == AI_OPENAI_CONSENT_VERSION
                 and user.has_current_ai_consent())
 
@@ -114,21 +115,34 @@ def _completion(system_instruction, prompt, max_tokens, temperature, json_respon
                 request_timeout=None, fallback_timeout=None, fallback_only=False):
     allowed = _openai_fallback_allowed()
     deadline = getattr(g, "ai_generation_deadline", None) if has_request_context() else None
-    if deadline is not None:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise AIServiceUnavailableError("A geração excedeu o tempo de espera.")
-        request_timeout = min(request_timeout or 25, remaining)
+    timeout = request_timeout or (25 if deadline is not None else current_app.config.get("GEMINI_TIMEOUT", 90))
+    if deadline is None:
+        deadline = time.monotonic() + timeout
+    if deadline <= time.monotonic():
+        raise AIServiceUnavailableError("A geração excedeu o tempo de espera.")
     if not (allowed and fallback_only):
         try:
-            result = _gemini_completion(
-                system_instruction, prompt, max_tokens, temperature, json_response=json_response,
-                model=model, json_schema=json_schema, image_bytes=image_bytes, mime_type=mime_type,
-                request_timeout=request_timeout,
-            )
-            if json_response:
-                _json_object(result)
-            return result
+            models = [model]
+            backup = current_app.config.get("GEMINI_FALLBACK_MODEL")
+            if backup and backup != (model or current_app.config["GEMINI_MODEL"]):
+                models.append(backup)
+            for index, candidate_model in enumerate(models):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise AIServiceUnavailableError("A geração excedeu o tempo de espera.")
+                try:
+                    result = _gemini_completion(
+                        system_instruction, prompt, max_tokens, temperature, json_response=json_response,
+                        model=candidate_model, json_schema=json_schema, image_bytes=image_bytes, mime_type=mime_type,
+                        request_timeout=min(timeout, remaining),
+                    )
+                    if json_response:
+                        _json_object(result)
+                    return result
+                except (AIServiceUnavailableError, AIQuotaExceededError):
+                    if index == len(models) - 1:
+                        raise
+                    current_app.logger.warning("Gemini unavailable; trying model=%s", backup)
         except AIRefusalError:
             raise
         except AIServiceError:
@@ -181,7 +195,7 @@ def _gemini_completion(
         config_options["response_json_schema"] = json_schema
     timeout = request_timeout if request_timeout is not None else current_app.config.get("GEMINI_TIMEOUT", 90)
     timeout_ms = timeout * 1000
-    http_options = types.HttpOptions(timeout=int(timeout_ms))
+    http_options = types.HttpOptions(timeout=math.ceil(timeout_ms))
     if request_timeout is not None:
         # Nutrition owns its short retry window; SDK retries must not extend it.
         http_options.retry_options = types.HttpRetryOptions(attempts=1)
@@ -232,13 +246,14 @@ def _gemini_completion(
     except Exception as error:
         category, status_code = _provider_error_category(error)
         current_app.logger.warning(
-            "Gemini request failed category=%s http_status=%s",
+            "Gemini request failed category=%s http_status=%s model=%s",
             category,
             status_code,
+            model or current_app.config["GEMINI_MODEL"],
         )
         if category == "quota_rate_limit":
             raise AIQuotaExceededError(
-                "O limite de uso da IA foi atingido. Tente novamente mais tarde."
+                "O serviço de IA está temporariamente sobrecarregado. Seu acesso não foi alterado. Tente novamente em instantes."
             ) from error
         if category == "timeout_unavailable":
             raise AIServiceUnavailableError(
@@ -296,7 +311,7 @@ Assuma porções médias brasileiras se não houver referência de tamanho."""
                 model=model,
                 image_bytes=image_bytes,
                 mime_type=mime_type,
-                request_timeout=min(10, remaining),
+                request_timeout=min(15, remaining),
             )
             break
         except AIServiceUnavailableError:

@@ -30,7 +30,26 @@ def test_nutrition_retry_preserves_photo_and_description(app, monkeypatch):
         assert 'Arroz e feijão' in args[1]
         assert kwargs['image_bytes'] == b'photo'
         assert kwargs['mime_type'] == 'image/jpeg'
-        assert kwargs['request_timeout'] <= 10
+        assert kwargs['request_timeout'] <= 15
+
+
+def test_nutrition_retry_uses_remaining_window(app, monkeypatch):
+    now = [0.0]
+    calls = []
+    monkeypatch.setattr(ai.time, 'monotonic', lambda: now[0])
+    monkeypatch.setattr(ai.time, 'sleep', lambda delay: now.__setitem__(0, now[0] + delay))
+
+    def completion(*args, **kwargs):
+        calls.append(kwargs['request_timeout'])
+        if len(calls) == 1:
+            now[0] += 15
+            raise ai.AIServiceUnavailableError('timeout')
+        return RESULT
+
+    monkeypatch.setattr(ai, '_completion', completion)
+    with app.app_context():
+        assert ai.calculate_nutrition('Arroz')['calories'] == 100
+    assert calls == [15, 6.5]
 
 
 @pytest.mark.parametrize('failure', [ai.AIQuotaExceededError, ai.AIServiceError, ai.AIResponseError])

@@ -56,7 +56,9 @@ class Config:
     GEMINI_CHAT_MODEL = os.getenv("GEMINI_CHAT_MODEL", "gemini-flash-lite-latest")
     GEMINI_STRUCTURED_MODEL = os.getenv("GEMINI_STRUCTURED_MODEL", "gemini-flash-lite-latest")
     GEMINI_NUTRITION_MODEL = os.getenv("GEMINI_NUTRITION_MODEL", "gemini-3.1-flash-lite")
+    GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    OPENAI_FALLBACK_ENABLED = os.getenv("OPENAI_FALLBACK_ENABLED", "true").lower() == "true"
     OPENAI_FALLBACK_MODEL = os.getenv("OPENAI_FALLBACK_MODEL", "gpt-4.1-mini")
     GEMINI_PLAN_MODEL = os.getenv("GEMINI_PLAN_MODEL", "gemini-flash-latest")
     GEMINI_WORKOUT_MODEL = os.getenv("GEMINI_WORKOUT_MODEL", GEMINI_NUTRITION_MODEL)

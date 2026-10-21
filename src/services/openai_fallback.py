@@ -68,7 +68,7 @@ def completion(system_instruction, prompt, max_tokens, temperature, *, json_resp
     if response.status_code != 200:
         current_app.logger.warning('OpenAI fallback failed http_status=%s', response.status_code)
         if response.status_code == 429:
-            raise AIQuotaExceededError('O limite de uso da IA foi atingido. Tente novamente mais tarde.')
+            raise AIQuotaExceededError('O serviço de IA está temporariamente sobrecarregado. Seu acesso não foi alterado. Tente novamente em instantes.')
         if response.status_code >= 500 or response.status_code == 408:
             raise AIServiceUnavailableError('A IA está temporariamente indisponível.')
         raise AIServiceError('OpenAI fallback request failed')
