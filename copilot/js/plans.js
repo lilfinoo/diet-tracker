@@ -1609,7 +1609,7 @@
                     </div>
                     <div class="plan-card__actions">
                         <button type="button" data-plan-action="${adjustAction}" data-plan-type="${type}" data-plan-id="${esc(plan.id)}" class="btn-adjust"><i class="fas ${isDiet && !plan.is_current ? "fa-check" : "fa-sliders"}" aria-hidden="true"></i> ${adjustLabel}</button>
-                        <button type="button" data-plan-action="delete" data-plan-type="${type}" data-plan-id="${esc(plan.id)}" class="btn-delete plan-delete" aria-label="Excluir ${isDiet ? "plano alimentar" : "plano de treino"}"><i class="fas fa-trash" aria-hidden="true"></i></button>
+                        <button type="button" data-plan-action="delete" data-plan-type="${type}" data-plan-id="${esc(plan.id)}" class="btn-delete plan-delete" aria-label="Excluir ${isDiet ? "plano alimentar" : "plano de treino"} ${esc(plan.title || "")}"><i class="fas fa-trash" aria-hidden="true"></i> Excluir plano</button>
                     </div>
                 </article>`;
         }).join("");
@@ -2036,10 +2036,17 @@
 
     async function deletePlan(type, id) {
         const label = type === "diet" ? "plano alimentar" : "plano de treino";
-        if (!window.confirm(`Tem certeza que deseja excluir este ${label}?`)) return;
+        if (!window.confirm(`Excluir este ${label}? Ele será removido dos seus planos e, se estiver em uso, deixará de ser o plano atual. Seu histórico será preservado. Esta ação não pode ser desfeita.`)) return;
         try {
-            await apiRequest(`/${type === "diet" ? "diet_plans" : "workout_plans"}/${apiSegment(id)}`, { method: "DELETE" });
-            showToast(`${type === "diet" ? "Plano alimentar" : "Plano de treino"} excluído!`, "success");
+            const result = await apiRequest(`/${type === "diet" ? "diet_plans" : "workout_plans"}/${apiSegment(id)}`, { method: "DELETE" });
+            if (type === "diet") {
+                dietPlans = dietPlans.filter(plan => String(plan.id) !== String(id));
+                renderPlanList("diet", dietPlans);
+            } else {
+                workoutPlans = workoutPlans.filter(plan => String(plan.id) !== String(id));
+                renderFilteredWorkoutPlans();
+            }
+            showToast(result?.message || `${type === "diet" ? "Plano alimentar" : "Plano de treino"} excluído!`, "success");
             if (type === "diet") await loadDietPlans();
             else await loadWorkoutPlans();
         } catch (error) {
