@@ -52,7 +52,9 @@ struct NativeOnboardingView: View {
                 }
             }.background(Color.fitBackground.ignoresSafeArea()).navigationBarHidden(true)
                 .onAppear { populate() }
-                .sheet(item: $selectedPlan, onDismiss: { onFinished() }) { kind in PlanGeneratorView(kind: kind, firstPlan: true) }
+                .sheet(isPresented: Binding(get: { selectedPlan != nil }, set: { if !$0 { selectedPlan = nil } }), onDismiss: { onFinished() }) {
+                    if let kind = selectedPlan { PlanGeneratorView(kind: kind, firstPlan: true) }
+                }
         }.interactiveDismissDisabled(busy)
     }
 
@@ -143,4 +145,3 @@ struct NativeOnboardingView: View {
     }
 }
 
-extension NativePlanKind: Identifiable { public var id: String { rawValue } }
