@@ -4,9 +4,9 @@ import SkipFuse
 #endif
 
 struct NativeLaunchView: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var animate = false
-    @State private var reflected = false
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
+    @State var animate = false
+    @State var reflected = false
 
     var body: some View {
         GeometryReader { geometry in
