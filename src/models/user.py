@@ -1829,3 +1829,29 @@ class PushDevice(db.Model):
     environment = db.Column(db.String(16), nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     user = db.relationship("User", back_populates="push_devices")
+
+
+class ReferralCode(db.Model):
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), primary_key=True)
+    code = db.Column(db.String(12), unique=True, nullable=False)
+
+
+class Referral(db.Model):
+    __table_args__ = (
+        db.UniqueConstraint("invitee_user_id", name="uq_referral_invitee"),
+        db.CheckConstraint("inviter_user_id != invitee_user_id", name="ck_referral_distinct_users"),
+        db.Index("ix_referral_inviter_created", "inviter_user_id", "created_at"),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    inviter_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    invitee_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="SET NULL"), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ReferralReward(db.Model):
+    __table_args__ = (db.UniqueConstraint("inviter_user_id", "period", name="uq_referral_reward_month"),)
+    id = db.Column(db.Integer, primary_key=True)
+    inviter_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    period = db.Column(db.String(7), nullable=False)
+    granted_at = db.Column(db.DateTime, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)

@@ -78,7 +78,7 @@ def update_consents():
 def _subscription_block(user):
     for subscription in sorted(user.subscriptions, key=lambda item: item.created_at or datetime.min, reverse=True):
         # Apple purchases are managed by Apple; account deletion cannot cancel them.
-        if subscription.provider == "revenuecat":
+        if subscription.provider in {"revenuecat", "referral"}:
             continue
         local_active = subscription.status in {"active", "trialing"}
         if subscription.provider == "asaas" and subscription.external_subscription_id:
@@ -182,6 +182,9 @@ def _detach_account_attribution(user):
             AnalyticsEvent.dedupe_key: None,
         },
         synchronize_session=False,
+    )
+    Subscription.query.filter_by(user_id=user_id, provider="referral").delete(
+        synchronize_session="fetch"
     )
     Subscription.query.filter_by(user_id=user_id).update(
         {Subscription.user_id: None}, synchronize_session=False

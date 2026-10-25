@@ -20,6 +20,7 @@ from src.routes.common import _csrf_token, _google_identity_claims, _google_sign
 from src.services.badges import grant_signup_badges
 from src.services.analytics import analytics_context, record_event
 from src.services.rate_limit import rate_limit
+from src.services.referrals import attach_referral
 
 
 auth_bp = Blueprint("auth", __name__)
@@ -152,6 +153,7 @@ def google_auth():
         db.session.add_all((user, identity))
         try:
             db.session.flush()
+            attach_referral(user, data.get("referral_code"))
             _record_signup_consents(user, data)
             grant_signup_badges(user)
             anonymous_id, analytics_properties = analytics_context(data.get("analytics"))
@@ -307,6 +309,7 @@ def apple_login():
     db.session.add_all((user, identity))
     try:
         db.session.flush()
+        attach_referral(user, data.get("referral_code"))
         _record_signup_consents(user, data)
         grant_signup_badges(user)
         anonymous_id, properties = analytics_context(data.get("analytics"))
@@ -345,6 +348,7 @@ def register():
     db.session.add(user)
     try:
         db.session.flush()
+        attach_referral(user, data.get("referral_code"))
         _record_signup_consents(user, data)
         grant_signup_badges(user)
         anonymous_id, analytics_properties = analytics_context(data.get("analytics"))
