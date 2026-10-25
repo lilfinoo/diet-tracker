@@ -585,6 +585,22 @@ _DAY_GROUP_PRIORITIES = {
 def _ideal_slot_definitions(questionnaire, spec):
     split_type = questionnaire["split_type"]
     base_code = spec["code"].split("_")[0]
+    if split_type == "upper_lower" and base_code == "UPPER":
+        groups = ["horizontal_push", "horizontal_pull"]
+        if questionnaire["session_duration"] <= 30:
+            if questionnaire["days_per_week"] == 2:
+                groups.extend(["biceps", "triceps"])
+            else:
+                upper_number = int(spec["code"].split("_")[1])
+                groups.append("biceps" if upper_number % 2 else "triceps")
+        else:
+            groups.extend(["vertical_pull", "lateral_raise", "biceps", "triceps"])
+            if questionnaire["session_duration"] >= 75:
+                groups.insert(3, "vertical_push")
+        return [
+            (f"{spec['code']}_{group}", [group], [], f"cobertura {group}")
+            for group in groups
+        ]
     if split_type == "abcde" and questionnaire["session_duration"] == 90:
         return _abcde_90_slot_definitions()[base_code]
 
