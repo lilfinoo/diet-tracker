@@ -1,0 +1,73 @@
+name: Fit Tracker Android (Skip)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['codex/android-pilot-*']
+    paths:
+      - 'native-android/**'
+      - 'native-ios/Package.swift'
+      - 'native-ios/Sources/FitTrackerCore/**'
+      - 'native-ios/Tests/**'
+      - '.github/workflows/android-pilot.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  billing-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements-dev.txt
+      - run: pytest tests/test_revenuecat.py
+
+  build:
+    needs: billing-contracts
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Skip on the remote runner
+        uses: skiptools/actions/setup-skip@v1
+        with:
+          install-swift-android-sdk: 'true'
+          run-doctor: 'false'
+
+      - name: Check shared API contracts
+        run: swift test --package-path native-ios
+
+      - name: Check local logout isolation
+        run: |
+          swiftc -swift-version 5 native-android/Sources/FitTrackerAndroid/NativeCookieVault.swift native-android/Checks/SessionVaultCheck.swift -o "$RUNNER_TEMP/session-vault-check"
+          "$RUNNER_TEMP/session-vault-check"
+
+      - name: Compile shared core for Android
+        run: skip android build --package-path native-ios --arch aarch64 --no-bridge
+
+      - name: Build Android debug APK
+        run: >-
+          skip export --project native-android
+          --debug --no-ios --arch aarch64 --no-export-project
+          --dir "$RUNNER_TEMP/fittracker-android"
+
+      - name: Verify APK package and signature
+        run: |
+          set -euo pipefail
+          python3 native-android/Checks/VerifyAPK.py "$RUNNER_TEMP/fittracker-android"
+
+      - name: Save APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: fit-tracker-android-debug
+          path: |
+            ${{ runner.temp }}/fittracker-android/**/*.apk
+            ${{ runner.temp }}/fittracker-android/apk-verification.json
+            ${{ runner.temp }}/fittracker-android/apk-badging.txt
+            ${{ runner.temp }}/fittracker-android/apk-signature.txt
+          if-no-files-found: error
+          retention-days: 7

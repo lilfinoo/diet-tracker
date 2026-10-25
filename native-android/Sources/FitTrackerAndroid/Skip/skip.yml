@@ -1,0 +1,8 @@
+skip:
+  mode: 'native'
+  bridging: true
+build:
+  contents:
+    - block: 'dependencies'
+      contents:
+        - 'implementation("androidx.exifinterface:exifinterface:1.4.1")'
