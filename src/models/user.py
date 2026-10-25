@@ -41,6 +41,7 @@ class User(db.Model):
 
     # Relacionamentos
     diet_entries = db.relationship("DietEntry", backref="user", lazy=True, cascade="all, delete-orphan")
+    water_entries = db.relationship("WaterEntry", backref="user", lazy=True, cascade="all, delete-orphan")
     measurements = db.relationship("Measurement", backref="user", lazy=True, cascade="all, delete-orphan")
     profile = db.relationship("UserProfile", backref="user", uselist=False, cascade="all, delete-orphan")
     chat_messages = db.relationship("ChatMessage", backref="user", lazy=True, cascade="all, delete-orphan")
@@ -534,6 +535,7 @@ class UserProfile(db.Model):
     dietary_restrictions = db.Column(db.Text, nullable=True)
     _profile_weight = db.Column("weight", db.Float, nullable=True)
     _profile_height = db.Column("height", db.Float, nullable=True)
+    bottle_capacity_ml = db.Column(db.Integer, nullable=True)
     timezone = db.Column(db.String(64), nullable=True)
     is_public = db.Column(db.Boolean, default=False, nullable=False)
     avatar_object_key = db.Column(db.String(512), nullable=True)
@@ -647,6 +649,27 @@ class UserProfile(db.Model):
             "profile_missing_fields": missing,
             "profile_complete": not missing,
         }
+
+class WaterEntry(db.Model):
+    __table_args__ = (
+        db.CheckConstraint("amount_ml > 0 AND amount_ml <= 10000", name="ck_water_entry_amount"),
+        db.Index("ix_water_entry_user_date", "user_id", "local_date"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    amount_ml = db.Column(db.Integer, nullable=False)
+    occurred_at = db.Column(db.DateTime, nullable=False)
+    local_date = db.Column(db.Date, nullable=False)
+    timezone = db.Column(db.String(64), nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "amount_ml": self.amount_ml,
+            "occurred_at": self.occurred_at.isoformat() + "Z",
+        }
+
 
 class ChatMessage(db.Model):
     __table_args__ = (db.Index("ix_chat_message_user_created_at", "user_id", "created_at"),)
