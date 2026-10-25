@@ -430,7 +430,7 @@ struct NativeWorkoutExecutionView: View {
               account.user?.id == ownerId else { snapCard(); return }
         if completedIds.contains(exercise.id) { await animateMove(1); return }
         do {
-            let sets = try workoutPerformedSets(rows(for: exercise), plannedSets: prescriptionCount(exercise))
+            let sets = try workoutPerformedSets(rows(for: exercise))
             local.completedSets = local.completedSets ?? [:]
             local.completedSets?[String(exercise.id)] = sets
             local.restUntil = nil
@@ -460,7 +460,7 @@ struct NativeWorkoutExecutionView: View {
         let performed = day.exercises.filter { completedIds.contains($0.id) }.map { exercise in
             let override = effectiveOverride(for: exercise)
             let recorded = local.completedSets?[String(exercise.id)]
-                ?? (try? workoutPerformedSets(rows(for: exercise), plannedSets: prescriptionCount(exercise))) ?? []
+                ?? (try? workoutPerformedSets(rows(for: exercise))) ?? []
             let sets = recorded.enumerated().map { index, row in
                 WorkoutPerformedSet(setOrder: index + 1, repetitions: row.repetitions,
                     loadKg: row.loadKg, isWarmup: row.isWarmup)

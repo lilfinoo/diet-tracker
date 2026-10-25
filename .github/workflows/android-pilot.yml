@@ -36,7 +36,31 @@ jobs:
         uses: skiptools/actions/setup-skip@v1
         with:
           install-swift-android-sdk: 'true'
+          swift-android-sdk-version: '6.4.1'
           run-doctor: 'false'
+
+      - name: Verify Swift Android NDK
+        run: |
+          skip version
+          skip android sdk list
+          python3 - <<'PYTHON'
+          import os
+          from pathlib import Path
+          import re
+          roots = [Path.home() / ".swiftpm/swift-sdks", Path.home() / "Library/org.swift.swiftpm/swift-sdks"]
+          candidates = {path.resolve() for root in roots for path in root.glob("*.artifactbundle/swift-android/android-ndk-r30/source.properties")}
+          if len(candidates) != 1:
+              raise SystemExit(f"Expected one bundled NDK r30, found {len(candidates)}")
+          properties = candidates.pop()
+          revision = re.search(r"Pkg.Revision\s*=\s*(\S+)", properties.read_text())
+          ndk = properties.parent
+          clang = ndk / "toolchains/llvm/prebuilt/darwin-x86_64/bin/clang"
+          if revision is None or not revision[1].startswith("30.") or not os.access(clang, os.X_OK):
+              raise SystemExit("Bundled NDK r30 is incomplete or has an unexpected revision")
+          with open(os.environ["GITHUB_ENV"], "a") as environment:
+              environment.write(f"ANDROID_NDK_HOME={ndk}\n")
+          print(f"Verified NDK {revision[1]} at {ndk}")
+          PYTHON
 
       - name: Check shared API contracts
         run: swift test --package-path native-ios
