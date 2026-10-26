@@ -432,8 +432,10 @@ struct NativeNutritionView: View {
                                     Circle().trim(from: 0, to: metric.fraction).stroke(metric.color, style: StrokeStyle(lineWidth: 4, lineCap: .round)).rotationEffect(.degrees(-90))
                                     Image(systemName: metric.icon).font(.system(size: 20)).foregroundColor(metric.color)
                                 }.frame(width: 44, height: 44)
-                                (Text(numberText(metric.value)).fontWeight(.bold).foregroundColor(metric.color) + Text(" / \(numberText(metric.target))\(metric.unit == "g" ? "g" : "")").foregroundColor(.secondary))
-                                    .font(.caption2).lineLimit(1).minimumScaleFactor(0.7)
+                                HStack(spacing: 0) {
+                                    Text(numberText(metric.value)).fontWeight(.bold).foregroundColor(metric.color)
+                                    Text(" / \(numberText(metric.target))\(metric.unit == "g" ? "g" : "")").foregroundColor(.secondary)
+                                }.font(.caption2).lineLimit(1).minimumScaleFactor(0.7)
                                 Text(metric.id).font(.caption2).foregroundColor(.secondary).lineLimit(1).minimumScaleFactor(0.75)
                             }.frame(maxWidth: .infinity)
                         }.buttonStyle(.plain).accessibilityLabel("Detalhes de \(metric.id)")

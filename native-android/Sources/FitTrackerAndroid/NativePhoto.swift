@@ -96,7 +96,7 @@ struct NativePhotoPicker: View {
                     }
                 }
             }
-            .androidCompositionBoundary(id: pickerId, inputs: camera)
+            .androidCompositionBoundary(id: pickerId, inputs: camera ? "camera" : "library")
             .frame(width: 1, height: 1)
             #else
             HostPhotoPicker(photo: $photo, camera: camera).ignoresSafeArea()

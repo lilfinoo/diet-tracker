@@ -54,7 +54,7 @@ enum NativeCookieVault {
         }
         let data: Data?
         #if os(Android)
-        data = Keychain.shared.string(forKey: key).flatMap { Data(base64Encoded: $0) }
+        data = try Keychain.shared.string(forKey: key).flatMap { Data(base64Encoded: $0) }
         #elseif canImport(Security)
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "ai.fittracker.app.session", kSecAttrAccount as String: key,
