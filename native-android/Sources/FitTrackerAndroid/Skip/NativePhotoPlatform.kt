@@ -16,7 +16,7 @@ import android.graphics.Typeface
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.ComponentActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -139,7 +139,7 @@ object NativePhotoPlatform {
         } finally { removeOwnedCapture(context, uri) }
     }
 
-    fun share(activity: AppCompatActivity, path: String) {
+    fun share(activity: ComponentActivity, path: String) {
         val file = File(path)
         if (!file.isFile) throw IOException("A imagem não está mais disponível.")
         val uri = FileProvider.getUriForFile(activity, activity.packageName + ".fileprovider", file)
