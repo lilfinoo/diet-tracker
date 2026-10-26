@@ -623,7 +623,7 @@ struct NativeRestTimer: View {
         let remaining = max(0, Int(ceil(until.timeIntervalSince(now))))
         HStack {
             Label(remaining > 0 ? "Descanso · \(remaining)s" : "Descanso concluído", systemImage: "timer")
-                .font(.subheadline.monospacedDigit())
+                .font(.system(.subheadline, design: .monospaced))
             Spacer()
             Button("Encerrar", action: stop).font(.caption)
         }.padding(12).background(Color.fitBlue.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))

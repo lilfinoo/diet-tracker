@@ -50,6 +50,7 @@ struct NativeLaunchView: View {
                         .font(.system(size: 10, weight: .semibold)).tracking(2.1)
                         .foregroundColor(Color(red: 137/255, green: 161/255, blue: 191/255))
                 }
+                .accessibilityHidden(true)
                 .position(x: geometry.size.width / 2, y: geometry.size.height * 0.43)
                 VStack(spacing: 14) {
                     Text("Preparando seu dia").font(.caption).foregroundColor(Color(red: 135/255, green: 161/255, blue: 194/255))
@@ -63,10 +64,10 @@ struct NativeLaunchView: View {
                         }
                     }
                 }
+                .accessibilityHidden(true)
                 .position(x: geometry.size.width / 2, y: geometry.size.height - 110)
             }
             .ignoresSafeArea()
-            .accessibilityElement(children: .ignore)
             .accessibilityLabel("Fit Tracker. Preparando seu dia")
             .onAppear { if !reduceMotion { animate = true } }
             .task {

@@ -74,7 +74,7 @@ struct NativeDietSlotView: View {
                             Text(slot.entry?.description ?? meal.description).font(.subheadline).foregroundColor(.secondary)
                                 .lineLimit(showingDescription ? nil : 2).multilineTextAlignment(.leading)
                                 .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
-                        }.buttonStyle(.plain).accessibilityHint("Toque para expandir ou recolher os alimentos")
+                        }.buttonStyle(.plain).accessibilityLabel(Text("\(slot.entry?.description ?? meal.description). Toque para expandir ou recolher os alimentos"))
                     } else {
                         Text(slot.entry?.description ?? meal.description).font(.subheadline).foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -146,38 +146,35 @@ struct NativeDietSlotView: View {
 
     var alternativesSheet: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text(slot.label).font(.title3.bold())
-                    Text("Escolha o que combina melhor com seu dia.").font(.subheadline).foregroundColor(.secondary)
-                    ForEach(Array(slot.alternatives.enumerated()), id: \.element.id) { index, alternative in
-                        Button { selectedAlternative = alternative.id } label: {
-                            VStack(alignment: .leading, spacing: 12) {
-                                HStack {
-                                    Text("Opção \(index + 1)").font(.caption.weight(.semibold))
-                                    Spacer()
-                                    if alternative.id == selectedAlternative {
-                                        Label("Selecionada", systemImage: "checkmark").font(.caption)
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text(slot.label).font(.title3.bold())
+                        Text("Escolha o que combina melhor com seu dia.").font(.subheadline).foregroundColor(.secondary)
+                        ForEach(Array(slot.alternatives.enumerated()), id: \.element.id) { index, alternative in
+                            Button { selectedAlternative = alternative.id } label: {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    HStack {
+                                        Text("Opção \(index + 1)").font(.caption.weight(.semibold))
+                                        Spacer()
+                                        if alternative.id == selectedAlternative {
+                                            Label("Selecionada", systemImage: "checkmark").font(.caption)
+                                        }
+                                    }.foregroundColor(.fitBlue)
+                                    Text(alternative.description).font(.body).foregroundColor(.primary)
+                                        .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading)
+                                    if let calories = alternative.calories {
+                                        Text("\(Int(calories)) kcal previstas").font(.caption).foregroundColor(.secondary)
                                     }
-                                }.foregroundColor(.fitBlue)
-                                Text(alternative.description).font(.body).foregroundColor(.primary)
-                                    .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading)
-                                if let calories = alternative.calories {
-                                    Text("\(Int(calories)) kcal previstas").font(.caption).foregroundColor(.secondary)
-                                }
-                            }.frame(maxWidth: .infinity, alignment: .leading).padding(18)
-                                .background(Color.fitSurface, in: RoundedRectangle(cornerRadius: 18))
-                                .overlay(RoundedRectangle(cornerRadius: 18)
-                                    .stroke(alternative.id == selectedAlternative ? Color.fitBlue : Color.white.opacity(0.08), lineWidth: 1))
-                        }.buttonStyle(.plain).accessibilityAddTraits(alternative.id == selectedAlternative ? .isSelected : [])
-                    }
-                    if let error { Text(error).font(.footnote).foregroundColor(.red) }
-                }.padding(20)
-            }
-            .background(Color.fitBackground.ignoresSafeArea())
-            .navigationTitle("Trocar refeição").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { showAlternatives = false }.disabled(busy) } }
-            .safeAreaInset(edge: .bottom) {
+                                }.frame(maxWidth: .infinity, alignment: .leading).padding(18)
+                                    .background(Color.fitSurface, in: RoundedRectangle(cornerRadius: 18))
+                                    .overlay(RoundedRectangle(cornerRadius: 18)
+                                        .stroke(alternative.id == selectedAlternative ? Color.fitBlue : Color.white.opacity(0.08), lineWidth: 1))
+                            }.buttonStyle(.plain).accessibilityAddTraits(alternative.id == selectedAlternative ? .isSelected : [])
+                        }
+                        if let error { Text(error).font(.footnote).foregroundColor(.red) }
+                    }.padding(20)
+                }
                 Button {
                     Task {
                         if await perform({ try await session.api.selectDietAlternative(date: date, slotKey: slot.slotKey, mealId: selectedAlternative) }) {
@@ -189,6 +186,9 @@ struct NativeDietSlotView: View {
                         .frame(maxWidth: .infinity).padding(.vertical, 10)
                 }.buttonStyle(.borderedProminent).disabled(busy).padding(20).background(Color.fitBackground)
             }
+            .background(Color.fitBackground.ignoresSafeArea())
+            .navigationTitle("Trocar refeição").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { showAlternatives = false }.disabled(busy) } }
             .interactiveDismissDisabled(busy)
         }
     }

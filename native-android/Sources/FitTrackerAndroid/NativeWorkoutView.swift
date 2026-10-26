@@ -70,7 +70,7 @@ struct NativeTodayWorkoutCard: View {
             .fitPremiumCard()
             .contentShape(RoundedRectangle(cornerRadius: FitTrackerTheme.cardRadius))
         }.buttonStyle(.plain)
-        .accessibilityHint("Abrir seu treino")
+        .accessibilityLabel(Text("Treino de hoje. \(today?.state == "unconfigured" ? "Crie seu primeiro treino" : today?.currentDay?.title ?? workoutStateTitle(today?.state ?? "")). \(today?.state == "unconfigured" ? "Montar meu treino" : "Abrir seu treino")"))
         .task { await tabData.loadWorkout() }
         .onFitNotification(.nativeWorkoutChanged) { _ in Task { await tabData.loadWorkout(force: true) } }
         .sheet(isPresented: $showingGenerator, onDismiss: { Task { await tabData.loadWorkout(force: true) } }) { PlanGeneratorView(kind: .workout, firstPlan: true) }
@@ -292,7 +292,7 @@ struct NativeWorkoutView: View {
                 .contentShape(RoundedRectangle(cornerRadius: 22))
             }
             .buttonStyle(.plain)
-            .accessibilityHint(state == "completed" || state == "partial" ? "Ver treino concluído e cargas registradas" : "Abrir treino")
+            .accessibilityLabel(Text("\(day.title). \(day.exercises.count) exercícios. \(status). \(state == "completed" || state == "partial" ? "Ver treino concluído e cargas registradas" : "Abrir treino")"))
         }
         .padding(.trailing, 16).padding(.bottom, 16)
     }

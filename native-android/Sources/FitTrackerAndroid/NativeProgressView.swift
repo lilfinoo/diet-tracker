@@ -224,7 +224,7 @@ struct NativeBodyChart: View {
         let valueRange = max(1, maximum - minimum)
         VStack(alignment: .leading, spacing: 9) {
             Text("\(minimum, specifier: "%.1f") – \(maximum, specifier: "%.1f") \(unit)")
-                .font(.caption).foregroundColor(.secondary)
+                .font(.caption).foregroundColor(.secondary).accessibilityHidden(true)
             GeometryReader { geometry in
                 Path { path in
                     for (index, point) in points.enumerated() {
@@ -243,8 +243,8 @@ struct NativeBodyChart: View {
                 Text(progressDate(points.first?.date ?? ""))
                 Spacer()
                 if points.count > 1 { Text(progressDate(points.last?.date ?? "")) }
-            }.font(.caption).foregroundColor(.secondary)
-        }.accessibilityElement(children: .combine)
+            }.font(.caption).foregroundColor(.secondary).accessibilityHidden(true)
+        }.accessibilityLabel(Text("De \(progressDate(points.first?.date ?? "")) a \(progressDate(points.last?.date ?? "")): \(minimum, specifier: "%.1f") a \(maximum, specifier: "%.1f") \(unit)"))
     }
 }
 

@@ -204,7 +204,7 @@ struct NativeDeleteAccountView: View {
             }
             Section {
                 Text("Para confirmar, digite seu nome de usuário:")
-                Text(expectedUsername).font(.headline).textSelection(.enabled)
+                Text(expectedUsername).font(.headline)
                 TextField("Nome de usuário", text: $username).textInputAutocapitalization(.never).disableAutocorrection(true)
                 if !username.isEmpty && confirmedUsername != expectedUsername {
                     Text("Digite exatamente \(expectedUsername), como mostrado acima. Seu nome de perfil pode ser diferente.").font(.footnote).foregroundColor(.orange)

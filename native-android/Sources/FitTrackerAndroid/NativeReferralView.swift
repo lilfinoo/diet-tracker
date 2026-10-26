@@ -18,7 +18,7 @@ struct NativeReferralView: View {
                 if loading { ProgressView("Consultando seus convites…") }
                 if let status {
                     Text("Seu código").font(.headline)
-                    Text(status.code).font(.title.bold()).textSelection(.enabled)
+                    Text(status.code).font(.title.bold())
                     ShareLink(item: "Use meu código \(status.code) ao criar sua conta no Fit Tracker: https://diet-tracker-6i67.onrender.com") {
                         Label("Compartilhar código", systemImage: "square.and.arrow.up")
                     }.buttonStyle(.borderedProminent)

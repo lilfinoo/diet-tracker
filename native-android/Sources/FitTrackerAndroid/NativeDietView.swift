@@ -344,43 +344,43 @@ struct NativeDietView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    DatePicker("Dia do diário", selection: $selectedDate, displayedComponents: .date)
-                        .datePickerStyle(.compact)
-                    if diary.days[date] == nil && diary.loading.contains(date) { ProgressView("Carregando refeições…") }
-                    if let error = diary.errors[date] {
-                        Text(error).foregroundColor(.red)
-                        Button("Tentar novamente") { Task { await diary.load(date, api: session.api, force: true) } }
-                    }
-                    if let day = diary.days[date] {
-                        NativeNutritionView(day: day, compact: false)
-                        if let plan = day.plan {
-                            Label(plan.title, systemImage: "list.bullet.rectangle").font(.headline)
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        DatePicker("Dia do diário", selection: $selectedDate, displayedComponents: .date)
+                            .datePickerStyle(.compact)
+                        if diary.days[date] == nil && diary.loading.contains(date) { ProgressView("Carregando refeições…") }
+                        if let error = diary.errors[date] {
+                            Text(error).foregroundColor(.red)
+                            Button("Tentar novamente") { Task { await diary.load(date, api: session.api, force: true) } }
                         }
-                        Text("Refeições registradas").font(.title3.bold())
-                        if day.entries.isEmpty { Text("Nenhuma refeição registrada neste dia.").foregroundColor(.secondary) }
-                        ForEach(day.entries) { entry in NativeMealRow(entry: entry) }
-                        if !day.slots.isEmpty {
-                            Text("Planejado para o dia").font(.title3.bold())
-                            ForEach(day.slots) { slot in
-                                NativeDietSlotView(slot: slot, date: date)
+                        if let day = diary.days[date] {
+                            NativeNutritionView(day: day, compact: false)
+                            if let plan = day.plan {
+                                Label(plan.title, systemImage: "list.bullet.rectangle").font(.headline)
+                            }
+                            Text("Refeições registradas").font(.title3.bold())
+                            if day.entries.isEmpty { Text("Nenhuma refeição registrada neste dia.").foregroundColor(.secondary) }
+                            ForEach(day.entries) { entry in NativeMealRow(entry: entry) }
+                            if !day.slots.isEmpty {
+                                Text("Planejado para o dia").font(.title3.bold())
+                                ForEach(day.slots) { slot in
+                                    NativeDietSlotView(slot: slot, date: date)
+                                }
                             }
                         }
-                    }
-                }.padding(20)
-            }
-            .background(Color.fitBackground.ignoresSafeArea())
-            .navigationTitle("Alimentação")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { Button("Plano") { showPlans = true } }
-            .safeAreaInset(edge: .bottom) {
+                    }.padding(20)
+                }
+                .refreshable { await diary.load(date, api: session.api, force: true) }
                 Button { showMeal = true } label: {
                     Label("Registrar refeição", systemImage: "plus").font(.body.weight(.semibold))
                         .frame(maxWidth: .infinity).padding(.vertical, 9)
                 }.buttonStyle(.borderedProminent).padding(.horizontal, 20).padding(.vertical, 12)
             }
-            .refreshable { await diary.load(date, api: session.api, force: true) }
+            .background(Color.fitBackground.ignoresSafeArea())
+            .navigationTitle("Alimentação")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { Button("Plano") { showPlans = true } }
             .task(id: date) { await diary.load(date, api: session.api) }
             .sheet(isPresented: $showMeal) { NativeMealComposer(date: date) }
             .sheet(isPresented: $showPlans, onDismiss: { Task { await diary.load(date, api: session.api, refreshAfterCurrent: true) } }) { NativePlansView(kind: .diet) }

@@ -557,10 +557,10 @@ struct PlanGeneratorView: View {
                 .disabled(diet.mealsPerDay >= 7).opacity(diet.mealsPerDay >= 7 ? 0.35 : 1)
                 .accessibilityLabel("Adicionar uma refeição")
                 VStack(spacing: 2) {
-                    Text("\(diet.mealsPerDay)").font(.system(size: 88, weight: .bold, design: .rounded)).monospacedDigit()
-                    Text(diet.mealsPerDay == 1 ? "refeição por dia" : "refeições por dia").font(.headline).foregroundColor(.secondary)
+                    Text("\(diet.mealsPerDay)").font(.system(size: 88, weight: .bold, design: .monospaced)).accessibilityHidden(true)
+                    Text(diet.mealsPerDay == 1 ? "refeição por dia" : "refeições por dia").font(.headline).foregroundColor(.secondary).accessibilityHidden(true)
                 }
-                .accessibilityElement(children: .combine)
+                .accessibilityLabel(Text("\(diet.mealsPerDay) \(diet.mealsPerDay == 1 ? "refeição por dia" : "refeições por dia")"))
                 Button { diet.mealsPerDay -= 1 } label: {
                     Image(systemName: "minus").font(.title2.bold()).frame(width: 100, height: 64)
                 }
@@ -699,9 +699,9 @@ struct PlanGeneratorView: View {
                             .font(.subheadline).foregroundColor(.secondary).multilineTextAlignment(.center)
                             .padding(.top, 14).frame(maxWidth: 300)
                         HStack(spacing: 9) {
-                            ProgressView().scaleEffect(0.75).tint(Color(red: 0.31, green: 0.86, blue: 0.75))
-                            Text("Seu plano está ganhando forma").font(.caption).foregroundColor(.secondary)
-                        }.padding(.top, 28).accessibilityElement(children: .combine)
+                            ProgressView().scaleEffect(0.75).tint(Color(red: 0.31, green: 0.86, blue: 0.75)).accessibilityHidden(true)
+                            Text("Seu plano está ganhando forma").font(.caption).foregroundColor(.secondary).accessibilityHidden(true)
+                        }.padding(.top, 28).accessibilityLabel(Text("Seu plano está ganhando forma"))
                     } else {
                         Image(systemName: "exclamationmark.circle").font(.system(size: 54, weight: .light))
                             .foregroundColor(.orange).padding(.bottom, 28)
@@ -1058,7 +1058,7 @@ struct NativeManualPlanView: View {
                                 ForEach(Array(imported.warnings.enumerated()), id: \.offset) { _, warning in Text(warning).font(.caption).foregroundColor(.orange) }
                             }
                         }
-                        DisclosureGroup("Texto original completo") { Text(imported.sourceText).font(.caption).textSelection(.enabled) }
+                        DisclosureGroup("Texto original completo") { Text(imported.sourceText).font(.caption) }
                     }
                 }
                 Section("Seu plano") { TextField("Nome do plano", text: $title) }
