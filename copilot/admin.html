@@ -190,6 +190,8 @@
       </div>
     </header>
 
+    <p id="loadStatus" role="status" aria-live="polite">Carregando dados do painel…</p>
+
     <nav class="nav" role="tablist" aria-label="Seções administrativas">
       <button class="tab active" id="adminTabOverview" role="tab" aria-selected="true" aria-controls="overview" data-section="overview">Visão geral</button>
       <button class="tab" id="adminTabUsers" role="tab" aria-selected="false" aria-controls="users" tabindex="-1" data-section="users">Usuários</button>
@@ -510,17 +512,35 @@
       if (csrfToken && !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method) && !headers['X-CSRF-Token']) {
         headers['X-CSRF-Token'] = csrfToken;
       }
-      const res = await fetch(`${API}${path}`, { credentials: 'include', ...options, headers });
-      const contentType = res.headers.get('content-type') || '';
-      const data = contentType.includes('application/json') ? await res.json() : await res.text();
-      if (!res.ok) {
-        throw new Error((data && data.error) || 'Falha na requisição');
+      const readOnly = method === 'GET';
+      for (let attempt = 0; ; attempt++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 20000);
+        try {
+          const res = await fetch(`${API}${path}`, { credentials: 'include', ...options, headers, ...(readOnly ? { cache: 'no-store', signal: controller.signal } : {}) });
+          const contentType = res.headers.get('content-type') || '';
+          const data = contentType.includes('application/json') ? await res.json() : await res.text();
+          if (!res.ok || !contentType.includes('application/json')) {
+            const error = new Error((data && data.error) || (res.status === 401 ? 'Sua sessão expirou. Entre novamente no app.' : 'Não foi possível carregar os dados. Clique em Atualizar para tentar novamente.'));
+            error.retryable = [502, 503, 504].includes(res.status) || (res.ok && !contentType.includes('application/json'));
+            throw error;
+          }
+          return data;
+        } catch (error) {
+          if (!readOnly || attempt >= 2 || !(error instanceof TypeError || error.name === 'AbortError' || error.retryable)) {
+            throw error;
+          }
+          console.warn(`Falha temporária ao consultar ${path}; tentando novamente.`, error);
+        } finally {
+          clearTimeout(timeout);
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
       }
-      return data;
     }
 
     async function refreshSession() {
       const session = await api('/check_session');
+      if (!session.logged_in) throw new Error('Sua sessão expirou. Entre novamente no app.');
       if (session.logged_in && session.csrf_token) setCsrfToken(session.csrf_token);
       return session;
     }
@@ -903,17 +923,27 @@
 
     async function loadAll() {
       const button = document.getElementById('refreshBtn');
+      if (button?.disabled) return;
       if (button) button.disabled = true;
+      const status = document.getElementById('loadStatus');
+      status.hidden = false;
+      status.textContent = 'Carregando dados do painel…';
       state.recentActivitiesLoaded = false;
       const activeSection = document.querySelector('.section.active')?.id || 'overview';
-      const pending = [loadAnalytics()];
-      if (state.usersLoaded || activeSection === 'users') pending.push(loadUsers());
-      if (state.mediaQueueLoaded || activeSection === 'reviews') pending.push(loadMediaQueue());
       try {
+        await refreshSession();
+        const pending = [loadAnalytics()];
+        if (state.usersLoaded || activeSection === 'users') pending.push(loadUsers());
+        if (state.mediaQueueLoaded || activeSection === 'reviews') pending.push(loadMediaQueue());
         const results = await Promise.allSettled(pending);
         const failure = results.find(result => result.status === 'rejected');
         if (failure) throw failure.reason;
+        status.hidden = true;
       } catch (error) {
+        console.error('Falha ao carregar o painel', error);
+        status.textContent = error.message === 'Load failed' || error.name === 'AbortError' || error instanceof TypeError
+          ? 'Conexão interrompida. Clique em Atualizar para tentar novamente.'
+          : error.message;
         showToast(error.message || 'Falha ao atualizar o painel');
       } finally {
         if (button) button.disabled = false;
@@ -1124,12 +1154,7 @@
       wireControls();
       wireModals();
       setPeriod(30);
-      await refreshSession();
-      try {
-        await loadAnalytics();
-      } catch (error) {
-        showToast(error.message || 'Falha ao carregar a visão geral');
-      }
+      await loadAll();
     }
 
     init().catch(err => {
@@ -1139,3 +1164,4 @@
   </script>
 </body>
 </html>
+
