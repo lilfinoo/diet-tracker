@@ -57,9 +57,19 @@ jobs:
           clang = ndk / "toolchains/llvm/prebuilt/darwin-x86_64/bin/clang"
           if revision is None or not revision[1].startswith("30.") or not os.access(clang, os.X_OK):
               raise SystemExit("Bundled NDK r30 is incomplete or has an unexpected revision")
+          sdk = Path(os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or Path.home() / "Library/Android/sdk")
+          if not sdk.is_dir():
+              raise SystemExit("Android SDK root does not exist")
+          standard = sdk / "ndk" / revision[1]
+          standard.parent.mkdir(parents=True, exist_ok=True)
+          if not standard.exists():
+              standard.symlink_to(ndk, target_is_directory=True)
+          if standard.resolve() != ndk:
+              raise SystemExit("Standard NDK path points to an unexpected installation")
           with open(os.environ["GITHUB_ENV"], "a") as environment:
               environment.write(f"ANDROID_NDK_HOME={ndk}\n")
           print(f"Verified NDK {revision[1]} at {ndk}")
+          print(f"Standard NDK discovery path: {standard}")
           PYTHON
 
       - name: Check shared API contracts
