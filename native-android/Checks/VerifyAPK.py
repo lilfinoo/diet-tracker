@@ -34,7 +34,12 @@ with zipfile.ZipFile(apk) as archive:
 if not libraries or any(not p.startswith('lib/arm64-v8a/') for p in libraries):
     architectures = sorted({p.split('/')[1] for p in libraries})
     raise SystemExit(f'Expected native libraries for ARM64 only; found {architectures}')
-certificate = re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-fA-F]+)', signature)
+certificate = re.search(r'certificate SHA-256 digest:\s*([0-9a-fA-F]{64})', signature)
+if certificate is None:
+    raise SystemExit('APK signing certificate fingerprint was not returned by apksigner')
+expected_certificate = os.environ.get('EXPECTED_SIGNING_CERTIFICATE_SHA256')
+if expected_certificate and certificate[1].lower() != expected_certificate.lower():
+    raise SystemExit('APK signing certificate does not match the registered Google Android client')
 digest = hashlib.sha256()
 with apk.open('rb') as stream:
     for block in iter(lambda: stream.read(1024 * 1024), b''):

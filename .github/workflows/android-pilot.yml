@@ -85,7 +85,25 @@ jobs:
 
       - name: Build Android debug APK
         id: android_apk
+        env:
+          FITTRACKER_ANDROID_PILOT_KEYSTORE: ${{ secrets.FITTRACKER_ANDROID_PILOT_KEYSTORE }}
+          FITTRACKER_ANDROID_PILOT_PASSWORD: ${{ secrets.FITTRACKER_ANDROID_PILOT_PASSWORD }}
         run: |
+          python3 - <<'PYTHON'
+          import base64
+          import os
+          from pathlib import Path
+          key = os.environ.get("FITTRACKER_ANDROID_PILOT_KEYSTORE")
+          password = os.environ.get("FITTRACKER_ANDROID_PILOT_PASSWORD")
+          if not key or not password:
+              raise SystemExit("Pilot signing secrets must be configured before building the Google-enabled APK")
+          path = Path(os.environ["RUNNER_TEMP"]) / "fittracker-pilot.p12"
+          fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+          with os.fdopen(fd, "wb") as stream:
+              stream.write(base64.b64decode(key, validate=True))
+          PYTHON
+          export FITTRACKER_ANDROID_PILOT_KEYSTORE_PATH="$RUNNER_TEMP/fittracker-pilot.p12"
+          unset FITTRACKER_ANDROID_PILOT_KEYSTORE
           unset ANDROID_NDK_ROOT
           if skip export --project native-android \
             --debug --debug-info line-tables --no-ios --arch aarch64 --no-export-project \
@@ -102,6 +120,8 @@ jobs:
           fi
 
       - name: Verify APK package and signature
+        env:
+          EXPECTED_SIGNING_CERTIFICATE_SHA256: adf74b79c98a3be5b8cc620ca9cfe25db5fc2cfa27261fbb305fbaa2743edefd
         run: |
           set -euo pipefail
           python3 native-android/Checks/VerifyAPK.py "$RUNNER_TEMP/fittracker-android"
@@ -118,3 +138,7 @@ jobs:
             ${{ runner.temp }}/fittracker-android/apk-signature.txt
           if-no-files-found: error
           retention-days: 7
+
+      - name: Remove temporary signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/fittracker-pilot.p12"

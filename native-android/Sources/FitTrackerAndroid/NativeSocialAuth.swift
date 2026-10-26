@@ -64,12 +64,13 @@ import FitTrackerCore
         catch { if !isNativeRequestCancellation(error) { self.error = Self.message(for: error) } }
     }
     func cancelConnection() { connectionTask?.cancel() }
-    func complete(username: String, consent: Bool) async {
+    func complete(username: String, consent: Bool, referralCode: String) async {
         guard !busy, isCurrent(), let api, let token = signupToken, let config = configuration else { return }
         busy = true; error = nil; status = "Concluindo seu cadastro…"
         defer { busy = false; status = nil }
         do {
-            let response = try await api.completeSocialSignup(provider: provider, token: token, name: username.trimmingCharacters(in: .whitespacesAndNewlines), aiConsent: consent, aiConsentVersion: config.legal.ai.version)
+            let code = referralCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            let response = try await api.completeSocialSignup(provider: provider, token: token, name: username.trimmingCharacters(in: .whitespacesAndNewlines), aiConsent: consent, aiConsentVersion: config.legal.ai.version, referralCode: code.isEmpty ? nil : code)
             guard isCurrent() else { throw CancellationError() }
             try await accept?(response)
             signupToken = nil
@@ -97,6 +98,7 @@ struct NativeSocialLoginView: View {
     @Environment(NativeSession.self) var session
     @State var auth = NativeSocialAuth()
     @State var username = ""
+    @State var referralCode = ""
     @State var aiChoice: Bool?
     @State var showAI = false
     @State var showReviewAccess = false
@@ -115,8 +117,8 @@ struct NativeSocialLoginView: View {
                     Spacer(minLength: 8)
                     Button { Task { await auth.login(.google, api: session.api, accept: session.acceptSocialSession, isCurrent: { session.user == nil && !session.busy }) } } label: {
                         HStack { Text("G").font(.headline); Text("Continuar com Google").font(.body.weight(.semibold)) }.frame(maxWidth: .infinity).padding(16)
-                    }.foregroundStyle(.black).background(.white, in: RoundedRectangle(cornerRadius: 15)).disabled(true)
-                    Text("Neste teste Android, use usuário e senha ou crie uma conta. O acesso Google ainda está em configuração. Contas criadas com Apple ou Google precisam ter uma senha cadastrada para entrar por aqui.")
+                    }.foregroundStyle(.black).background(.white, in: RoundedRectangle(cornerRadius: 15)).disabled(auth.busy || session.busy)
+                    Text("Entre ou crie sua conta com o Google para salvar seus planos e acompanhar sua evolução.")
                         .font(.footnote).foregroundStyle(.secondary)
                     if auth.busy { ProgressView().frame(maxWidth: .infinity) }
                     if let status = auth.status { Text(status).font(.footnote).foregroundStyle(.secondary) }
@@ -139,13 +141,16 @@ struct NativeSocialLoginView: View {
             }.background(Color.fitBackground)
         }
         .onDisappear { auth.cancelConnection() }
-        .sheet(isPresented: Binding(get: { auth.signupToken != nil }, set: { if !$0 { auth.signupToken = nil; aiChoice = nil } })) {
+        .sheet(isPresented: Binding(get: { auth.signupToken != nil }, set: { if !$0 { auth.signupToken = nil; aiChoice = nil; referralCode = "" } })) {
             NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
                         Text("Como podemos chamar você?").font(.title2.bold())
                         Text("Informe seu nome para completar seu acesso. Você não precisa criar uma senha.").foregroundStyle(.secondary)
                         TextField("Seu nome", text: $username).textInputAutocapitalization(.words).autocorrectionDisabled().padding(14).background(Color.fitSurface, in: RoundedRectangle(cornerRadius: 12))
+                        TextField("Código de convite (opcional)", text: $referralCode)
+                            .textInputAutocapitalization(.characters).autocorrectionDisabled()
+                            .padding(14).background(Color.fitSurface, in: RoundedRectangle(cornerRadius: 12))
                         Text("Planos e análises com IA").font(.headline)
                         Text("Você escolhe se autoriza o envio dos dados necessários para planos e análises. Pode mudar isso no Perfil.").font(.subheadline).foregroundStyle(.secondary)
                         Button("Ver como seus dados são usados") { showAI = true }.font(.subheadline)
@@ -155,9 +160,9 @@ struct NativeSocialLoginView: View {
                         if auth.signupNeedsRestart {
                             Button("Voltar ao login") { auth.signupToken = nil }.buttonStyle(.bordered)
                         }
-                        Button { if let choice = aiChoice { Task { await auth.complete(username: username, consent: choice) } } } label: { Text(auth.busy ? "Entrando…" : "Continuar").frame(maxWidth: .infinity).padding(16) }.background(Color.fitBlue, in: RoundedRectangle(cornerRadius: 15)).foregroundStyle(.white).disabled(auth.busy || auth.signupNeedsRestart || aiChoice == nil || username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || username.count > 80)
+                        Button { if let choice = aiChoice { Task { await auth.complete(username: username, consent: choice, referralCode: referralCode) } } } label: { Text(auth.busy ? "Entrando…" : "Continuar").frame(maxWidth: .infinity).padding(16) }.background(Color.fitBlue, in: RoundedRectangle(cornerRadius: 15)).foregroundStyle(.white).disabled(auth.busy || auth.signupNeedsRestart || aiChoice == nil || username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || username.count > 80)
                     }.padding(24)
-                }.background(Color.fitBackground).navigationTitle("Seu primeiro acesso").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { auth.signupToken = nil; aiChoice = nil }.disabled(auth.busy) } }
+                }.background(Color.fitBackground).navigationTitle("Seu primeiro acesso").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { auth.signupToken = nil; aiChoice = nil; referralCode = "" }.disabled(auth.busy) } }
             }
             .interactiveDismissDisabled(auth.busy)
         }

@@ -62,6 +62,16 @@ android {
     // default signing configuration tries to load from keystore.properties
     // see: https://skip.dev/docs/deployment/#export-signing
     signingConfigs {
+        val pilotKeystore = System.getenv("FITTRACKER_ANDROID_PILOT_KEYSTORE_PATH")
+        if (!pilotKeystore.isNullOrBlank()) {
+            getByName("debug") {
+                storeFile = file(pilotKeystore)
+                storeType = "PKCS12"
+                storePassword = System.getenv("FITTRACKER_ANDROID_PILOT_PASSWORD")
+                keyAlias = "fittracker-android-pilot"
+                keyPassword = System.getenv("FITTRACKER_ANDROID_PILOT_PASSWORD")
+            }
+        }
         val keystorePropertiesFile = file("keystore.properties")
         create("release") {
             if (keystorePropertiesFile.isFile) {
