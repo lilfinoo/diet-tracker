@@ -34,6 +34,9 @@ android {
     defaultConfig {
         minSdk = libs.versions.android.sdk.min.get().toInt()
         targetSdk = libs.versions.android.sdk.compile.get().toInt()
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
         // skip.tools.skip-build-plugin will automatically use Skip.env properties for:
         // applicationId = ANDROID_APPLICATION_ID ?? PRODUCT_BUNDLE_IDENTIFIER
         // versionCode = CURRENT_PROJECT_VERSION

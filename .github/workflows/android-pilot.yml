@@ -84,6 +84,7 @@ jobs:
         run: skip android build --package-path native-ios --arch aarch64 --no-bridge
 
       - name: Build Android debug APK
+        id: android_apk
         run: |
           unset ANDROID_NDK_ROOT
           if skip export --project native-android \
@@ -106,6 +107,7 @@ jobs:
           python3 native-android/Checks/VerifyAPK.py "$RUNNER_TEMP/fittracker-android"
 
       - name: Save APK
+        if: ${{ !cancelled() && steps.android_apk.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: fit-tracker-android-debug

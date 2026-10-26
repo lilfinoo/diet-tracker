@@ -32,7 +32,8 @@ if "launchable-activity:" not in badging:
 with zipfile.ZipFile(apk) as archive:
     libraries = [p for p in archive.namelist() if p.startswith('lib/') and p.endswith('.so')]
 if not libraries or any(not p.startswith('lib/arm64-v8a/') for p in libraries):
-    raise SystemExit('Expected native libraries for ARM64 only')
+    architectures = sorted({p.split('/')[1] for p in libraries})
+    raise SystemExit(f'Expected native libraries for ARM64 only; found {architectures}')
 certificate = re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-fA-F]+)', signature)
 digest = hashlib.sha256()
 with apk.open('rb') as stream:
