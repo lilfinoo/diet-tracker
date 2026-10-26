@@ -68,7 +68,6 @@ struct NativeTodayWorkoutCard: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: FitTrackerTheme.cardRadius))
             .fitPremiumCard()
-            .contentShape(RoundedRectangle(cornerRadius: FitTrackerTheme.cardRadius))
         }.buttonStyle(.plain)
         .accessibilityLabel(Text("Treino de hoje. \(today?.state == "unconfigured" ? "Crie seu primeiro treino" : today?.currentDay?.title ?? workoutStateTitle(today?.state ?? "")). \(today?.state == "unconfigured" ? "Montar meu treino" : "Abrir seu treino")"))
         .task { await tabData.loadWorkout() }
@@ -289,7 +288,6 @@ struct NativeWorkoutView: View {
                 .padding(14).frame(maxWidth: .infinity).frame(height: 278, alignment: .top)
                 .background(Color.fitSurface, in: RoundedRectangle(cornerRadius: 22))
                 .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.fitBlue.opacity(0.26), lineWidth: 1))
-                .contentShape(RoundedRectangle(cornerRadius: 22))
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text("\(day.title). \(day.exercises.count) exercícios. \(status). \(state == "completed" || state == "partial" ? "Ver treino concluído e cargas registradas" : "Abrir treino")"))
@@ -551,9 +549,9 @@ struct NativeWorkoutActivityView: View {
                     }
                     Button { showShare = true } label: {
                         Label("Compartilhar treino", systemImage: "square.and.arrow.up")
-                            .frame(maxWidth: .infinity)
+                            .frame(maxWidth: .infinity).fitPrimarySurface()
                     }
-                    .buttonStyle(FitPrimaryButtonStyle())
+                    .buttonStyle(.plain)
                     .disabled(deleting || activity.exercises.isEmpty)
                     ForEach(activity.exercises) { exercise in
                         VStack(alignment: .leading, spacing: 12) {

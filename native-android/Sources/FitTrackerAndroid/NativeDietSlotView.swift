@@ -64,7 +64,7 @@ struct NativeDietSlotView: View {
                             error = nil
                             showAlternatives = true
                         } label: {
-                            Image(systemName: "ellipsis").frame(width: 44, height: 44).contentShape(Rectangle())
+                            Image(systemName: "ellipsis").frame(width: 44, height: 44)
                         }.accessibilityLabel("Trocar opção de \(slot.label)")
                     }
                 }
@@ -88,8 +88,8 @@ struct NativeDietSlotView: View {
                     HStack {
                         Button { Task { await setOutcome(.consumedPlanned) } } label: {
                             Label("Comi como planejado", systemImage: "checkmark")
-                                .lineLimit(1).minimumScaleFactor(0.75).frame(maxWidth: .infinity)
-                        }.buttonStyle(FitPrimaryButtonStyle(compact: true))
+                                .lineLimit(1).minimumScaleFactor(0.75).frame(maxWidth: .infinity).fitPrimarySurface(compact: true)
+                        }.buttonStyle(.plain)
                         Button { Task { await setOutcome(.skipped) } } label: { Label("Pular", systemImage: "forward.fill").font(.caption.weight(.medium)).padding(.vertical, 6) }.buttonStyle(.bordered)
                     }.font(.subheadline)
                 } else {

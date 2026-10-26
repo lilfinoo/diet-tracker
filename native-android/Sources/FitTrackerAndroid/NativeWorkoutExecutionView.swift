@@ -580,7 +580,7 @@ struct NativeWorkoutExerciseRecorder: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(label).font(.caption).foregroundColor(.secondary)
             TextField("—", text: text).keyboardType(decimal ? .decimalPad : .numberPad).font(.title.bold()).padding(16)
-                .background(Color.fitSurface, in: RoundedRectangle(cornerRadius: 15)).accessibilityLabel(label)
+                .background(Color.fitSurface, in: RoundedRectangle(cornerRadius: 15)).accessibilityLabel(Text(label))
         }
     }
 

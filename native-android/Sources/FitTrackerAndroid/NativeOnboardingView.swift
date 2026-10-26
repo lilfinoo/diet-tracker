@@ -108,7 +108,7 @@ struct NativeOnboardingView: View {
         }
     }
     func field(_ title: String, placeholder: String, text: Binding<String>, keyboard: UIKeyboardType) -> some View {
-        VStack(alignment: .leading, spacing: 8) { Text(title).font(.caption.weight(.semibold)); TextField(placeholder, text: text).keyboardType(keyboard).padding(15).background(Color.fitSurface, in: RoundedRectangle(cornerRadius: 14)).accessibilityLabel(title) }
+        VStack(alignment: .leading, spacing: 8) { Text(title).font(.caption.weight(.semibold)); TextField(placeholder, text: text).keyboardType(keyboard).padding(15).background(Color.fitSurface, in: RoundedRectangle(cornerRadius: 14)).accessibilityLabel(Text(title)) }
     }
     func planChoice(_ title: String, description: String, icon: String, kind: NativePlanKind) -> some View {
         Button { selectedPlan = kind } label: {

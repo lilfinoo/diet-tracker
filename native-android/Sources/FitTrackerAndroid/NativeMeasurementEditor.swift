@@ -66,7 +66,7 @@ struct NativeMeasurementEditor: View {
         HStack {
             Text(title)
             TextField("Não informado", text: text).keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing).accessibilityLabel(title)
+                .multilineTextAlignment(.trailing).accessibilityLabel(Text(title))
         }
     }
 

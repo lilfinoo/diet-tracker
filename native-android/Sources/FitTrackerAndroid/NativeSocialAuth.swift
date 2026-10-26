@@ -241,7 +241,7 @@ struct NativeReviewAccessView: View {
                             .onSubmit { signIn() }
                             .padding(15).background(Color.fitSurface, in: RoundedRectangle(cornerRadius: 14))
                     }
-                    if attempted, let error = session.error { Text(error).font(.footnote).foregroundStyle(.red).accessibilityLabel("Erro de acesso: " + error) }
+                    if attempted, let error = session.error { Text(error).font(.footnote).foregroundStyle(.red).accessibilityLabel(Text("Erro de acesso: " + error)) }
                     Button { signIn() } label: {
                         HStack { if session.busy { ProgressView().tint(.white) }; Text(session.busy ? "Entrando…" : "Entrar").fontWeight(.semibold) }
                             .frame(maxWidth: .infinity).padding(16)

@@ -267,8 +267,8 @@ struct NativeHomeView: View {
                     if let error = diary.errors[today] { diaryError(error) }
                     Button { showMeal = true } label: {
                         Label("Adicionar refeição", systemImage: "plus").font(.body.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                    }.buttonStyle(FitPrimaryButtonStyle())
+                            .frame(maxWidth: .infinity).fitPrimarySurface()
+                    }.buttonStyle(.plain)
                     NativeFreeAccessCard()
                     if session.user?.isPremium != true {
                         Button { subscription = true } label: { NativePremiumBanner() }.buttonStyle(.plain)

@@ -581,7 +581,7 @@ struct PlanGeneratorView: View {
                 .padding(14)
                 .background(Color.fitSurface, in: RoundedRectangle(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.16), lineWidth: 1))
-                .accessibilityLabel(title)
+                .accessibilityLabel(Text(title))
         }
     }
     func numberQuestion(_ title: String, value: Binding<Int>, values: [Int], suffix: String) -> some View { VStack(alignment: .leading, spacing: 14) { Text(title).font(.title2.bold()); LazyVGrid(columns: [GridItem(.adaptive(minimum: 70))], spacing: 10) { ForEach(values, id: \.self) { item in Button("\(item)") { value.wrappedValue = item }.frame(maxWidth: .infinity).padding(14).background(value.wrappedValue == item ? Color.fitBlue.opacity(0.25) : Color.fitSurface, in: RoundedRectangle(cornerRadius: 12)) } }; Text(suffix).font(.footnote).foregroundColor(.secondary) } }

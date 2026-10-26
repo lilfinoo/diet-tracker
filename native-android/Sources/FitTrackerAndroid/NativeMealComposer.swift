@@ -147,7 +147,7 @@ struct NativeMealComposer: View {
         picker = "camera"
     }
     func numberField(_ title: String, text: Binding<String>) -> some View {
-        HStack { Text(title); TextField("Não informado", text: text).keyboardType(.decimalPad).multilineTextAlignment(.trailing).accessibilityLabel(title) }
+        HStack { Text(title); TextField("Não informado", text: text).keyboardType(.decimalPad).multilineTextAlignment(.trailing).accessibilityLabel(Text(title)) }
     }
     func decimal(_ number: Double?) -> String { number.map { String(format: "%.1f", $0).replacingOccurrences(of: ".", with: ",") } ?? "" }
     func number(_ text: String, maximum: Double) throws -> Double? {

@@ -192,15 +192,3 @@ struct FitPrimarySurface: ViewModifier {
     }
 }
 
-struct FitPrimaryButtonStyle: ButtonStyle {
-    var compact = false
-    @Environment(\.accessibilityReduceMotion) var reduceMotion
-    @Environment(\.isEnabled) var isEnabled
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.fitPrimarySurface(compact: compact)
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
-            .opacity(isEnabled ? 1 : 0.5)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: configuration.isPressed)
-    }
-}
-
