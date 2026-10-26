@@ -176,6 +176,10 @@ func hostPreparePhoto(_ image: UIImage) -> Data? {
 struct AndroidPhotoPickerComposer: ContentComposer {
     let camera: Bool
     let completion: (String?, String?) -> Void
+    init(camera: Bool, completion: @escaping (String?, String?) -> Void) {
+        self.camera = camera
+        self.completion = completion
+    }
     @Composable func Compose(context: ComposeContext) {
         NativePhotoPlatform.Picker(camera: camera, completion: completion)
     }
