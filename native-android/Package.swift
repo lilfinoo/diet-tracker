@@ -26,7 +26,8 @@ let package = Package(
             .product(name: "SkipKeychain", package: "skip-keychain")
         ], resources: [.process("Resources")], plugins: [.plugin(name: "skipstone", package: "skip")]),
         .target(name: "FitTrackerAuthBridge", dependencies: [
-            .product(name: "SkipUI", package: "skip-ui")
+            .product(name: "SkipUI", package: "skip-ui"),
+            .product(name: "SkipFuseUI", package: "skip-fuse-ui")
         ], plugins: [.plugin(name: "skipstone", package: "skip")]),
     ],
     swiftLanguageModes: [.v5]
