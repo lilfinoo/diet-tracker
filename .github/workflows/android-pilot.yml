@@ -74,10 +74,21 @@ jobs:
         run: skip android build --package-path native-ios --arch aarch64 --no-bridge
 
       - name: Build Android debug APK
-        run: >-
-          skip export --project native-android
-          --debug --no-ios --arch aarch64 --no-export-project
-          --dir "$RUNNER_TEMP/fittracker-android"
+        run: |
+          unset ANDROID_NDK_ROOT
+          if skip export --project native-android \
+            --debug --debug-info line-tables --no-ios --arch aarch64 --no-export-project \
+            --dir "$RUNNER_TEMP/fittracker-android"; then
+            exit 0
+          else
+            build_result=$?
+            for build_log in /tmp/skip-export-*.txt; do
+              if [ -f "$build_log" ]; then
+                cat "$build_log"
+              fi
+            done
+            exit "$build_result"
+          fi
 
       - name: Verify APK package and signature
         run: |
