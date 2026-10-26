@@ -12,7 +12,6 @@ struct NativeDietSlotView: View {
     @Environment(NativeSession.self) var session
     @Environment(NativeDietStore.self) var diary
     @Environment(\.accessibilityReduceMotion) var reduceMotion
-    @Environment(\.sizeCategory) var textSize
     @State var busy = false
     @State var error: String?
     @State var confirmReset = false
@@ -52,10 +51,9 @@ struct NativeDietSlotView: View {
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 6) {
                         Text(slot.label).font(.headline)
-                        if compact && textSize.isAccessibilityCategory { statusBadge }
+                        if compact { statusBadge }
                     }
                     Spacer()
-                    if compact && !textSize.isAccessibilityCategory { statusBadge }
                     if diary.isPending(date: date, slotKey: slot.slotKey) && !pending {
                         Text("Sincronizando").font(.caption).foregroundColor(.secondary)
                     }

@@ -154,8 +154,8 @@ extension Color {
 
 enum FitTrackerTheme {
     static let electricBlue = Color(red: 0.06, green: 0.58, blue: 1)
-    static let cardRadius: CGFloat = 22
-    static let pagePadding: CGFloat = 20
+    static let cardRadius: Double = 22
+    static let pagePadding: Double = 20
     static let pageTitle = Font.largeTitle.bold()
     static let sectionTitle = Font.title2.bold()
     static let cardTitle = Font.title3.bold()

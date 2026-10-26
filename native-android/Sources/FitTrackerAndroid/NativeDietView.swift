@@ -402,7 +402,6 @@ struct NativeNutritionView: View {
     let day: DietDayResponse
     let compact: Bool
     var onOpenDiary: (() -> Void)? = nil
-    @Environment(\.sizeCategory) var textSize
     @State var selected: String?
     var metrics: [NutritionMetric] { [
         .init(id: "Calorias", icon: "flame", color: .orange, value: day.totals.calories, target: day.targets.calories, unit: "kcal"),
@@ -424,7 +423,7 @@ struct NativeNutritionView: View {
                 } else { Text(mealCountText) }
             }.font(.caption).foregroundColor(.secondary)
             if compact {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: textSize.isAccessibilityCategory ? 2 : 4), alignment: .center, spacing: 12) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 2), alignment: .center, spacing: 12) {
                     ForEach(metrics) { metric in
                         Button { toggle(metric.id) } label: {
                             VStack(spacing: 5) {
