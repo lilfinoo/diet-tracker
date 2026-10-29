@@ -104,12 +104,14 @@ def _handler_for(operation):
         suggest_diet_day,
     )
     from src.routes.profile_routes import get_ai_macros
+    from src.routes.professional_routes import generate_professional_workout
 
     return {
         "chat": chat,
         "nutrition_macros": get_ai_macros,
         "diet_plan": create_guided_diet_plan,
         "workout_plan": create_guided_workout_plan,
+        "professional_workout_plan": generate_professional_workout,
         "diet_day": suggest_diet_day,
     }.get(operation)
 
@@ -127,7 +129,7 @@ def _existing_result(task):
                 "plan_id": plan.id,
                 "plan": plan.to_dict_full(),
             }, 201
-    elif task.operation == "workout_plan":
+    elif task.operation in {"workout_plan", "professional_workout_plan"}:
         plan = WorkoutPlan.query.filter_by(ai_task_id=task.id).first()
         if plan:
             return {
@@ -149,7 +151,7 @@ def _complete(task, result, status):
         User.query.filter(User.id == task.user_id, User.ai_trial_uses > 0).update(
             {User.ai_trial_uses: User.ai_trial_uses - 1}, synchronize_session=False,
         )
-    task.result = result
+    task.result = current_app.json.loads(current_app.json.dumps(result))
     task.http_status = status
     task.error = result.get("error") if task.status == "failed" and isinstance(result, dict) else None
     task.completed_at = datetime.utcnow()
@@ -176,6 +178,11 @@ def execute_ai_job(self, task_id):
         task = db.session.get(AITask, uuid.UUID(str(task_id)))
         if task is None or task.status in {"succeeded", "failed"}:
             return
+        if task.operation == "professional_workout_plan":
+            user = db.session.get(User, task.user_id)
+            if not user or user.is_banned or not user.has_current_ai_consent() or not user.has_entitlement("workout"):
+                _fail(task, "A autorização profissional para executar esta tarefa não está mais válida.", 403)
+                return
 
         existing = _existing_result(task)
         if existing:

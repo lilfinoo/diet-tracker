@@ -10,6 +10,7 @@ from src.models.user import (
     AdminActionAudit,
     AnalyticsEvent,
     ExerciseMediaReview,
+    ProfessionalStudentRelationship,
     Subscription,
     User,
     WorkoutXExercise,
@@ -174,7 +175,7 @@ def list_users():
     serialized_users = []
     for user in users:
         subscriptions = subscriptions_by_user.get(user.id, [])
-        plan_rank = {"free": 0, "premium_student": 1, "premium_student_annual": 1}
+        plan_rank = {"free": 0, "premium_student": 1, "premium_student_annual": 1, "professional_single": 2, "professional_complete": 3}
         subscription = max(
             subscriptions,
             key=lambda item: (plan_rank.get(item.plan_code, 0), item.created_at or datetime.min),
@@ -188,7 +189,10 @@ def list_users():
             "email": user.email,
             "created_at": user.created_at.isoformat() if user.created_at else None,
             "account_status": "banned" if user.is_banned else "active",
-            "account_type": "admin" if user.is_admin else "standard",
+            "account_type": "admin" if user.is_admin else ("professional" if user.is_professional else "standard"),
+            "is_professional": user.is_professional,
+            "professional_entitled": user.has_entitlement("professional"),
+            "professional_scope": user.professional_scope,
             "is_banned": user.is_banned,
             "is_admin": user.is_admin,
             "is_premium": user.is_premium or plan_code != "free",
@@ -386,6 +390,46 @@ def update_premium_status(user_id):
         "message": f"Acesso Premium {action} para {user_to_update.username}.",
         "user": user_to_update.admin_dict(),
     }), 200
+
+
+@admin_bp.route("/admin/users/<uuid:user_id>/professional", methods=["PATCH"])
+@admin_required
+def update_professional_status(user_id):
+    data = json_body()
+    enabled = data.get("is_professional")
+    if not isinstance(enabled, bool):
+        return jsonify({"error": "is_professional deve ser verdadeiro ou falso"}), 400
+    user = db.get_or_404(User, user_id)
+    previous_scope = user.professional_scope
+    if enabled:
+        if data.get("professional_scope", "workout") != "workout":
+            return jsonify({"error": "Somente o acesso profissional de treinos está disponível."}), 400
+        try:
+            end = _admin_grant_end(data)
+        except ValueError as error:
+            return jsonify({"error": str(error)}), 400
+        user.professional_scope = "workout"
+        _upsert_admin_grant(user, "professional", "professional_single", end)
+    else:
+        _revoke_admin_grants(user, "professional")
+        user.professional_scope = None
+        ProfessionalStudentRelationship.query.filter(
+            ProfessionalStudentRelationship.professional_user_id == user.id,
+            ProfessionalStudentRelationship.status.in_(("pending", "active")),
+        ).update({
+            "status": "revoked",
+            "invite_token_hash": None,
+            "revoked_at": datetime.utcnow(),
+            "revoked_by_user_id": g.user.id,
+        }, synchronize_session=False)
+    user.is_professional = enabled
+    _audit_admin("professional.granted" if enabled else "professional.revoked", user, {
+        "previous_scope": previous_scope,
+        "new_scope": user.professional_scope,
+        "duration_days": data.get("duration_days"),
+    })
+    db.session.commit()
+    return jsonify({"message": "Acesso profissional atualizado.", "user": user.admin_dict()}), 200
 
 
 @admin_bp.route("/admin/users/<uuid:user_id>/toggle_admin", methods=["POST"])

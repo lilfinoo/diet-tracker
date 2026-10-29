@@ -9,7 +9,7 @@ from src.models.user import WorkoutDay, WorkoutExercise, WorkoutPlan, WorkoutSes
 from src.routes.common import (ai_consent_required, premium_required, _apply_workout_plan_schedule, _editable_workout_plan, _get_or_create_profile, _local_date_for_timezone, _plan_catalog, _prescription, _redistribute_workout_plan_data, _set_catalog_exercise, _workout_questionnaire_for_plan, _workout_today_payload, _version_workout_plan_for_edit, json_body, login_required, page_query)
 from src.services.plan_management import create_workout_plan
 from src.services.analytics import record_event
-from src.services.workout_plans import catalog_by_key, replacement_options
+from src.services.workout_plans import catalog_by_key, exercise_selection_group, replacement_options, resolve_catalog_exercise, selection_exercise_catalog
 from src.services.workout_progress import user_timezone
 from src.services.ai import AIServiceError, AIQuotaExceededError, suggest_workout_changes
 from src.services.rate_limit import rate_limit
@@ -164,8 +164,8 @@ def get_workout_plan_details(plan_id):
 @workout_bp.route("/workout_plans/<int:plan_id>/exercises/catalog", methods=["GET"])
 @login_required
 def workout_plan_exercise_catalog(plan_id):
-    plan = _editable_workout_plan(plan_id)
-    return jsonify({"items": _plan_catalog(plan)}), 200
+    _editable_workout_plan(plan_id)
+    return jsonify({"items": selection_exercise_catalog()}), 200
 
 
 @workout_bp.route("/workout_plans/<int:plan_id>/exercises/<int:exercise_id>/replacement_options", methods=["GET"])
@@ -202,14 +202,13 @@ def replace_plan_exercise(plan_id, exercise_id):
         db.session.commit()
         return jsonify({"message": "Exercício atualizado.", "plan": plan.to_dict_full()}), 200
     catalog_key = str(data.get("catalog_key", ""))
-    catalog_item = catalog_by_key().get(catalog_key)
+    catalog_item = resolve_catalog_exercise(catalog_key)
     if catalog_item:
-        source = catalog_by_key().get(exercise.catalog_key)
-        allowed_keys = {item["key"] for item in _plan_catalog(plan)}
-        if catalog_item["key"] not in allowed_keys:
-            abort(400, description="Escolha um exercício compatível com o plano.")
-        if source and catalog_item["substitution_group"] != source["substitution_group"]:
+        source = resolve_catalog_exercise(exercise.catalog_key)
+        if source and exercise_selection_group(catalog_item) != exercise_selection_group(source):
             abort(400, description="A substituição deve manter o mesmo padrão de movimento.")
+        if any(item.id != exercise.id and item.catalog_key == catalog_item["key"] for item in (exercise.day.exercises if exercise.day else plan.exercises)):
+            abort(409, description="Este exercício já faz parte do treino.")
         plan, _, exercise_map = _version_workout_plan_for_edit(plan)
         exercise = exercise_map.get(exercise.id, exercise)
         _set_catalog_exercise(exercise, catalog_item)
@@ -244,11 +243,10 @@ def add_plan_exercise(plan_id, day_id):
     if len(day.exercises) >= 12:
         abort(400, description="Este treino já atingiu o limite de 12 exercícios.")
     data = json_body()
-    catalog_item = catalog_by_key().get(str(data.get("catalog_key", "")))
-    allowed_keys = {item["key"] for item in _plan_catalog(plan)}
+    catalog_item = resolve_catalog_exercise(data.get("catalog_key"))
     custom_name = str(data.get("name", "")).strip()
-    if catalog_item and catalog_item["key"] not in allowed_keys:
-        abort(400, description="Escolha um exercício compatível com o plano.")
+    if data.get("catalog_key") and not catalog_item:
+        abort(400, description="Escolha um exercício válido do catálogo.")
     if not catalog_item and not 2 <= len(custom_name) <= 100:
         abort(400, description="Digite um nome de exercício entre 2 e 100 caracteres.")
     if catalog_item and any(item.catalog_key == catalog_item["key"] for item in day.exercises):
@@ -392,7 +390,7 @@ def apply_workout_plan_changes(plan_id):
 @workout_bp.route("/workout_plans/exercises/catalog", methods=["GET"])
 @login_required
 def manual_workout_catalog():
-    return jsonify({"items": list(catalog_by_key().values())}), 200
+    return jsonify({"items": selection_exercise_catalog()}), 200
 
 
 @workout_bp.route("/workout_plans/manual", methods=["POST"])
@@ -411,7 +409,7 @@ def create_manual_workout():
         for order, item in enumerate(day["exercises"], 1):
             if not isinstance(item, dict):
                 return jsonify({"error": "Exercício inválido."}), 400
-            catalog = catalog_by_key().get(str(item.get("catalog_key", "")))
+            catalog = resolve_catalog_exercise(item.get("catalog_key"))
             name = catalog["name"] if catalog else str(item.get("name", "")).strip()
             if not 2 <= len(name) <= 100 or (item.get("catalog_key") and not catalog):
                 return jsonify({"error": "Escolha um exercício do catálogo ou informe seu nome."}), 400

@@ -26,6 +26,7 @@ from src.routes.diet_daily_routes import diet_daily_bp
 from src.routes.billing_routes import billing_bp
 from src.routes.admin_routes import admin_bp
 from src.routes.plan_routes import plan_bp
+from src.routes.professional_routes import professional_bp
 from src.routes.session_routes import session_bp
 from src.routes.social_routes import social_bp
 from src.routes.progress_routes import progress_bp
@@ -109,6 +110,7 @@ def create_app(config_class=None):
     app.register_blueprint(push_bp, url_prefix="/api")
     app.register_blueprint(billing_bp, url_prefix="/api")
     app.register_blueprint(plan_bp, url_prefix="/api")
+    app.register_blueprint(professional_bp, url_prefix="/api")
     app.register_blueprint(admin_bp, url_prefix="/api")
     app.register_blueprint(adherence_bp, url_prefix="/api")
     app.register_blueprint(diet_daily_bp, url_prefix="/api")
@@ -244,7 +246,7 @@ def create_app(config_class=None):
 
     @app.cli.command("apply-workoutx-preview")
     def apply_workoutx_preview():
-        """Replace the active WorkoutX catalog with the cached preview selection."""
+        """Activate the complete cached WorkoutX catalog, preserving existing IDs."""
         click.echo(f"WorkoutX exercises activated: {apply_preview_catalog()}")
 
     @app.route("/admin")

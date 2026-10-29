@@ -387,7 +387,7 @@
     <div class="modal-card">
       <div class="modal-head">
         <div>
-          <h3 style="margin:0;">Conceder Premium</h3>
+          <h3 id="accessGrantTitle" style="margin:0;">Conceder Premium</h3>
           <p class="muted" style="margin:4px 0 0;">Escolha por quanto tempo o acesso ficará ativo.</p>
         </div>
         <button class="action small" id="closePremiumModal">Fechar</button>
@@ -771,20 +771,21 @@
     function userChips(user) {
       const chips = [];
       if (user.is_admin) chips.push('<span class="chip">Admin</span>');
+      if (user.professional_entitled) chips.push('<span class="chip good">Personal</span>');
       if (user.is_premium) chips.push('<span class="chip good">Premium</span>');
       if (user.is_banned) chips.push('<span class="chip bad">Banido</span>');
       return chips.join(' ');
     }
 
     function adminGrant(user, type) {
-      return (user.admin_grants || []).find(grant => grant.plan_code === 'premium_student');
+      return (user.admin_grants || []).find(grant => type === 'professional' ? grant.plan_code.startsWith('professional_') : grant.plan_code === 'premium_student');
     }
 
     function grantSummary(user) {
       const grants = user.admin_grants || [];
       if (!grants.length && !user.legacy_premium_grant) return '';
       const labels = grants.map(grant => {
-        const access = 'Premium';
+        const access = grant.plan_code.startsWith('professional_') ? 'Personal' : 'Premium';
         const expiry = grant.current_period_end ? `até ${fmt.format(new Date(grant.current_period_end))}` : 'sem prazo';
         return `${access} Admin ${expiry}`;
       });
@@ -818,6 +819,7 @@
             <div class="row-actions">
               <button class="action small" data-action="${escapeHtml(user.is_banned ? 'unban' : 'ban')}" data-user="${escapeHtml(user.id)}">${escapeHtml(user.is_banned ? 'Desbanir' : 'Banir')}</button>
               <button class="action small" data-action="premium" data-user="${escapeHtml(user.id)}" data-value="${escapeHtml(!(premiumGrant || user.legacy_premium_grant))}"${!canGrantPremium && !premiumGrant && !user.legacy_premium_grant ? ' disabled' : ''}>${escapeHtml(premiumLabel)}</button>
+              <button class="action small" data-action="professional" data-user="${escapeHtml(user.id)}" data-value="${escapeHtml(!user.is_professional)}">${user.is_professional ? 'Revogar Personal' : 'Conceder Personal'}</button>
               <button class="action small" data-action="admin" data-user="${escapeHtml(user.id)}">${escapeHtml(user.is_admin ? 'Remover Admin' : 'Tornar Admin')}</button>
             </div>
           </td>
@@ -985,15 +987,17 @@
       let options = { method: 'POST' };
       if (action === 'ban' || action === 'unban' || action === 'admin') {
         path = action === 'admin' ? `/admin/users/${userId}/toggle_admin` : `/admin/users/${userId}/${action}`;
-      } else if (action === 'premium') {
+      } else if (action === 'premium' || action === 'professional') {
         if (value === 'true') {
           state.currentPremiumUser = userId;
+          state.currentGrantType = action;
+          document.getElementById('accessGrantTitle').textContent = action === 'professional' ? 'Conceder Personal · treinos' : 'Conceder Premium';
           els.premiumDurationSelect.value = '';
           els.premiumModal.classList.add('show');
           return;
         }
-        path = `/admin/users/${userId}/premium`;
-        options = { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_premium: false }) };
+        path = `/admin/users/${userId}/${action}`;
+        options = { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action === 'professional' ? { is_professional: false } : { is_premium: false }) };
 
       }
       await api(path, options);
@@ -1006,6 +1010,7 @@
       const user = state.users.find(item => String(item.id) === String(userId));
       const messages = {
         ban: 'Banir este usuário e bloquear seu acesso?',
+        professional: value === 'false' ? 'Revogar o acesso profissional de treinos deste usuário?' : '',
         premium: value === 'false' ? 'Remover o acesso Premium deste usuário?' : '',
         admin: user?.is_admin ? 'Remover os privilégios administrativos deste usuário?' : '',
       };
@@ -1143,15 +1148,15 @@
       document.getElementById('cancelPremium').addEventListener('click', closePremiumModal);
       els.confirmPremium.addEventListener('click', async () => {
         if (!els.premiumDurationSelect.value) {
-          showToast('Escolha por quanto tempo o Premium ficará ativo');
+          showToast('Escolha por quanto tempo o acesso ficará ativo');
           return;
         }
-        const saved = await runAdminAction(els.confirmPremium, () => api(`/admin/users/${state.currentPremiumUser}/premium`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_premium: true, duration_days: selectedDuration(els.premiumDurationSelect) })
+        const saved = await runAdminAction(els.confirmPremium, () => api(`/admin/users/${state.currentPremiumUser}/${state.currentGrantType || 'premium'}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...(state.currentGrantType === 'professional' ? { is_professional: true, professional_scope: 'workout' } : { is_premium: true }), duration_days: selectedDuration(els.premiumDurationSelect) })
         }));
         if (!saved) return;
         closePremiumModal();
-        showToast('Premium concedido');
+        showToast('Acesso concedido');
         const pending = [loadAnalytics()];
         if (state.usersLoaded) pending.push(loadUsers());
         await Promise.all(pending);

@@ -114,6 +114,29 @@ def catalog_by_key():
     return {exercise["key"]: exercise for exercise in exercise_catalog()}
 
 
+def exercise_selection_group(exercise):
+    group = exercise["substitution_group"]
+    return {
+        "horizontal_press": "horizontal_push", "chest_adduction": "horizontal_push",
+        "vertical_press": "vertical_push", "hip_hinge": "hinge", "hip_extension": "hinge",
+        "unilateral_knee_dominant": "squat", "leg_press": "squat",
+        "plantar_flexion": "calf_raise", "shoulder_abduction": "lateral_raise",
+        "elbow_flexion": "biceps", "elbow_extension": "triceps",
+        "trunk_flexion": "core_flexion", "anti_extension": "core_stability",
+    }.get(group, group)
+
+
+def selection_exercise_catalog():
+    """Complete selection library; automatic generation keeps its curated catalog."""
+    from src.models.user import WorkoutXExercise
+
+    exercises = [*exercise_catalog(), *(
+        _workoutx_catalog_item(row.data)
+        for row in WorkoutXExercise.query.order_by(WorkoutXExercise.provider_id).all()
+    )]
+    return [{**item, "group": exercise_selection_group(item)} for item in exercises]
+
+
 @lru_cache(maxsize=1)
 def catalog_aliases():
     aliases = {}
@@ -1149,8 +1172,7 @@ def _workoutx_replacement_options(exercise, source, unavailable_equipment, avail
     full_gym = not available or "full_gym" in available
     candidates = [
         item for item in catalog
-        if workoutx_display_name(item["id"])
-        and _workoutx_equipment_available(item, blocked, available, full_gym)
+        if _workoutx_equipment_available(item, blocked, available, full_gym)
     ]
     present_ids = set()
     for present in present_exercises or []:
@@ -1175,8 +1197,7 @@ def _workoutx_replacement_options(exercise, source, unavailable_equipment, avail
         )
         candidates.extend(
             item for item in extra_candidates
-            if workoutx_display_name(item["id"])
-            and _workoutx_equipment_available(item, blocked, available, full_gym)
+            if _workoutx_equipment_available(item, blocked, available, full_gym)
         )
     options = local_options or _diversify_replacement_options(substitution_options(
         source_item, candidates, present_ids=present_ids,
@@ -1185,7 +1206,7 @@ def _workoutx_replacement_options(exercise, source, unavailable_equipment, avail
     localized_options = [
         {
             "catalog_key": f"workoutx:{candidate['id']}",
-            "name": workoutx_display_name(candidate["id"]),
+            "name": workoutx_display_name(candidate["id"]) or candidate["name"],
             "movement_pattern": classify_workoutx_exercise(candidate)["movement_pattern"],
             "primary_muscle": classify_workoutx_exercise(candidate)["primary_muscle"],
             "equipment": candidate.get("equipment") or "",
@@ -1200,7 +1221,6 @@ def _workoutx_replacement_options(exercise, source, unavailable_equipment, avail
             "rationale": "Alternativa compatível para este treino.",
         }
         for candidate in options
-        if workoutx_display_name(candidate["id"])
     ]
     return localized_options or None
 

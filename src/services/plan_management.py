@@ -3,6 +3,7 @@ import hashlib
 import json
 
 from src.models.user import (
+    DelegatedActionAudit,
     DietPlan,
     DietPlanMeal,
     WorkoutDay,
@@ -65,10 +66,13 @@ def create_workout_plan(
     *,
     status="published",
     source="manual",
+    relationship=None,
+    roster_relationship=None,
     supersedes_plan_id=None,
 ):
     plan = WorkoutPlan(
         user_id=owner.id if owner else None,
+        professional_student_relationship_id=roster_relationship.id if roster_relationship else None,
         author_user_id=author.id,
         published_by_user_id=author.id if status == "published" else None,
         published_at=datetime.utcnow() if status == "published" else None,
@@ -87,6 +91,8 @@ def create_workout_plan(
     db.session.add(plan)
     db.session.flush()
     _replace_workout_days(plan, plan_data["days"])
+    if relationship:
+        add_audit(author, owner, relationship, "workout_plan.created", "workout_plan", plan.id)
     return plan
 
 
@@ -202,3 +208,29 @@ def _replace_diet_meals(plan, meals):
             diet_plan_id=plan.id,
             **{key: meal[key] for key in DIET_MEAL_FIELDS if key in meal},
         ))
+
+
+def publish_plan(plan, actor, owner, relationship, resource_type):
+    plan.status = "published"
+    plan.published_at = datetime.utcnow()
+    plan.published_by_user_id = actor.id
+    plan.professional_verified_fingerprint = snapshot_fingerprint(plan_snapshot(plan))
+    if plan.supersedes_plan_id:
+        model = WorkoutPlan if resource_type == "workout_plan" else DietPlan
+        previous = db.session.get(model, plan.supersedes_plan_id)
+        if previous and previous.user_id == owner.id:
+            previous.status = "archived"
+    add_audit(actor, owner, relationship, f"{resource_type}.published", resource_type, plan.id)
+    return plan
+
+
+def add_audit(actor, subject, relationship, action, resource_type=None, resource_id=None, details=None):
+    db.session.add(DelegatedActionAudit(
+        actor_user_id=actor.id,
+        subject_user_id=subject.id,
+        relationship_id=relationship.id if relationship else None,
+        action=action,
+        resource_type=resource_type,
+        resource_id=str(resource_id) if resource_id is not None else None,
+        details=details,
+    ))

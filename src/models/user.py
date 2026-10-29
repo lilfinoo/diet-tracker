@@ -27,6 +27,8 @@ class User(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_premium = db.Column(db.Boolean, default=False, nullable=False)
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
+    is_professional = db.Column(db.Boolean, default=False, nullable=False)
+    professional_scope = db.Column(db.String(16), nullable=True)
     ai_trial_uses = db.Column(db.Integer, default=0, nullable=False)
     free_plan_uses = db.Column(db.Integer, default=0, nullable=False)
     free_workout_plan_uses = db.Column(db.Integer, default=0, nullable=False)
@@ -110,6 +112,8 @@ class User(db.Model):
             )
         ]
         plan_rank = {
+            "professional_single": 2,
+            "professional_complete": 3,
             "free": 0,
             "premium_student": 1,
             "premium_student_annual": 1,
@@ -133,8 +137,16 @@ class User(db.Model):
         if entitlement == "premium":
             return self.is_premium or plan_code != "free"
         if entitlement == "professional":
-            return False
-        if entitlement in {"diet", "workout"}:
+            subscription = self.active_subscription()
+            return bool(
+                self.is_professional
+                and self.professional_scope in {"workout", "both"}
+                and subscription
+                and subscription.plan_code in {"professional_single", "professional_complete"}
+            )
+        if entitlement == "workout":
+            return self.has_entitlement("professional")
+        if entitlement == "diet":
             return False
         return False
 
@@ -178,6 +190,9 @@ class User(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "is_admin": self.is_admin,
             "is_premium": self.has_entitlement("premium"),
+            "is_professional": self.is_professional,
+            "professional_entitled": self.has_entitlement("professional"),
+            "professional_scope": self.professional_scope,
             "plan_code": self.effective_plan_code(),
             "ai_trial_uses": self.ai_trial_uses,
             "free_plan_uses": self.free_plan_uses,
@@ -199,6 +214,8 @@ class User(db.Model):
         subscription = self.active_subscription()
         if self.is_admin:
             account_type = "admin"
+        elif self.is_professional:
+            account_type = "professional"
         else:
             account_type = "standard"
         return {
@@ -212,6 +229,9 @@ class User(db.Model):
             "is_banned": self.is_banned,
             "is_admin": self.is_admin,
             "is_premium": self.has_entitlement("premium"),
+            "is_professional": self.is_professional,
+            "professional_entitled": self.has_entitlement("professional"),
+            "professional_scope": self.professional_scope,
             "plan_code": self.effective_plan_code(),
             "subscription_status": subscription.status if subscription else "none",
         }
@@ -229,6 +249,9 @@ class User(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "is_admin": self.is_admin,
             "is_premium": self.has_entitlement("premium"),
+            "is_professional": self.is_professional,
+            "professional_entitled": self.has_entitlement("professional"),
+            "professional_scope": self.professional_scope,
             "plan_code": self.effective_plan_code(),
             "ai_trial_uses": self.ai_trial_uses,
             "free_plan_uses": self.free_plan_uses,

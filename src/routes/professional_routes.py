@@ -1,5 +1,6 @@
 import hashlib
 import secrets
+from uuid import UUID
 from datetime import datetime, timedelta
 from functools import wraps
 from types import SimpleNamespace
@@ -56,7 +57,7 @@ from src.services.rate_limit import rate_limit
 from src.services.workout_plans import (
     PlanValidationError,
     build_workout_contract,
-    exercise_catalog,
+    selection_exercise_catalog,
     invalid_workout_day_numbers,
     merge_workout_day_repairs,
     normalize_manual_workout,
@@ -171,6 +172,10 @@ def _student_context(student_id, lock=False):
             db.session.commit()
         return _offline_student(relationship), relationship
 
+    try:
+        student_id = UUID(str(student_id))
+    except ValueError:
+        abort(404, description="Aluno não encontrado.")
     relationship = _relationship_for(g.user.id, student_id, lock=lock)
     if not relationship:
         abort(404, description="Aluno não encontrado.")
@@ -232,6 +237,7 @@ def _commit_or_conflict(message):
 @professional_bp.route("/professional/invitations", methods=["POST"])
 @professional_required
 def create_invitation():
+    db.session.get(User, g.user.id, with_for_update=True)
     if _occupied_student_slots(g.user.id) >= 5:
         return jsonify({"error": "Seu plano permite acompanhar até 5 alunos."}), 409
     token = secrets.token_urlsafe(32)
@@ -261,7 +267,8 @@ def list_invitations():
     changed = False
     for relationship in relationships:
         if relationship.invite_expires_at <= now:
-            relationship.status = "expired"
+            relationship.status = "offline" if relationship.student_name else "expired"
+            relationship.invite_token_hash = None
             changed = True
     if changed:
         db.session.commit()
@@ -276,7 +283,8 @@ def cancel_invitation(relationship_id):
         professional_user_id=g.user.id,
         status="pending",
     ).first_or_404()
-    relationship.status = "revoked"
+    relationship.status = "offline" if relationship.student_name else "revoked"
+    relationship.invite_token_hash = None
     relationship.revoked_at = datetime.utcnow()
     relationship.revoked_by_user_id = g.user.id
     db.session.commit()
@@ -691,8 +699,9 @@ def get_exercises():
             "primary_muscle": item["primary_muscle"],
             "equipment": item["equipment"],
             "difficulty": item["difficulty"],
+            "aliases": item.get("aliases", []),
         }
-        for item in exercise_catalog()
+        for item in selection_exercise_catalog()
     ]), 200
 
 
@@ -870,7 +879,7 @@ def publish_professional_workout(student_id, plan_id):
         ],
     }
     try:
-        normalize_workout_output(raw_plan, questionnaire)
+        normalize_manual_workout(raw_plan, questionnaire)
     except PlanValidationError as error:
         return jsonify({"error": "Revise o treino antes de publicar.", "fields": error.errors}), 400
     publish_plan(plan, g.user, student, relationship, "workout_plan")

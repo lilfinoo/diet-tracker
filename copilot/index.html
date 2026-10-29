@@ -23,8 +23,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet" media="print" onload="this.media='all'">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="/styles.css?v=20260926-diet-transparent">
+    <link rel="stylesheet" href="/styles.css?v=20261029-professional">
     <link rel="stylesheet" href="/fluid.css?v=20260828-achievements">
+    <link rel="stylesheet" href="/professional.css?v=20261029-guided-catalog">
 </head>
 <body data-auth-state="unknown">
     <div id="appBootScreen" role="status" aria-live="polite">
@@ -504,6 +505,23 @@
                     </div>
                 </div>
 
+                <div id="professionalTab" class="tab-content hidden">
+                    <section id="professionalDashboard">
+                        <div class="content-header professional-heading">
+                            <div class="content-heading"><span class="content-kicker">Área profissional</span><h2>Seus alunos</h2><p>Acompanhe seus alunos. Monte, revise e envie treinos.</p></div>
+                            <div class="professional-create-actions"><button type="button" class="btn-primary" onclick="openOfflineStudent()"><i class="fas fa-user-plus"></i> Novo aluno</button><button type="button" class="btn-secondary" onclick="openProfessionalInvite()"><i class="fas fa-link"></i> Convite avulso</button></div>
+                        </div>
+                        <div class="professional-workflow" aria-label="Como funciona o acompanhamento">
+                            <article><span>1</span><div><strong>Cadastre seu aluno</strong><p>Comece pelo perfil, mesmo sem conta no app.</p></div></article>
+                            <article><span>2</span><div><strong>Monte o treino</strong><p>Organize os dias e a prescrição de cada exercício.</p></div></article>
+                            <article><span>3</span><div><strong>Envie para o app</strong><p>Com o convite aceito, o aluno recebe o plano.</p></div></article>
+                        </div>
+                        <div id="professionalStats" class="stats-grid"></div>
+                        <div id="professionalStudents" class="professional-student-grid" aria-live="polite"></div>
+                    </section>
+                    <section id="professionalStudentDetail" class="hidden" aria-live="polite"></section>
+                </div>
+
                 <div id="statsTab" class="tab-content hidden">
                     <div class="profile-dashboard">
                         <header class="profile-page-heading"><span class="content-kicker">Seu espaço</span><h1>Perfil <small class="app-version">v1.1.2</small></h1></header>
@@ -524,6 +542,7 @@
 
                         <div id="profileAuthenticatedContent">
                             <nav class="profile-shortcuts" aria-label="Assinatura e rede">
+                                <button type="button" id="profileProfessionalDashboard" class="hidden" onclick="showTab('professional')"><span class="profile-shortcut-icon"><i data-lucide="briefcase-business" aria-hidden="true"></i></span><strong>Área profissional</strong><span class="profile-shortcut-caption">Alunos e planos<i data-lucide="chevron-right" aria-hidden="true"></i></span></button>
                                 <button type="button" onclick="openPlansModal()"><span class="profile-shortcut-icon"><i data-lucide="credit-card" aria-hidden="true"></i></span><strong>Planos e assinatura</strong><span class="profile-shortcut-caption">Gerenciar plano<i data-lucide="chevron-right" aria-hidden="true"></i></span></button>
                             </nav>
                             <section class="profile-dashboard-section profile-settings-section">
@@ -941,6 +960,61 @@
             </div>
         </div>
 
+        <div id="professionalStudentModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="professionalStudentModalTitle">
+            <div class="modal-content professional-sheet">
+                <div class="modal-header"><div><span class="content-kicker">Cadastro do personal</span><h3 id="professionalStudentModalTitle">Novo aluno</h3></div><button type="button" class="btn-close" onclick="closeOfflineStudent()" aria-label="Fechar">&times;</button></div>
+                <p>Este cadastro pode ser gerenciado sem o aluno ter uma conta no aplicativo.</p>
+                <form id="professionalStudentForm" onsubmit="saveOfflineStudent(event)">
+                    <div class="professional-editor-basics">
+                        <label for="rosterName">Nome<input id="rosterName" maxlength="100" placeholder="Nome do aluno" required></label>
+                        <label for="rosterAge">Idade (anos)<input id="rosterAge" type="number" min="0" max="120" placeholder="Ex.: 30" required></label>
+                        <label for="rosterWeight">Peso (kg)<input id="rosterWeight" type="number" min="0.1" max="500" step="0.1" placeholder="Ex.: 70" required></label>
+                        <label for="rosterHeight">Altura (cm)<input id="rosterHeight" type="number" min="0.1" max="300" step="0.1" placeholder="Ex.: 170" required></label>
+                        <label for="rosterGender">Gênero usado no cálculo<select id="rosterGender"><option value="">Não informado</option><option value="masculino">Masculino</option><option value="feminino">Feminino</option></select></label>
+                        <label for="rosterGoal">Objetivo<input id="rosterGoal" maxlength="100" placeholder="Ex.: ganhar massa muscular"></label>
+                        <label for="rosterActivity">Nível de atividade<select id="rosterActivity"><option value="">Não informado</option><option value="sedentario">Sedentário</option><option value="leve">Leve</option><option value="moderado">Moderado</option><option value="intenso">Intenso</option></select></label>
+                    </div>
+                    <div id="professionalStudentMessage" class="modal-message" role="status" aria-live="polite"></div>
+                    <div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeOfflineStudent()">Cancelar</button><button class="btn-primary" type="submit">Salvar aluno</button></div>
+                </form>
+            </div>
+        </div>
+
+        <div id="professionalInviteModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="professionalInviteTitle">
+            <div class="modal-content professional-sheet">
+                <div class="modal-header"><div><span class="content-kicker">Novo vínculo</span><h3 id="professionalInviteTitle">Convidar aluno</h3></div><button type="button" class="btn-close" onclick="closeProfessionalInvite()" aria-label="Fechar">&times;</button></div>
+                <p>Gere um link seguro, válido por 7 dias, e envie ao aluno. Ele poderá entrar ou criar uma conta antes de aceitar.</p>
+                <div id="professionalInviteResult" class="invite-result hidden"><label for="professionalInviteLink">Link do convite</label><input id="professionalInviteLink" readonly><div class="modal-actions"><button class="btn-secondary" type="button" onclick="copyProfessionalInvite()"><i class="fas fa-copy"></i> Copiar</button><button class="btn-primary" type="button" onclick="shareProfessionalInvite()"><i class="fab fa-whatsapp"></i> WhatsApp</button></div></div>
+                <div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeProfessionalInvite()">Fechar</button><button id="professionalInviteGenerate" type="button" class="btn-primary" onclick="generateProfessionalInvite()">Gerar link</button></div>
+                <div id="professionalInviteMessage" class="modal-message" role="status" aria-live="polite"></div>
+            </div>
+        </div>
+
+        <div id="professionalPlanEditorModal" class="modal plan-modal" role="dialog" aria-modal="true" aria-labelledby="professionalPlanEditorTitle">
+            <div class="modal-content professional-editor-sheet">
+                <div class="modal-header"><div><span id="professionalPlanEditorKicker" class="content-kicker">Rascunho</span><h3 id="professionalPlanEditorTitle">Editor de plano</h3></div><button type="button" class="btn-close" onclick="closeProfessionalPlanEditor()" aria-label="Fechar">&times;</button></div>
+                <form id="professionalPlanEditorForm" novalidate>
+                    <div id="professionalBuilderContext" class="professional-builder-context"></div>
+                    <nav class="professional-builder-steps" aria-label="Etapas da montagem do treino">
+                        <button type="button" data-builder-nav="0" onclick="setProfessionalEditorStep(0)"><span>1</span><div><strong>Plano</strong><small>Objetivo e rotina</small></div></button>
+                        <button type="button" data-builder-nav="1" onclick="setProfessionalEditorStep(1)"><span>2</span><div><strong>Treinos</strong><small>Dias e exercícios</small></div></button>
+                        <button type="button" data-builder-nav="2" onclick="setProfessionalEditorStep(2)"><span>3</span><div><strong>Revisão</strong><small>Confira e envie</small></div></button>
+                    </nav>
+                    <div id="professionalPlanEditorBody"></div>
+                    <div id="professionalPlanEditorMessage" class="modal-message" role="alert" aria-live="polite"></div>
+                    <footer class="professional-builder-footer">
+                        <p id="professionalSaveNote" class="professional-save-note">O rascunho fica visível só para você.</p>
+                        <div class="professional-builder-actions">
+                            <button id="professionalEditorBack" type="button" class="btn-secondary" onclick="setProfessionalEditorStep(ProfessionalWorkspace.editorStep() - 1)">Voltar</button>
+                            <button id="professionalEditorSave" type="submit" class="btn-secondary"><i class="fas fa-floppy-disk" aria-hidden="true"></i> Salvar rascunho</button>
+                            <button id="professionalEditorNext" type="button" class="btn-primary" onclick="setProfessionalEditorStep(ProfessionalWorkspace.editorStep() + 1)">Montar treinos <i class="fas fa-arrow-right" aria-hidden="true"></i></button>
+                            <button id="professionalEditorSend" type="button" class="btn-primary" hidden onclick="saveProfessionalEditor(event, true)"><i class="fas fa-paper-plane" aria-hidden="true"></i> Salvar e enviar ao aluno</button>
+                        </div>
+                    </footer>
+                </form>
+            </div>
+        </div>
+
     <script defer src="/vendor/lucide.min.js?v=1.42.0-no-map"></script>
     <script defer src="/js/icons.js?v=20260907-lucide-today"></script>
     <script defer src="/fluid.js?v=20260828-achievements"></script>
@@ -951,11 +1025,12 @@
     <script defer src="/js/body-evolution.js?v=20260909"></script>
     <script defer src="/js/exercise-media.js?v=20260828-achievements"></script>
     <script defer src="/js/native-billing.js?v=20261006-revenuecat"></script>
-    <script defer src="/script.js?v=20261006-revenuecat-v1"></script>
+    <script defer src="/script.js?v=20261029-professional"></script>
     <script defer src="/js/diet-entry.js?v=20260926-diet-transparent"></script>
     <script defer src="/js/diet-share.js?v=20260926-diet-transparent"></script>
     <script defer src="/js/workout-share.js?v=20260926-home-share"></script>
     <script defer src="/js/plans.js?v=20260926-home-share"></script>
+    <script defer src="/js/professional.js?v=20261029-guided-catalog"></script>
     <script defer src="/js/home-refresh.js?v=20260921-home-refresh"></script>
     <script defer src="/js/progress.js?v=20260919-progress"></script>
     <script defer src="/js/social.js?v=20260919-camera"></script>

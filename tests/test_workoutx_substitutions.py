@@ -155,7 +155,7 @@ def test_workoutx_replacement_uses_brazilian_name_and_preserves_gif_key(app):
     assert workoutx_display_name("999999") is None
 
 
-def test_untranslated_workoutx_candidate_falls_back_to_local_catalog(app):
+def test_untranslated_workoutx_candidate_keeps_provider_name(app):
     source = workout_exercise("0025", "Supino reto com barra", "supino_reto_barra")
     with app.app_context():
         db.session.add_all([
@@ -167,7 +167,9 @@ def test_untranslated_workoutx_candidate_falls_back_to_local_catalog(app):
         options = replacement_options(source, present_exercises=[source])
 
     assert options
-    assert all(not item["catalog_key"].startswith("workoutx:") for item in options)
+    assert [(item["catalog_key"], item["name"]) for item in options] == [
+        ("workoutx:999999", "Cable Bench Press")
+    ]
     assert all(item["name"] for item in options)
 
 

@@ -536,10 +536,17 @@ def collect_preview_exercises(directory=None, pause_seconds=2):
 
 
 def preview_exercises(directory=None):
-    pages = _preview_pages(_preview_directory(directory))
+    directory = _preview_directory(directory)
+    pages = _preview_pages(directory)
     exercises = [exercise for page in pages for exercise in page["data"]]
     if not exercises:
         raise WorkoutXServiceError("WorkoutX preview cache is empty")
+    try:
+        total = int(json.loads((directory / "manifest.json").read_text(encoding="utf-8"))["total"])
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise WorkoutXServiceError("WorkoutX preview manifest is invalid") from error
+    if len(exercises) != total:
+        raise WorkoutXServiceError("WorkoutX preview cache is incomplete")
     return exercises
 
 
@@ -583,24 +590,14 @@ def preview_catalog_comparison(directory=None):
 
 
 def apply_preview_catalog(directory=None):
-    from src.models.user import WorkoutXExercise, db
-
-    selected = select_exercises(preview_exercises(directory))
-    if not selected:
-        raise WorkoutXServiceError("WorkoutX preview selection is empty")
-    WorkoutXExercise.query.delete()
-    db.session.add_all(
-        WorkoutXExercise(provider_id=_provider_id(exercise["id"]), data=exercise)
-        for exercise in selected
-    )
-    db.session.commit()
-    return len(selected)
+    return _store_catalog(preview_exercises(directory))
 
 
 def _exercise_pages(limit=10):
     offset = 0
     total = None
     received = 0
+    seen_ids = set()
 
     while total is None or offset < total:
         if offset:
@@ -617,18 +614,23 @@ def _exercise_pages(limit=10):
         for exercise in batch:
             if not isinstance(exercise, dict) or not exercise.get("id"):
                 raise WorkoutXServiceError("WorkoutX returned an exercise without an ID")
-            _provider_id(exercise["id"])
+            provider_id = _provider_id(exercise["id"])
+            if provider_id in seen_ids:
+                raise WorkoutXServiceError("WorkoutX returned duplicate exercise IDs")
+            seen_ids.add(provider_id)
 
-        if total is None:
-            try:
-                total = int(payload["total"])
-            except (KeyError, TypeError, ValueError) as error:
-                raise WorkoutXServiceError("WorkoutX returned invalid pagination data") from error
-            if total < 0:
-                raise WorkoutXServiceError("WorkoutX returned invalid pagination data")
+        try:
+            page_total = int(payload["total"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise WorkoutXServiceError("WorkoutX returned invalid pagination data") from error
+        if page_total < 0 or (total is not None and page_total != total):
+            raise WorkoutXServiceError("WorkoutX returned invalid pagination data")
+        total = page_total
         if not batch:
             break
         received += len(batch)
+        if received > total:
+            raise WorkoutXServiceError("WorkoutX returned invalid pagination data")
         yield batch
         offset += len(batch)
 
@@ -641,17 +643,27 @@ def fetch_all_exercises(limit=10):
     return exercises
 
 
-def import_exercises():
+def _store_catalog(exercises):
     from src.models.user import WorkoutXExercise, db
 
-    selected = select_exercises(fetch_all_exercises())
-    WorkoutXExercise.query.delete()
-    db.session.add_all(
-        WorkoutXExercise(provider_id=_provider_id(exercise["id"]), data=exercise)
-        for exercise in selected
-    )
+    if not exercises:
+        raise WorkoutXServiceError("WorkoutX exercise catalog is empty")
+    provider_ids = [_provider_id(exercise["id"]) for exercise in exercises]
+    if len(set(provider_ids)) != len(provider_ids):
+        raise WorkoutXServiceError("WorkoutX returned duplicate exercise IDs")
+    existing = {row.provider_id: row for row in WorkoutXExercise.query.all()}
+    for provider_id, exercise in zip(provider_ids, exercises):
+        row = existing.get(provider_id)
+        if row is None:
+            db.session.add(WorkoutXExercise(provider_id=provider_id, data=exercise))
+        else:
+            row.data = exercise
     db.session.commit()
-    return len(selected)
+    return len(exercises)
+
+
+def import_exercises():
+    return _store_catalog(fetch_all_exercises())
 
 
 @lru_cache(maxsize=512)

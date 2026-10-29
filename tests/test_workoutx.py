@@ -2,6 +2,8 @@ from src.services import workoutx
 from io import BytesIO
 from urllib.error import HTTPError
 
+import pytest
+
 from src.models.user import AdminActionAudit, ExerciseMediaReview, User, WorkoutXExercise, WorkoutXGif, db
 from tests.helpers import registration_payload
 
@@ -304,17 +306,67 @@ def test_workoutx_recommendation_endpoints_parse_ranked_ids(app, monkeypatch):
 def test_workoutx_imports_every_page_and_updates_existing_records(app, monkeypatch):
     responses = [
         b'{"total":3,"count":2,"data":[{"id":"0001","name":"First","target":"abs"},{"id":"0002","name":"Second","target":"biceps"}]}',
-        b'{"total":3,"count":1,"data":[{"id":"0003","name":"Third","target":"quads"}]}',
+        b'{"total":3,"count":1,"data":[{"id":"0003","name":"Bosu Stretch","target":"cardiovascular system"}]}',
     ]
     monkeypatch.setattr(workoutx, "_request", lambda url: responses.pop(0))
+    monkeypatch.setattr(workoutx.time, "sleep", lambda _seconds: None)
 
     with app.app_context():
-        db.session.add(WorkoutXExercise(provider_id="0001", data={"id": "0001", "name": "Old"}))
+        db.session.add_all([
+            WorkoutXExercise(provider_id="0001", data={"id": "0001", "name": "Old"}),
+            WorkoutXExercise(provider_id="9999", data={"id": "9999", "name": "Used by an older plan"}),
+        ])
         db.session.commit()
 
         assert workoutx.import_exercises() == 3
-        assert WorkoutXExercise.query.count() == 3
+        assert WorkoutXExercise.query.count() == 4
         assert db.session.get(WorkoutXExercise, "0001").data["name"] == "First"
+        assert db.session.get(WorkoutXExercise, "0003").data["name"] == "Bosu Stretch"
+        assert db.session.get(WorkoutXExercise, "9999").data["name"] == "Used by an older plan"
+
+
+def test_workoutx_import_does_not_limit_exercises_by_group_or_movement(app, monkeypatch):
+    exercises = [
+        {"id": str(index), "name": f"Leg Press {index}", "target": "quads"}
+        for index in range(1, 61)
+    ]
+    monkeypatch.setattr(workoutx, "fetch_all_exercises", lambda: exercises)
+
+    with app.app_context():
+        assert workoutx.import_exercises() == 60
+        assert WorkoutXExercise.query.count() == 60
+
+
+@pytest.mark.parametrize("responses", [
+    [
+        b'{"total":2,"data":[{"id":"0001","name":"Updated"}]}',
+        b'{"total":2,"data":[]}',
+    ],
+    [
+        b'{"total":2,"data":[{"id":"0001","name":"Updated"}]}',
+        b'{"total":2,"data":[{"id":"0001","name":"Duplicate"}]}',
+    ],
+    [
+        b'{"total":2,"data":[{"id":"0001","name":"Updated"}]}',
+        b'{"total":3,"data":[{"id":"0002","name":"Changed total"}]}',
+    ],
+    [b'{"total":1,"data":[{"id":"0001"},{"id":"0002"}]}'],
+    [b'{"total":0,"data":[]}'],
+])
+def test_workoutx_failed_import_preserves_the_active_catalog(app, monkeypatch, responses):
+    responses = list(responses)
+    monkeypatch.setattr(workoutx, "_request", lambda _url: responses.pop(0))
+    monkeypatch.setattr(workoutx.time, "sleep", lambda _seconds: None)
+
+    with app.app_context():
+        db.session.add(WorkoutXExercise(provider_id="0001", data={"id": "0001", "name": "Original"}))
+        db.session.commit()
+
+        with pytest.raises(workoutx.WorkoutXServiceError):
+            workoutx.import_exercises()
+
+        assert WorkoutXExercise.query.count() == 1
+        assert db.session.get(WorkoutXExercise, "0001").data["name"] == "Original"
 
 
 def test_catalog_selection_prioritizes_common_movements():
@@ -350,19 +402,40 @@ def test_preview_collection_resumes_without_refetching_saved_pages(app, tmp_path
     ]
 
 
-def test_preview_application_replaces_the_active_catalog(app, monkeypatch):
-    monkeypatch.setattr(workoutx, "preview_exercises", lambda directory=None: [
-        {"id": "0001", "name": "First", "target": "abs"},
-        {"id": "0002", "name": "Second", "target": "biceps"},
-    ])
+def test_preview_application_imports_the_full_catalog_and_preserves_existing_ids(app, tmp_path, monkeypatch):
+    monkeypatch.setattr(workoutx, "_request", lambda _url: (
+        b'{"total":2,"data":[{"id":"0001","name":"First","target":"abs"},'
+        b'{"id":"0002","name":"Bosu Stretch","target":"cardiovascular system"}]}'
+    ))
     with app.app_context():
-        db.session.add(WorkoutXExercise(provider_id="old", data={"id": "old", "name": "Old"}))
+        db.session.add(WorkoutXExercise(provider_id="9999", data={"id": "9999", "name": "Old"}))
+        db.session.commit()
+        workoutx.collect_preview_exercises(tmp_path, pause_seconds=0)
+
+        assert workoutx.apply_preview_catalog(tmp_path) == 2
+        assert [item.provider_id for item in WorkoutXExercise.query.order_by(WorkoutXExercise.provider_id)] == [
+            "0001", "0002", "9999"
+        ]
+
+
+def test_incomplete_preview_cannot_change_the_active_catalog(app, tmp_path, monkeypatch):
+    responses = [
+        b'{"total":2,"data":[{"id":"0001","name":"Updated"}]}',
+        b'{"total":2,"data":[]}',
+    ]
+    monkeypatch.setattr(workoutx, "_request", lambda _url: responses.pop(0))
+
+    with app.app_context():
+        db.session.add(WorkoutXExercise(provider_id="0001", data={"id": "0001", "name": "Original"}))
         db.session.commit()
 
-        assert workoutx.apply_preview_catalog() == 2
-        assert [item.provider_id for item in WorkoutXExercise.query.order_by(WorkoutXExercise.provider_id)] == [
-            "0001", "0002"
-        ]
+        with pytest.raises(workoutx.WorkoutXServiceError, match="incomplete"):
+            workoutx.collect_preview_exercises(tmp_path, pause_seconds=0)
+        with pytest.raises(workoutx.WorkoutXServiceError, match="incomplete"):
+            workoutx.apply_preview_catalog(tmp_path)
+
+        assert WorkoutXExercise.query.count() == 1
+        assert db.session.get(WorkoutXExercise, "0001").data["name"] == "Original"
 
 
 def test_workoutx_rejects_oversized_response(app, monkeypatch):

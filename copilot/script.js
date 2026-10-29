@@ -53,7 +53,7 @@ const PRIMARY_VIEWS = new Set(['diet', 'diet_plans', 'workout_plans', 'progress'
 const VIEW_LABELS = {
     diet: 'Hoje', diet_plans: 'Dieta', workout_plans: 'Treino', progress: 'Progresso',
     measurements: 'Medidas', activities: 'Atividades', personalRecords: 'Recordes pessoais', achievements: 'Conquistas',
-    stats: 'Perfil', chat: 'Assistente IA'
+    stats: 'Perfil', chat: 'Assistente IA', professional: 'Área profissional'
 };
 const VIEW_PATHS = Object.freeze({
     diet: '/app/hoje',
@@ -65,7 +65,8 @@ const VIEW_PATHS = Object.freeze({
     activities: '/app/progresso/atividades',
     personalRecords: '/app/progresso/prs',
     achievements: '/app/progresso/conquistas',
-    chat: '/app/assistente'
+    chat: '/app/assistente',
+    professional: '/app/profissional'
 });
 const PATH_VIEWS = Object.freeze(Object.fromEntries(
     Object.entries(VIEW_PATHS).map(([view, path]) => [path, view])
@@ -2269,6 +2270,7 @@ function showTab(tabName, options = {}) {
         openPlansModal();
         return false;
     }
+    if (tabName === 'professional' && !window.ProfessionalWorkspace?.hasAccess(currentUser)) return false;
     // Remove active class from all nav buttons
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.classList.remove('active');
@@ -2337,6 +2339,8 @@ function showTab(tabName, options = {}) {
         loadDietDailyScreen();
     } else if (tabName === 'workout_plans') { // Carrega planos de treino
         loadWorkoutPlans();
+    } else if (tabName === 'professional') {
+        window.loadProfessionalDashboard?.();
     } else if (tabName === 'chat') {
         if (!audioInitialized) { initializeAudioFeatures(); audioInitialized = true; }
     }
@@ -2735,6 +2739,7 @@ function finalizeModalClose(modal) {
 
 function closeAppModal(modal, options = {}) {
     if (!modal) return;
+    if (modal.id === "professionalPlanEditorModal" && window.ProfessionalWorkspace?.canCloseEditor() === false) return false;
     if (modal.id === "dietModal" && window.DietEntryFlow?.canClose() === false) return false;
     if (modal.id === 'plansModal') nativePlansRequest += 1;
     if (modal.id === 'loginScreen' && !currentUser) pendingAuthIntent = null;
@@ -2948,6 +2953,7 @@ function setCurrentUser(user) {
         currentProfile = null;
     }
     currentUser = user;
+    window.ProfessionalWorkspace?.sessionChanged(user);
     if (typeof updateOfflineStatus === 'function') updateOfflineStatus();
 }
 
