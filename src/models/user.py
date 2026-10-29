@@ -1831,21 +1831,109 @@ class PushDevice(db.Model):
     user = db.relationship("User", back_populates="push_devices")
 
 
+class Affiliate(db.Model):
+    __table_args__ = (
+        db.CheckConstraint("first_rate BETWEEN 0 AND 100 AND renewal_rate BETWEEN 0 AND 100", name="ck_affiliate_rates"),
+        db.CheckConstraint("recurring_months >= 0", name="ck_affiliate_recurring_months"),
+        db.CheckConstraint("annual_first_rate IS NULL OR annual_first_rate BETWEEN 0 AND 100", name="ck_affiliate_annual_first_rate"),
+        db.CheckConstraint("annual_renewal_rate IS NULL OR annual_renewal_rate BETWEEN 0 AND 100", name="ck_affiliate_annual_renewal_rate"),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)
+    public_name = db.Column(db.String(255), nullable=False)
+    email = db.Column(db.String(255), nullable=True)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="SET NULL"), unique=True, nullable=True)
+    active = db.Column(db.Boolean, default=True, nullable=False)
+    first_rate = db.Column(db.Numeric(5, 2), default=50, nullable=False)
+    renewal_rate = db.Column(db.Numeric(5, 2), default=10, nullable=False)
+    recurring_months = db.Column(db.Integer, default=12, nullable=False)
+    annual_first_rate = db.Column(db.Numeric(5, 2), nullable=True)
+    annual_renewal_rate = db.Column(db.Numeric(5, 2), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
 class ReferralCode(db.Model):
-    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), primary_key=True)
-    code = db.Column(db.String(12), unique=True, nullable=False)
+    __table_args__ = (
+        db.CheckConstraint("(kind = 'user_referral' AND user_id IS NOT NULL AND affiliate_id IS NULL) OR (kind = 'affiliate' AND user_id IS NULL AND affiliate_id IS NOT NULL)", name="ck_referral_code_owner"),
+        db.Index("ix_referral_code_affiliate", "affiliate_id"),
+    )
+    code = db.Column(db.String(32), primary_key=True)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), unique=True, nullable=True)
+    affiliate_id = db.Column(db.Integer, db.ForeignKey("affiliate.id", ondelete="RESTRICT"), nullable=True)
+    kind = db.Column(db.String(16), default="user_referral", nullable=False)
+    active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
 class Referral(db.Model):
     __table_args__ = (
         db.UniqueConstraint("invitee_user_id", name="uq_referral_invitee"),
         db.CheckConstraint("inviter_user_id != invitee_user_id", name="ck_referral_distinct_users"),
+        db.CheckConstraint("(kind = 'user_referral' AND inviter_user_id IS NOT NULL AND affiliate_id IS NULL) OR (kind = 'affiliate' AND inviter_user_id IS NULL AND affiliate_id IS NOT NULL)", name="ck_referral_owner"),
+        db.CheckConstraint("validation_state IN ('valid', 'invalid', 'pending')", name="ck_referral_validation_state"),
         db.Index("ix_referral_inviter_created", "inviter_user_id", "created_at"),
+        db.Index("ix_referral_affiliate_created", "affiliate_id", "created_at"),
     )
     id = db.Column(db.Integer, primary_key=True)
-    inviter_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    inviter_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=True)
     invitee_user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="SET NULL"), nullable=True)
+    affiliate_id = db.Column(db.Integer, db.ForeignKey("affiliate.id", ondelete="RESTRICT"), nullable=True)
+    code = db.Column(db.String(32), db.ForeignKey("referral_code.code", ondelete="SET NULL"), nullable=True)
+    kind = db.Column(db.String(16), default="user_referral", nullable=False)
+    source = db.Column(db.String(32), default="signup", nullable=False)
+    validation_state = db.Column(db.String(16), default="valid", nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AffiliatePayout(db.Model):
+    __table_args__ = (
+        db.CheckConstraint("amount >= 0", name="ck_affiliate_payout_amount"),
+        db.CheckConstraint("status IN ('pending', 'paid')", name="ck_affiliate_payout_status"),
+        db.CheckConstraint("period_end >= period_start", name="ck_affiliate_payout_period"),
+        db.Index("ix_affiliate_payout_created", "affiliate_id", "created_at"),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    affiliate_id = db.Column(db.Integer, db.ForeignKey("affiliate.id", ondelete="RESTRICT"), nullable=False)
+    period_start = db.Column(db.DateTime, nullable=False)
+    period_end = db.Column(db.DateTime, nullable=False)
+    amount = db.Column(db.Numeric(18, 4), nullable=False)
+    currency = db.Column(db.String(3), nullable=False)
+    status = db.Column(db.String(16), default="pending", nullable=False)
+    paid_at = db.Column(db.DateTime, nullable=True)
+    reference = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AffiliateCommission(db.Model):
+    __table_args__ = (
+        db.UniqueConstraint("provider", "transaction_id", "environment", name="uq_affiliate_commission_transaction"),
+        db.CheckConstraint("kind IN ('initial', 'renewal')", name="ck_affiliate_commission_kind"),
+        db.CheckConstraint("status IN ('pending', 'released', 'paid', 'canceled', 'reversed')", name="ck_affiliate_commission_status"),
+        db.CheckConstraint("rate BETWEEN 0 AND 100", name="ck_affiliate_commission_rate"),
+        db.CheckConstraint("gross_amount IS NULL OR gross_amount >= 0", name="ck_affiliate_commission_gross"),
+        db.CheckConstraint("net_amount IS NULL OR net_amount >= 0", name="ck_affiliate_commission_net"),
+        db.CheckConstraint("amount IS NULL OR amount >= 0", name="ck_affiliate_commission_amount"),
+        db.CheckConstraint("environment IN ('production', 'sandbox')", name="ck_affiliate_commission_environment"),
+        db.CheckConstraint("status NOT IN ('released', 'paid') OR (net_amount IS NOT NULL AND amount IS NOT NULL)", name="ck_affiliate_commission_released_net"),
+        db.Index("ix_affiliate_commission_status", "affiliate_id", "environment", "status"),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    affiliate_id = db.Column(db.Integer, db.ForeignKey("affiliate.id", ondelete="RESTRICT"), nullable=False)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="SET NULL"), nullable=True)
+    provider = db.Column(db.String(32), nullable=False)
+    transaction_id = db.Column(db.String(255), nullable=False)
+    environment = db.Column(db.String(32), nullable=False)
+    kind = db.Column(db.String(16), nullable=False)
+    gross_amount = db.Column(db.Numeric(18, 4), nullable=True)
+    currency = db.Column(db.String(3), nullable=False)
+    net_amount = db.Column(db.Numeric(18, 4), nullable=True)
+    rate = db.Column(db.Numeric(5, 2), nullable=False)
+    amount = db.Column(db.Numeric(18, 4), nullable=True)
+    status = db.Column(db.String(16), default="pending", nullable=False)
+    occurred_at = db.Column(db.DateTime, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    payout_id = db.Column(db.Integer, db.ForeignKey("affiliate_payout.id", ondelete="RESTRICT"), nullable=True)
 
 
 class ReferralReward(db.Model):

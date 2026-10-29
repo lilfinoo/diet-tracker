@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Minha parceria | Fit Tracker</title>
+  <style>
+    :root { color-scheme: dark; --text: #e5e7eb; --muted: #94a3b8; --line: rgba(148, 163, 184, .16); }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; color: var(--text); font-family: Inter, system-ui, sans-serif; background: radial-gradient(circle at top left, rgba(59, 130, 246, .2), transparent 40%), #050b16; }
+    main { max-width: 960px; margin: auto; padding: 24px 18px; }
+    header, article { padding: 22px; border: 1px solid var(--line); border-radius: 24px; background: rgba(10, 18, 34, .9); margin-bottom: 18px; }
+    h1 { font-size: clamp(1.5rem, 5vw, 2.2rem); }
+    h1, h2 { margin: 0 0 12px; }
+    h2 { font-size: 1.15rem; }
+    p { line-height: 1.55; }
+    .eyebrow { color: #60a5fa; text-transform: uppercase; letter-spacing: .15em; font-size: .75rem; }
+    .muted, dt { color: var(--muted); }
+    button, a { font: inherit; }
+    button, .link { display: inline-block; padding: 10px 14px; border: 1px solid var(--line); border-radius: 999px; background: rgba(59, 130, 246, .18); color: var(--text); cursor: pointer; text-decoration: none; }
+    button:disabled { opacity: .55; cursor: wait; }
+    button:focus-visible, a:focus-visible { outline: 2px solid #22d3ee; outline-offset: 4px; }
+    .row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+    .metric, .code, .payout { padding: 16px; border: 1px solid var(--line); border-radius: 18px; background: rgba(15, 23, 42, .45); }
+    dl { margin: 0; }
+    dd { margin: 10px 0 0; font-size: 1.8rem; font-weight: 800; color: #67e8f9; }
+    .list { display: grid; gap: 10px; }
+    code { font-size: 1.1rem; overflow-wrap: anywhere; }
+    #status { min-height: 1.6em; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">Fit Tracker · Parceiros</p>
+      <h1 id="partnerName">Minha parceria</h1>
+      <p class="muted">Acompanhe os resultados agregados das suas indicações.</p>
+      <div class="row"><a class="link" href="/">Abrir o app</a><button id="refresh" type="button">Atualizar</button></div>
+      <p id="status" role="status" aria-live="polite"></p>
+    </header>
+    <div id="results" hidden>
+      <article>
+        <h2>Seus códigos</h2>
+        <p id="partnershipStatus" class="muted"></p>
+        <div id="codes" class="list"></div>
+      </article>
+      <article>
+        <h2>Resultados das indicações</h2>
+        <div id="metrics" class="grid"></div>
+        <p class="muted">Acesso ativo mostra a situação da assinatura no sistema. Ele pode incluir teste gratuito e não comprova uma cobrança. Pagantes confirmados exigem uma transação paga verificada; a ausência de confirmação não significa ausência de assinaturas.</p>
+      </article>
+      <article>
+        <h2>Comissões</h2>
+        <p>Financeiro indisponível nesta etapa. Comissões pendentes e liberadas ainda não são calculadas. O cálculo depende de cobranças verificadas e da receita líquida efetivamente recebida.</p>
+      </article>
+      <article>
+        <h2>Histórico de pagamentos</h2>
+        <div id="payouts" class="list"></div>
+      </article>
+    </div>
+  </main>
+  <script>
+    (() => {
+      'use strict';
+      const status = document.getElementById('status');
+      const refresh = document.getElementById('refresh');
+      const results = document.getElementById('results');
+      const codes = document.getElementById('codes');
+      const metrics = document.getElementById('metrics');
+      const payouts = document.getElementById('payouts');
+      const number = value => value == null ? 'Sem confirmação' : String(value);
+      const date = value => value ? new Date(value).toLocaleDateString('pt-BR') : 'Não informada';
+
+      function render(data) {
+        document.getElementById('partnerName').textContent = data.public_name || 'Minha parceria';
+        document.getElementById('partnershipStatus').textContent = data.active
+          ? 'Parceria ativa. Compartilhe seus códigos ativos para novas indicações.'
+          : 'Parceria inativa. Os códigos não aceitam novas indicações; seu histórico foi preservado.';
+        codes.replaceChildren();
+        for (const entry of data.codes || []) {
+          const row = document.createElement('div');
+          row.className = 'code row';
+          const label = document.createElement('code');
+          label.textContent = entry.code;
+          const state = document.createElement('span');
+          state.className = 'muted';
+          state.textContent = entry.active && data.active ? 'Ativo' : 'Indisponível para novas indicações';
+          const copy = document.createElement('button');
+          copy.type = 'button';
+          copy.textContent = 'Copiar código';
+          copy.setAttribute('aria-label', `Copiar código ${entry.code}`);
+          copy.addEventListener('click', async () => {
+            try {
+              await navigator.clipboard.writeText(entry.code);
+              status.textContent = 'Código copiado.';
+            } catch {
+              status.textContent = 'Não foi possível copiar automaticamente. Selecione o código e copie manualmente.';
+            }
+          });
+          row.append(label, state, copy);
+          codes.append(row);
+        }
+        if (!codes.children.length) codes.textContent = 'Nenhum código disponível.';
+        metrics.replaceChildren();
+        for (const [label, key] of [
+          ['Cadastros indicados', 'registrations'],
+          ['Pagantes confirmados', 'confirmed_paying_users'],
+          ['Assinaturas com acesso ativo', 'active_subscribers'],
+          ['Cancelamentos registrados', 'cancellations']
+        ]) {
+          const item = document.createElement('dl');
+          item.className = 'metric';
+          const title = document.createElement('dt');
+          title.textContent = label;
+          const value = document.createElement('dd');
+          value.textContent = number(data.metrics?.[key]);
+          item.append(title, value);
+          metrics.append(item);
+        }
+        payouts.replaceChildren();
+        for (const entry of data.payouts || []) {
+          const item = document.createElement('div');
+          item.className = 'payout';
+          item.textContent = `${date(entry.period_start)} a ${date(entry.period_end)} · ${entry.currency} ${entry.amount} · ${entry.status === 'paid' ? 'Pago' : 'Pendente'}${entry.paid_at ? ` · Pago em ${date(entry.paid_at)}` : ''}`;
+          payouts.append(item);
+        }
+        if (!payouts.children.length) payouts.textContent = 'Nenhum pagamento registrado. O financeiro permanece desativado.';
+        results.hidden = false;
+      }
+
+      async function load() {
+        if (refresh.disabled) return;
+        refresh.disabled = true;
+        results.hidden = true;
+        status.textContent = 'Carregando sua parceria…';
+        try {
+          const response = await fetch('/api/affiliates/me', { credentials: 'include', cache: 'no-store' });
+          if (response.status === 401) {
+            status.textContent = 'Entre na sua conta pelo app e volte aqui para atualizar os resultados.';
+            return;
+          }
+          if (response.status === 404) {
+            status.textContent = 'Sua conta ainda não possui uma parceria vinculada. Procure a administração do Fit Tracker.';
+            return;
+          }
+          if (!response.ok) throw new Error();
+          render(await response.json());
+          status.textContent = 'Resultados atualizados.';
+        } catch {
+          status.textContent = 'Não foi possível carregar os resultados. Clique em Atualizar para tentar novamente.';
+        } finally {
+          refresh.disabled = false;
+        }
+      }
+      refresh.addEventListener('click', load);
+      load();
+    })();
+  </script>
+</body>
+</html>

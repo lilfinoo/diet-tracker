@@ -197,6 +197,7 @@
       <button class="tab" id="adminTabUsers" role="tab" aria-selected="false" aria-controls="users" tabindex="-1" data-section="users">Usuários</button>
       <button class="tab" id="adminTabReviews" role="tab" aria-selected="false" aria-controls="reviews" tabindex="-1" data-section="reviews">Revisão de mídia</button>
       <button class="tab" id="adminTabReports" role="tab" aria-selected="false" aria-controls="reports" tabindex="-1" data-section="reports">Relatórios</button>
+      <button class="tab" id="adminTabAffiliates" role="tab" aria-selected="false" aria-controls="affiliates" tabindex="-1" data-section="affiliates">Parceiros</button>
     </nav>
 
     <section class="section active" id="overview" role="tabpanel" aria-labelledby="adminTabOverview">
@@ -342,6 +343,18 @@
           <div class="reviews-grid" id="mediaQueue"></div>
         </article>
       </div>
+    </section>
+
+    <section class="section" id="affiliates" role="tabpanel" aria-labelledby="adminTabAffiliates" hidden>
+      <article class="card">
+        <div class="section-head"><div><h2>Influencers e afiliados</h2><p>Cadastre parceiros, configure regras e consulte as indicações.</p></div></div>
+        <p class="muted">Comissões e pagamentos estão desativados até haver cobranças e receita líquida verificadas. As regras abaixo preparam o cálculo futuro; cadastro e Premium gratuito não comprovam uma venda.</p>
+        <details><summary>Cadastrar influencer</summary><form id="affiliateCreate" class="grid" style="margin-top:14px;"></form></details>
+        <p id="affiliateStatus" role="status" aria-live="polite"></p>
+        <div id="affiliateList" class="list"></div>
+        <div id="affiliatePagination" class="pagination"></div>
+      </article>
+      <article class="card" id="affiliateDetail" style="margin-top:16px;" hidden></article>
     </section>
 
     <section class="section" id="reports" role="tabpanel" aria-labelledby="adminTabReports" hidden>
@@ -933,6 +946,7 @@
       try {
         await refreshSession();
         const pending = [loadAnalytics()];
+        if (activeSection === 'affiliates' && window.adminAffiliates) pending.push(window.adminAffiliates.load());
         if (state.usersLoaded || activeSection === 'users') pending.push(loadUsers());
         if (state.mediaQueueLoaded || activeSection === 'reviews') pending.push(loadMediaQueue());
         const results = await Promise.allSettled(pending);
@@ -1162,6 +1176,7 @@
       showToast(err.message || 'Falha ao carregar o admin');
     });
   </script>
+  <script src="/js/admin-affiliates.js"></script>
 </body>
 </html>
 
