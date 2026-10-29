@@ -97,7 +97,7 @@ def attach_referral(user, raw_code):
     inviter = _locked_user(code.user_id)
     if inviter.is_banned:
         _invalid_code()
-    if Referral.query.filter_by(invitee_user_id=user.id).first():
+    if Referral.query.filter_by(invitee_user_id=user.id, kind="user_referral").first():
         return
     now = datetime.utcnow()
     db.session.add(Referral(inviter_user_id=inviter.id, invitee_user_id=user.id, code=code.code, created_at=now))

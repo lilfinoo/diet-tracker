@@ -1868,7 +1868,7 @@ class ReferralCode(db.Model):
 
 class Referral(db.Model):
     __table_args__ = (
-        db.UniqueConstraint("invitee_user_id", name="uq_referral_invitee"),
+        db.UniqueConstraint("invitee_user_id", "kind", name="uq_referral_invitee_kind"),
         db.CheckConstraint("inviter_user_id != invitee_user_id", name="ck_referral_distinct_users"),
         db.CheckConstraint("(kind = 'user_referral' AND inviter_user_id IS NOT NULL AND affiliate_id IS NULL) OR (kind = 'affiliate' AND inviter_user_id IS NULL AND affiliate_id IS NOT NULL)", name="ck_referral_owner"),
         db.CheckConstraint("validation_state IN ('valid', 'invalid', 'pending')", name="ck_referral_validation_state"),

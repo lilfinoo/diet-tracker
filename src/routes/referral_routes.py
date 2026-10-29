@@ -25,7 +25,9 @@ def get_attribution():
     from src.models.user import Referral
     from src.services.affiliates import attribution_dict, eligible_for_affiliate
 
-    entry = Referral.query.filter_by(invitee_user_id=g.user.id).first()
+    entry = Referral.query.filter_by(invitee_user_id=g.user.id).order_by(
+        (Referral.kind == "affiliate").desc()
+    ).first()
     response = jsonify(attribution=attribution_dict(entry) if entry else None,
                        can_apply_affiliate=eligible_for_affiliate(g.user))
     response.headers["Cache-Control"] = "no-store"
@@ -37,20 +39,16 @@ def get_attribution():
 @rate_limit("referral_apply", 10, 60)
 def apply_code():
     from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-    from src.models.user import Referral, ReferralCode
+    from src.models.user import ReferralCode
     from src.routes.common import json_body
-    from src.services.affiliates import attach_affiliate, attribution_dict, verify_purchase_history
+    from src.services.affiliates import attach_affiliate, attribution_dict
     from src.services.referrals import _invalid_code, _locked_user, normalize_code
-    from src.services.revenuecat import RevenueCatError
 
     data = json_body()
     if set(data) != {"code"}:
         return jsonify(error="Informe somente o código."), 400
     try:
         normalized = normalize_code(data["code"])
-        candidate = ReferralCode.query.filter_by(code=normalized, active=True, kind="affiliate").first()
-        if candidate and not Referral.query.filter_by(invitee_user_id=g.user.id).first():
-            verify_purchase_history(g.user)
         _locked_user(g.user.id)
         code = ReferralCode.query.filter_by(code=normalized).with_for_update().populate_existing().first()
         if not code or not code.active:
@@ -62,9 +60,6 @@ def apply_code():
         payload = attribution_dict(entry)
         db.session.commit()
         return jsonify(**payload, message=f"Código de {payload['public_name']} aplicado com sucesso.")
-    except RevenueCatError:
-        db.session.rollback()
-        return jsonify(error="Não foi possível verificar o histórico de compras. Tente novamente."), 503
     except IntegrityError:
         db.session.rollback()
         return jsonify(error="Esta conta já possui uma indicação.", code="referral_already_applied"), 409

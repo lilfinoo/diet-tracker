@@ -4,15 +4,14 @@ from decimal import Decimal
 import secrets
 from uuid import UUID
 
-from flask import abort, current_app, jsonify, make_response
+from flask import abort, jsonify, make_response
 from sqlalchemy import case, func
 
 from src.models.user import (
-    Affiliate, AffiliateCommission, AffiliatePayout, BillingCheckout, Referral, ReferralCode,
+    Affiliate, AffiliateCommission, AffiliatePayout, Referral, ReferralCode,
     Subscription, User, db,
 )
 from src.services.referrals import _invalid_code, _locked_user, normalize_code
-from src.services.revenuecat import fetch_subscriber
 
 FINANCIAL_TRACKING_ENABLED = False
 
@@ -23,48 +22,23 @@ def reject(message, code="referral_not_eligible", status=409):
 
 
 def eligible_for_affiliate(user):
-    return not (
-        Referral.query.filter_by(invitee_user_id=user.id).first()
-        or Subscription.query.filter(
-            Subscription.user_id == user.id, Subscription.provider.notin_(("admin", "referral"))
-        ).first()
-        or BillingCheckout.query.filter_by(user_id=user.id).first()
-    )
-
-
-def verify_purchase_history(user):
-    """Do network I/O before locks; local eligibility is rechecked under lock."""
-    if not eligible_for_affiliate(user):
-        reject("Aplique o código antes de iniciar uma assinatura ou compra.")
-    if current_app.config.get("REVENUECAT_SECRET_API_KEY"):
-        # Canonical history also catches expired/restored subscriptions not yet
-        # synced locally. Fail closed on provider outages through the caller.
-        subscriber = fetch_subscriber(user.id)
-        history = subscriber.get("subscriptions")
-        purchases = subscriber.get("non_subscriptions")
-        if (history is not None and not isinstance(history, dict)) or (
-            purchases is not None and not isinstance(purchases, dict)
-        ):
-            from src.services.revenuecat import RevenueCatError
-            raise RevenueCatError("Não foi possível verificar o histórico de compras.")
-        if history or purchases:
-            reject("Aplique o código antes de iniciar uma assinatura ou compra.")
+    # Account age, purchases and a friend's invitation do not prevent linking a
+    # partner for a subsequent subscription. Each account keeps one partner.
+    return Referral.query.filter_by(invitee_user_id=user.id, kind="affiliate").first() is None
 
 
 def attach_affiliate(user, code, source):
     # The same user lock is taken for signup and post-signup application. The
-    # unique invitee constraint remains the final guard across all code types.
+    # unique invitee/type constraint is the final guard for concurrent requests.
     _locked_user(user.id)
     affiliate = Affiliate.query.filter_by(id=code.affiliate_id).with_for_update().one()
     if not code.active or not affiliate.active or affiliate.user_id == user.id:
         _invalid_code()
-    previous = Referral.query.filter_by(invitee_user_id=user.id).first()
+    previous = Referral.query.filter_by(invitee_user_id=user.id, kind="affiliate").first()
     if previous:
         if previous.kind == "affiliate" and previous.code == code.code:
             return previous
         reject("Esta conta já possui uma indicação e não pode trocá-la.", "referral_already_applied")
-    if not eligible_for_affiliate(user):
-        reject("Aplique o código antes de iniciar uma assinatura ou compra.")
     attribution = Referral(
         invitee_user_id=user.id, affiliate_id=affiliate.id, code=code.code,
         kind="affiliate", source=source,

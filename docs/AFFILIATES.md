@@ -2,7 +2,7 @@
 
 ## Resultado e limites
 
-Implementado o cadastro administrativo de parceiros, códigos globais únicos, aplicação no cadastro ou na tela atual de convites, atribuição permanente, consulta de indicados e painel agregado de cada parceiro. A recompensa antiga continua sendo **3 novos cadastros no mês de Brasília → 1 mês de Premium**, no máximo uma recompensa por mês.
+Implementado o cadastro administrativo de parceiros, códigos globais únicos, aplicação no cadastro, nos convites ou na tela de assinatura, atribuição permanente, consulta de indicados e painel agregado de cada parceiro. A recompensa antiga continua sendo **3 novos cadastros no mês de Brasília → 1 mês de Premium**, no máximo uma recompensa por mês.
 
 **O sistema financeiro permanece desativado.** Não há geração, liberação nem pagamento de comissão por cadastro, trial, restauração ou snapshot de acesso. A API responde `financial_tracking_enabled: false`; a tentativa de registrar pagamento retorna `503 / affiliate_finance_disabled`. As tabelas e a rotina interna de registro manual estão preparadas para uma integração futura; não representam receita ou comissão já apurada. Não há transferências Pix.
 
@@ -22,13 +22,11 @@ Implementado o cadastro administrativo de parceiros, códigos globais únicos, a
 
 Migration nova: `migrations/versions/a7c9e1f3b5d8_add_affiliate_attribution.py`, após `f2a0b8c6d4e1`.
 
-O release preserva a cadeia canônica `a2c4e6f8b0d1 → f2a0b8c6d4e1 → a7c9e1f3b5d8`. Como pré-requisito, `f2a0b8c6d4e1` amplia `workout_plan.source` para também aceitar `template` e adiciona `workout_session.duration_seconds_confirmed` e `workout_session.energy_estimate`, ambas opcionais. Não altera dados existentes; o backend anterior continua compatível com as colunas extras. O restante das funcionalidades locais de água e estimativa energética não integra este release.
-
 | Entidade | Alteração |
 | --- | --- |
 | `affiliate` | Nova: cadastro, conta vinculada opcional, status, regras mensais e anuais separadas, duração e observações. |
 | `referral_code` | Reutilizada. Código torna-se PK global de até 32 caracteres; usuário proprietário único opcional ou afiliado; tipo, ativo e criação. |
-| `referral` | Reutilizada como atribuição. Acrescenta tipo, afiliado, código, origem e validação; mantém unicidade por convidado e histórico anterior. |
+| `referral` | Reutilizada como atribuição. Acrescenta tipo, afiliado, código, origem e validação; mantém unicidade por convidado/tipo e histórico anterior. |
 | `referral_reward` | Mecânica e tabela preservadas. |
 | `affiliate_commission` | Nova, preparada: transação por provedor/ambiente, valores decimais bruto/líquido/comissão opcionais, taxa aplicada, datas e estado. |
 | `affiliate_payout` | Nova, preparada: período, moeda, valor, estado, data e referência administrativa. |
@@ -40,7 +38,9 @@ Exclusão de convidado anonimiza seu vínculo (`SET NULL`) sem reduzir a contage
 
 ### Implantação segura
 
-Nada foi aplicado em produção. Antes de implantar:
+Atualização de 28/10/2026: backend publicado no commit `873429075c7a666556a20fbb2b7f99b3e1bfbda5`, deploy Render `dep-dbh9h6gm7kps73e943eg` live. Migrations até `a7c9e1f3b5d8` aplicadas; 106 códigos antigos preservados. RLS e revogação de acesso dos clientes verificadas nas seis tabelas. Em 29/10/2026, o archive da build iOS 23 passou e foi enviado ao App Store Connect; 177 testes Swift aprovados. Processamento concluído; build 1.0.3 (23) confirmada no grupo interno Teste Fit Tracker, com notas salvas. ID: `a3090ecb-9840-4f12-aefc-d49f01ff6b19`. O cadastro com código já pode usar o campo de convite da build 22.
+
+Para implantações futuras:
 
 1. Fazer backup e testar a cadeia de migrations em uma cópia PostgreSQL do ambiente real.
 2. Conferir a versão Alembic e que o usuário SQL do backend é proprietário das tabelas ou possui acesso de servidor que contorna RLS. Não usar o papel `authenticated` para o ORM.
@@ -56,8 +56,8 @@ A troca de PK, FKs e backfill exige bloqueios DDL: executar em janela adequada a
 - Administração usa `User.is_admin` carregado no servidor, sessão autenticada e CSRF existente. A conta vinculada ao influencer é definida apenas pelo administrador.
 - `/api/affiliates/me` usa o UUID da sessão, sem aceitar ID de parceiro do cliente; devolve apenas métricas agregadas, códigos públicos e pagamentos sem referência administrativa.
 - Sem e-mails, nomes, UUIDs ou dados de saúde dos indicados no painel do influencer. Somente administradores consultam a lista de usuários.
-- Aplicação usa bloqueios de usuário/código/parceiro e unicidade do convidado. Repetir o mesmo código ativo é idempotente; outro código retorna conflito. Desativar impede novos vínculos e mantém histórico.
-- Consulta externa ao RevenueCat acontece antes dos bloqueios; a elegibilidade local é revalidada dentro da transação. A vinculação administrativa segue ordem usuário → parceiro para evitar ciclo de locks.
+- Aplicação usa bloqueios de usuário/código/parceiro e unicidade por convidado/tipo. Repetir o mesmo código ativo é idempotente; outro código retorna conflito. Desativar impede novos vínculos e mantém histórico.
+- Aplicar código não consulta histórico de compras nem depende da disponibilidade do RevenueCat. A vinculação administrativa segue ordem usuário → parceiro para evitar ciclo de locks.
 - Atribuição é atômica no banco. Compras externas à aplicação não participam dessa transação: uma integração financeira futura precisa verificar também a data real da primeira compra antes de reconhecer conversão/comissão.
 - Listas paginadas, respostas privadas `no-store`, códigos com limite de tentativas, valores apresentados com escape/textContent e métricas carregadas em lote.
 - Não foram adicionadas chaves no app, permissões diretas ao banco nem endpoint para o cliente escrever percentuais/comissões.
@@ -66,9 +66,9 @@ A troca de PK, FKs e backfill exige bloqueios DDL: executar em janela adequada a
 
 - Normalização no servidor: remover espaços e converter para maiúsculas; caracteres aceitos `A–Z`, `0–9`, de 3 a 32 posições. Códigos pessoais continuam com 12 caracteres hexadecimais.
 - `user_referral`: somente cadastro, mantendo todos os critérios anteriores de recompensa.
-- `affiliate`: cadastro ou aplicação autenticada posterior, desde que não exista indicação anterior, assinatura comercial de qualquer estado ou tentativa de checkout. Benefícios administrativos/de convites não são compra comercial.
-- Quando RevenueCat está configurado, aplicação posterior consulta também seu histórico canônico; compra/trial anterior, mesmo expirado e ainda não sincronizado localmente, impede aplicação. Falha do provedor impede a operação temporariamente. Sem configuração, o bloqueio usa apenas o histórico local conhecido; configurar RevenueCat é necessário para a verificação externa.
-- O código do parceiro não concede Premium nem aumenta o contador de amigos. Cada conta tem no máximo uma atribuição; não há troca livre nem autoindicação pela conta vinculada.
+- `affiliate`: cadastro ou aplicação autenticada posterior, inclusive na contratação por contas antigas, com assinaturas/trials anteriores ou checkout pendente. O histórico comercial não bloqueia o vínculo.
+- Convite de amigo e parceiro podem coexistir; a migration `b8d0f2a4c6e9`, após `a7c9e1f3b5d8`, troca a unicidade global por convidado/tipo sem apagar dados. O downgrade recusa usuários com os dois vínculos.
+- O código do parceiro não concede Premium nem aumenta o contador de amigos. Cada conta tem no máximo uma atribuição de cada tipo; não há troca livre nem autoindicação pela conta vinculada.
 - Aplicação posterior mostra confirmação com nome público. O cadastro mantém a resposta original de criação e o vínculo pode ser consultado na tela de convites.
 
 ## Operação: Ana Fitness / ANAFIT
@@ -76,7 +76,7 @@ A troca de PK, FKs e backfill exige bloqueios DDL: executar em janela adequada a
 1. Entrar com administrador existente e abrir `/admin` → **Parceiros**.
 2. Informar nome e nome público `Ana Fitness`, código `ANAFIT`, 50% primeira mensalidade, 10% renovações e 12 meses. Regras anuais vazias significam **sem regra anual**; não herdam a taxa mensal.
 3. Opcionalmente vincular o UUID da conta da Ana para liberar seu painel. A própria conta vinculada não pode aplicar `ANAFIT`.
-4. Criar conta de teste com `ANAFIT` no campo de convite, ou usar **Código de parceiro** na tela atual de convites de uma conta elegível antes da assinatura.
+4. Criar conta de teste com `ANAFIT` no campo de convite, ou entrar em uma conta existente e usar **Código de parceiro (opcional)** na tela Premium antes da compra. Código digitado é aplicado antes de abrir a compra Apple; erro impede iniciar a compra. Campo vazio mantém a contratação normal. Restaurar compras não aplica código.
 5. Selecionar Ana em **Parceiros → Ver e editar**: aparecem os códigos, quantidade de atribuições e lista paginada de usuários. Estado da assinatura é acesso, não prova de cobrança.
 6. Usar **Criar código**, **Copiar** ou **Desativar**. Desativação preserva a lista anterior. Desativar a parceria suspende todos os seus códigos para novas aplicações.
 7. Ana entra com a conta vinculada no mesmo domínio e abre `/affiliate.html`. Vê somente seus resultados agregados. A API correspondente é `/api/affiliates/me`.
@@ -132,8 +132,8 @@ Os demais arquivos com alterações locais anteriores não fazem parte desta ent
 - Suíte JavaScript: **256 testes aprovados**, incluindo os 7 casos de carregamento administrativo existentes. Sintaxe dos scripts novos e smoke DOM do painel do parceiro aprovados.
 - `py_compile` dos arquivos Python envolvidos: aprovado. Ruff dos arquivos desta tarefa: aprovado.
 - `ruff check .`: três erros preexistentes em `marketing/reel-ia-organizada-2026-10-27/renderizar_previa.py` (import não usado e duas f-strings sem interpolação), preservados por estarem fora do escopo.
-- Análise de sintaxe Swift dos quatro arquivos alterados: aprovada. Foram adicionados cinco testes Swift, mas **`swift test` não concluiu por falta de espaço em disco ao gerar módulos**; não foi validado build completo do app nem execução desses testes.
-- Nenhuma migration aplicada nem deploy realizado em produção.
+- Análise de sintaxe Swift aprovada; tentativa inicial de testes bloqueada por espaço. Na preparação posterior da build 23, **177 testes Swift aprovados**, incluindo cinco novos de afiliados. Após liberar espaço, o archive Release e a assinatura passaram; upload da build 23 concluído em 29/10/2026, com processamento concluído e grupo interno confirmado.
+- Atualização posterior: backend e migrations publicados conforme registro acima; o upload TestFlight da build 23 foi concluído em 29/10/2026, com processamento concluído e grupo interno confirmado.
 
 Testes cobrem cadastro Ana, aplicação, contador antigo, códigos inválidos/desativados, unicidade/concorrência, privacidade, autorização, CSRF, elegibilidade, ausência de vendas fictícias em eventos RevenueCat repetidos/trial/revogação e migração com backfill/histórico.
 

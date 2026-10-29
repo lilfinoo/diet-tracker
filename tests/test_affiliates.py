@@ -192,15 +192,32 @@ def test_affiliate_routes_enforce_csrf_and_admin_code_controls(app):
         assert getattr(app.test_client(), method)(path, json={"code": "ANA10"} if method == "post" else None).status_code == 401
 
 
-def test_purchase_history_blocks_late_affiliate_application(app):
-    partner(app)
+@pytest.mark.parametrize("provider,status", [
+    ("revenuecat", "active"), ("revenuecat", "expired"), ("revenuecat", "trialing"),
+    ("revenuecat", "canceled"), ("asaas", "pending"), ("asaas", "expired"),
+])
+def test_existing_accounts_with_subscription_history_can_apply_partner(app, provider, status):
+    affiliate_id = partner(app)
     client, user_id = account(app, "already-subscribed")
     with app.app_context():
-        db.session.add(Subscription(user_id=user_id, provider="revenuecat", external_subscription_id="expired-purchase", status="expired", plan_code="premium_student", current_period_end=datetime.utcnow() - timedelta(days=1)))
+        user = db.session.get(User, user_id)
+        user.created_at = datetime(2025, 1, 1)
+        subscription = Subscription(user_id=user_id, provider=provider,
+            external_subscription_id="existing-purchase", status=status,
+            plan_code="premium_student", current_period_end=datetime.utcnow() + timedelta(days=10))
+        db.session.add(subscription)
         db.session.commit()
-    assert client.post("/api/referrals/apply", json={"code": "ANA10"}).status_code == 409
+        subscription_id, end = subscription.id, subscription.current_period_end
+    assert client.get("/api/referrals/attribution").json["can_apply_affiliate"] is True
+    assert client.post("/api/referrals/apply", json={"code": "ANA10"}).status_code == 200
     with app.app_context():
-        assert Referral.query.filter_by(invitee_user_id=user_id).first() is None
+        entry = Referral.query.filter_by(invitee_user_id=user_id, kind="affiliate").one()
+        assert entry.affiliate_id == affiliate_id
+        assert entry.created_at > datetime(2025, 1, 1)
+        subscription = db.session.get(Subscription, subscription_id)
+        assert subscription.status == status and subscription.current_period_end == end
+        assert Subscription.query.filter_by(user_id=user_id).count() == 1
+        assert AffiliateCommission.query.count() == ReferralReward.query.count() == 0
 
 
 def test_disabled_code_signup_rolls_back_without_deleting_existing_attribution(app):
@@ -216,21 +233,17 @@ def test_disabled_code_signup_rolls_back_without_deleting_existing_attribution(a
         assert Referral.query.filter_by(affiliate_id=affiliate_id).count() == 1
 
 
-def test_canonical_unsynced_purchase_and_provider_outage_fail_closed(app, monkeypatch):
-    from src.services.revenuecat import RevenueCatError
+def test_partner_application_does_not_depend_on_purchase_provider_availability(app, monkeypatch):
     partner(app)
     client, _ = account(app, "unsynced-customer")
     app.config["REVENUECAT_SECRET_API_KEY"] = "test-key"
-    monkeypatch.setattr("src.services.affiliates.fetch_subscriber", lambda _: {"subscriptions": {"old-product": {}}})
-    assert client.post("/api/referrals/apply", json={"code": "ANA10"}).status_code == 409
-    def unavailable(_):
-        raise RevenueCatError("unavailable")
-    monkeypatch.setattr("src.services.affiliates.fetch_subscriber", unavailable)
-    assert client.post("/api/referrals/apply", json={"code": "ANA10"}).status_code == 503
-    with app.app_context():
-        assert Referral.query.count() == 0
-    monkeypatch.setattr("src.services.affiliates.fetch_subscriber", lambda _: {"subscriptions": {}})
+    def must_not_query(_):
+        pytest.fail("Partner attribution must not query or change past purchases")
+    monkeypatch.setattr("src.services.revenuecat.fetch_subscriber", must_not_query)
     assert client.post("/api/referrals/apply", json={"code": " A N A 1 0 "}).status_code == 200
+    with app.app_context():
+        assert Referral.query.filter_by(kind="affiliate").count() == 1
+        assert Subscription.query.count() == AffiliateCommission.query.count() == 0
 
 
 def test_duplicate_refund_trial_restore_events_never_create_unverified_commissions(app, monkeypatch):
@@ -318,3 +331,33 @@ def test_admin_can_create_anafit_and_inspect_and_disable_without_losing_history(
     assert blocked.status_code == 503 and blocked.json["code"] == "affiliate_finance_disabled"
     assert customer.post("/api/referrals/apply", json={"code": "ANAFIT", "affiliate_id": affiliate_id}).status_code == 400
     assert customer.get(f"/api/admin/affiliates/{affiliate_id}/referrals").status_code == 403
+
+
+def test_friend_invitation_and_reward_survive_later_partner_at_checkout(app):
+    affiliate_id = partner(app)
+    inviter, _ = account(app, "original-friend")
+    code = inviter.get("/api/referrals").json["code"]
+    invited = []
+    for number in range(3):
+        client = app.test_client()
+        assert client.post("/api/register", json=registration_payload(
+            f"friend-with-partner-{number}", referral_code=code)).status_code == 201
+        invited.append(client)
+    before = inviter.get("/api/referrals").json
+    assert before["rewarded_this_month"] is True
+    customer = invited[0]
+    original = customer.get("/api/referrals/attribution").json
+    assert original["attribution"]["kind"] == "user_referral"
+    assert original["can_apply_affiliate"] is True
+    assert customer.post("/api/referrals/apply", json={"code": "ANA10"}).status_code == 200
+    assert customer.post("/api/referrals/apply", json={"code": "ANA10"}).status_code == 200
+    status = customer.get("/api/referrals/attribution").json
+    assert status["attribution"]["kind"] == "affiliate"
+    assert status["attribution"]["public_name"] == "Ana"
+    assert status["can_apply_affiliate"] is False
+    assert inviter.get("/api/referrals").json == before
+    with app.app_context():
+        assert Referral.query.filter_by(kind="user_referral").count() == 3
+        assert Referral.query.filter_by(kind="affiliate", affiliate_id=affiliate_id).count() == 1
+        assert ReferralReward.query.count() == 1
+        assert AffiliateCommission.query.count() == 0
