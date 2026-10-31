@@ -18,6 +18,7 @@ from src.models.user import (
     db,
 )
 from src.routes.common import admin_required, json_body, page_query
+from src.services.analytics import paywall_report
 from src.services.workout_plans import catalog_by_key
 from src.services.workoutx import GIF_DOWNLOAD_LOCK, WorkoutXServiceError, automatic_legacy_media, cache_local_gif, get_cached_gif, get_exercise, media_mapping, review_mapping_is_doubt, search_cached_exercises
 
@@ -746,6 +747,7 @@ def _build_admin_analytics_payload(from_date, to_date, bucket):
         "range": {"from": from_date.isoformat(), "to": to_date.isoformat(), "bucket": bucket},
         "summary": summary,
         "cohort": _signup_cohort(from_date, to_date),
+        "paywall_experiment": paywall_report(from_date, to_date),
         "funnel": funnel,
         "series": {
             "labels": labels,

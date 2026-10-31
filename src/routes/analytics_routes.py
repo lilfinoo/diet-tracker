@@ -1,10 +1,14 @@
 from datetime import datetime
 
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, g, jsonify, request, session
 from sqlalchemy.exc import IntegrityError
 
 from src.models.user import AnalyticsEvent, User, db
+from src.routes.common import login_required
 from src.services.analytics import (
+    PAYWALL_EXPERIMENT,
+    PAYWALL_SURFACES,
+    paywall_enrollment,
     CLIENT_EVENTS,
     RETURN_EVENTS,
     record_event,
@@ -15,6 +19,27 @@ from src.services.analytics import (
 
 analytics_bp = Blueprint("analytics", __name__)
 MAX_BATCH_SIZE = 20
+
+
+@analytics_bp.route("/analytics/paywall", methods=["POST"])
+@login_required
+def enroll_paywall_experiment():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get("surface"), str) or payload["surface"] not in PAYWALL_SURFACES or payload.get("platform") not in ("web", "ios", "android"):
+        return jsonify({"error": "Contexto do paywall inválido."}), 400
+    enrollment = paywall_enrollment(g.user.analytics_subject_id)
+    if g.user.is_admin or g.user.has_entitlement("premium"):
+        return jsonify({"experiment": None})
+    if enrollment is None:
+        try:
+            record_event("paywall_experiment_enrolled", user_id=g.user.id,
+                         properties={"surface": payload["surface"], "platform": payload["platform"]},
+                         dedupe_key=f"{PAYWALL_EXPERIMENT}:{g.user.analytics_subject_id}")
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+        enrollment = paywall_enrollment(g.user.analytics_subject_id)
+    return jsonify({"experiment": {key: enrollment.properties[key] for key in ("experiment_id", "variant")}})
 
 
 @analytics_bp.route("/analytics/events", methods=["POST"])

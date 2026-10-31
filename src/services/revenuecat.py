@@ -6,6 +6,7 @@ import requests
 from flask import current_app
 
 from src.models.user import Subscription, db
+from src.services.analytics import record_payment_confirmed
 
 ENTITLEMENT_ID = "fittracker_ai_pro"
 PRODUCT_PLANS = {
@@ -107,4 +108,15 @@ def sync_subscription(user):
     subscription.current_period_start = _date(entitlement.get("purchase_date"))
     # A rejected sandbox/store must never retain a future canceled period granting access.
     subscription.current_period_end = end if allowed else None
+    purchase_date = details.get("purchase_date") or entitlement.get("purchase_date")
+    transaction_id = details.get("store_transaction_id")
+    price = details.get("price")
+    zero_price = isinstance(price, dict) and price.get("amount") == 0
+    if (active and details.get("is_sandbox") is False
+            and details.get("period_type") == "normal"
+            and not details.get("refunded_at") and not zero_price
+            and purchase_date):
+        payment_id = str(transaction_id or f"{user.id}:{product}:{purchase_date}")
+        record_payment_confirmed(user.id, subscription.plan_code, "revenuecat", payment_id,
+                                 paid_at=_date(purchase_date))
     return subscription
