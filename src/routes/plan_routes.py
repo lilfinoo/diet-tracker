@@ -160,7 +160,29 @@ def create_guided_diet_plan():
                 sorted(error.errors),
             )
             if attempt == max_attempts:
-                return jsonify({"error": "Não conseguimos concluir sua dieta agora. Suas escolhas foram mantidas; tente novamente em alguns instantes."}), 502
+                try:
+                    days = generated.get("days") if isinstance(generated, dict) else None
+                    if not isinstance(days, list) or len(days) != 3:
+                        raise error
+                    for index, day in enumerate(days):
+                        if index in validated_days:
+                            continue
+                        candidate = {"type": "diet_plan_day", "meals": day.get("meals") if isinstance(day, dict) else None}
+                        try:
+                            normalize_diet_day(candidate, questionnaire, nutrition_targets)
+                        except PlanValidationError as day_error:
+                            repaired = generate_diet_day(
+                                questionnaire, profile, candidate["meals"],
+                                "Ajuste as porções para atingir as metas diárias e preserve as restrições.",
+                                nutrition_targets, correction_feedback(day_error, candidate, nutrition_targets),
+                            )
+                            normalize_diet_day(repaired, questionnaire, nutrition_targets)
+                            days[index] = {"meals": repaired["meals"]}
+                    plan_data = normalize_diet_output(generated, questionnaire, nutrition_targets)
+                    break
+                except (PlanValidationError, AIServiceError):
+                    current_app.logger.warning("Individual diet day repair failed")
+                    return jsonify({"error": "Não conseguimos concluir sua dieta agora. Suas escolhas foram mantidas; tente novamente em alguns instantes."}), 502
             correction = correction_feedback(error, generated, nutrition_targets)
         except AIResponseError:
             current_app.logger.warning("Diet plan AI returned invalid output (attempt %s/%s)", attempt, max_attempts)
