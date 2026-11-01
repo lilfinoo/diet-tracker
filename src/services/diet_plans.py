@@ -97,8 +97,8 @@ def validate_diet_questionnaire(data):
         errors["change_pace"] = "Selecione um ritmo válido."
     if training_days not in range(8):
         errors["training_days_per_week"] = "Escolha entre 0 e 7 dias de treino."
-    if meals_per_day not in {3, 4, 5}:
-        errors["meals_per_day"] = "Escolha entre 3 e 5 refeições."
+    if meals_per_day not in range(1, 8):
+        errors["meals_per_day"] = "Escolha entre 1 e 7 refeições."
     if prep_minutes not in {15, 30, 45, 60}:
         errors["prep_minutes"] = "Selecione um tempo de preparo válido."
     allergies = _text_list(data, "allergies", errors)
