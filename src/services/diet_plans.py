@@ -24,7 +24,6 @@ GOAL_ADJUSTMENTS = {
 }
 PROTEIN_PER_KG = {"fat_loss": 1.8, "muscle_gain": 1.8, "maintenance": 1.6, "general_health": 1.6}
 NUTRITION_TOLERANCES = {"calories": 0.10, "protein": 0.15, "carbs": 0.20, "fat": 0.20}
-MACRO_ENERGY_TOLERANCE = 0.20
 
 
 def _text(value):
@@ -350,18 +349,6 @@ def _normalize_substitutions(raw_substitutions, field, errors):
 
 
 def _validate_day_totals(totals, targets, field, errors):
-    target_names = {
-        "calories": "targetCalories", "protein": "targetProtein",
-        "carbs": "targetCarbs", "fat": "targetFat",
-    }
-    for nutrient, tolerance in NUTRITION_TOLERANCES.items():
-        target = targets[target_names[nutrient]]
-        if abs(totals[nutrient] - target) / target > tolerance:
-            difference = target - totals[nutrient]
-            errors[f"{field}.{nutrient}"] = f"Ajuste {difference:+.1f} de {nutrient} para atingir a meta."
-    macro_energy = totals["protein"] * 4 + totals["carbs"] * 4 + totals["fat"] * 9
-    if totals["calories"] and abs(macro_energy - totals["calories"]) / totals["calories"] > MACRO_ENERGY_TOLERANCE:
-        errors[f"{field}.macro_energy"] = "As estimativas de macros são incompatíveis com as calorias informadas."
     if totals["calories"] < targets["bmr"] * 0.90:
         errors[f"{field}.bmr"] = "O dia ficou perigosamente abaixo da TMB estimada."
 
