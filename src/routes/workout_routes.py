@@ -70,6 +70,55 @@ def set_current_workout_plan(plan_id):
     }), 200
 
 
+@workout_bp.route("/workout_plans/<int:plan_id>/start-day", methods=["POST"])
+@login_required
+def select_first_workout_day(plan_id):
+    plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=g.user.id, status="published").first_or_404()
+    day = next((item for item in plan.days if item.id == json_body().get("day_id")), None)
+    if not day:
+        return jsonify({"error": "Treino inválido."}), 400
+    profile = _get_or_create_profile(g.user.id)
+    if WorkoutSession.query.filter_by(user_id=g.user.id, completed_at=None).first():
+        return jsonify({"error": "Finalize o treino em andamento antes de alterar a agenda."}), 409
+    plan.questionnaire_data = {**(plan.questionnaire_data or {}), "starting_day_id": day.id}
+    if profile.current_workout_plan_id == plan.id and profile.current_workout_schedule:
+        timezone_name = profile.timezone or user_timezone(g.user.id) or "UTC"
+        weekday = _local_date_for_timezone(timezone_name).weekday()
+        schedule = sorted((dict(item) for item in profile.current_workout_schedule), key=lambda item: (item["weekday"] - weekday) % 7)
+        index = plan.days.index(day)
+        days = list(plan.days)
+        offset = 0
+        for item in schedule:
+            if item.get("plan_id") not in (None, plan.id):
+                continue
+            selected = days[(index + offset) % len(days)]
+            item.update(day_id=selected.id, day_title=selected.title, day_code=selected.code, plan_id=plan.id)
+            offset += 1
+        profile.current_workout_schedule = schedule
+    db.session.commit()
+    return jsonify(_workout_today_payload(g.user)), 200
+
+
+@workout_bp.route("/workouts/schedule/day", methods=["PUT"])
+@login_required
+def set_workout_for_today_weekday():
+    data = json_body()
+    plan = WorkoutPlan.query.filter_by(id=data.get("plan_id"), user_id=g.user.id, status="published").first_or_404()
+    day = next((item for item in plan.days if item.id == data.get("day_id")), None)
+    if not day:
+        return jsonify({"error": "Treino inválido."}), 400
+    profile = _get_or_create_profile(g.user.id)
+    if not profile.current_workout_plan_id:
+        return jsonify({"error": "Defina um plano principal primeiro."}), 409
+    timezone_name = profile.timezone or user_timezone(g.user.id) or "UTC"
+    weekday = _local_date_for_timezone(timezone_name).weekday()
+    schedule = [item for item in (profile.current_workout_schedule or []) if item.get("weekday") != weekday]
+    schedule.append({"weekday": weekday, "plan_id": plan.id, "day_id": day.id, "day_title": day.title, "day_code": day.code})
+    profile.current_workout_schedule = schedule
+    db.session.commit()
+    return jsonify(_workout_today_payload(g.user)), 200
+
+
 @workout_bp.route("/workout_plans/<int:plan_id>/current/adapt", methods=["POST"])
 @premium_required(message="Aplicar um plano de treino requer Premium.")
 def adapt_current_workout_plan(plan_id):
@@ -123,6 +172,16 @@ def adapt_current_workout_plan(plan_id):
     }), 200
 
 
+def _workout_plan_has_started(plan, user_id):
+    if (plan.questionnaire_data or {}).get("starting_day_id"):
+        return True
+    while plan:
+        if WorkoutSession.query.filter_by(user_id=user_id, workout_plan_id=plan.id).first():
+            return True
+        plan = WorkoutPlan.query.filter_by(id=plan.supersedes_plan_id, user_id=user_id).first() if plan.supersedes_plan_id else None
+    return False
+
+
 @workout_bp.route("/workout_plans", methods=["GET"])
 @login_required
 def get_workout_plans():
@@ -143,6 +202,7 @@ def get_workout_plans():
     for plan in plans:
         data = plan.to_dict()
         data["is_current"] = plan.id == current_plan_id
+        data["has_started"] = _workout_plan_has_started(plan, user.id)
         payload.append(data)
     return jsonify(payload), 200
 
@@ -158,6 +218,7 @@ def get_workout_plan_details(plan_id):
     profile = UserProfile.query.filter_by(user_id=g.user.id).first()
     data = plan.to_dict_full()
     data["is_current"] = bool(profile and profile.current_workout_plan_id == plan.id)
+    data["has_started"] = _workout_plan_has_started(plan, user.id)
     return jsonify(data), 200
 
 

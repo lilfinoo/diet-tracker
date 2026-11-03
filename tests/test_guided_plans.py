@@ -1302,3 +1302,46 @@ def test_diet_plan_day_replace_requires_owned_plan(app, client, monkeypatch):
 
     response = client.put(f"/api/diet_plans/{plan['id']}/days/1", json={"meals": []})
     assert response.status_code == 404
+
+
+def test_first_workout_rotation_and_other_plan_weekday(app, client, monkeypatch):
+    register_premium(app, client)
+    monkeypatch.setattr("src.routes.plan_routes.generate_workout_plan", lambda *args: generated_workout())
+    first = client.post("/api/workout_plans/generate", json=workout_questionnaire()).get_json()["plan"]
+    second = client.post("/api/workout_plans/generate", json=workout_questionnaire()).get_json()["plan"]
+    today = datetime.utcnow().date().weekday()
+    tomorrow = (today + 1) % 7
+    assert client.put(f"/api/workout_plans/{first['id']}/current", json={"weekdays": [today, tomorrow]}).status_code == 200
+    assert client.get(f"/api/workout_plans/{first['id']}").get_json()["has_started"] is False
+    rotated = client.post(f"/api/workout_plans/{first['id']}/start-day", json={"day_id": first["days"][1]["id"]})
+    assert rotated.status_code == 200
+    assert rotated.get_json()["current_day"]["id"] == first["days"][1]["id"]
+    assert next(item for item in rotated.get_json()["week"] if item["weekday"] == tomorrow)["day_id"] == first["days"][0]["id"]
+    chosen = client.post(f"/api/workout_plans/{second['id']}/start-day", json={"day_id": second["days"][1]["id"]})
+    assert chosen.status_code == 200
+    assert chosen.get_json()["current_plan_id"] == first["id"]
+    assert client.get(f"/api/workout_plans/{second['id']}").get_json()["has_started"] is True
+    changed = client.put("/api/workouts/schedule/day", json={"plan_id": second["id"], "day_id": second["days"][1]["id"]})
+    assert changed.status_code == 200
+    assert changed.get_json()["current_plan_id"] == second["id"]
+    assert changed.get_json()["current_day"]["id"] == second["days"][1]["id"]
+    assert next(item for item in changed.get_json()["week"] if item["weekday"] == tomorrow)["day_id"] == first["days"][0]["id"]
+    rerotated = client.post(f"/api/workout_plans/{first['id']}/start-day", json={"day_id": first["days"][0]["id"]})
+    assert rerotated.status_code == 200
+    assert rerotated.get_json()["current_day"]["id"] == second["days"][1]["id"]
+    assert next(item for item in rerotated.get_json()["week"] if item["weekday"] == tomorrow)["day_id"] == first["days"][0]["id"]
+    assert client.put(f"/api/workout_plans/{second['id']}/current", json={"weekdays": [today, tomorrow]}).status_code == 200
+    assert client.get("/api/workouts/today").get_json()["current_day"]["id"] == second["days"][1]["id"]
+
+
+def test_first_workout_rotation_preserves_rest_days(app, client, monkeypatch):
+    register_premium(app, client)
+    monkeypatch.setattr("src.routes.plan_routes.generate_workout_plan", lambda *args: generated_workout())
+    plan = client.post("/api/workout_plans/generate", json=workout_questionnaire()).get_json()["plan"]
+    today = datetime.utcnow().date().weekday()
+    tomorrow, later = (today + 1) % 7, (today + 2) % 7
+    assert client.put(f"/api/workout_plans/{plan['id']}/current", json={"weekdays": [tomorrow, later]}).status_code == 200
+    response = client.post(f"/api/workout_plans/{plan['id']}/start-day", json={"day_id": plan["days"][1]["id"]})
+    assert response.status_code == 200
+    assert response.get_json()["state"] == "rest"
+    assert next(item for item in response.get_json()["week"] if item["weekday"] == tomorrow)["day_id"] == plan["days"][1]["id"]

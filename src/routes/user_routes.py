@@ -323,7 +323,7 @@ def _workout_today_payload(user):
     current_day = None
     schedule = profile.current_workout_schedule or []
     schedule_map = _schedule_day_map(schedule)
-    current_day_id = schedule_map.get(local_date.weekday())
+    schedule_items = {item.get("weekday"): item for item in schedule}
 
     if profile.current_workout_plan_id:
         current_plan = WorkoutPlan.query.filter_by(
@@ -339,14 +339,29 @@ def _workout_today_payload(user):
             profile.workout_schedule_effective_from = None
             profile.workout_schedule_timezone = None
 
-    if current_plan and current_day_id:
-        current_day = next((day for day in current_plan.days if day.id == current_day_id), None)
+    plans_by_id = {current_plan.id: current_plan} if current_plan else {}
+    if current_plan:
+        other_plan_ids = {item.get("plan_id") for item in schedule if item.get("plan_id") and item.get("plan_id") != current_plan.id}
+        if other_plan_ids:
+            other_plans = WorkoutPlan.query.filter(
+                WorkoutPlan.id.in_(other_plan_ids), WorkoutPlan.user_id == user.id, WorkoutPlan.status == "published"
+            ).options(selectinload(WorkoutPlan.days).selectinload(WorkoutDay.exercises)).all()
+            plans_by_id.update({plan.id: plan for plan in other_plans})
+
+    def scheduled_day(weekday):
+        item = schedule_items.get(weekday, {})
+        plan = plans_by_id.get(item.get("plan_id") or (current_plan.id if current_plan else None))
+        day = next((day for day in plan.days if day.id == schedule_map.get(weekday)), None) if plan else None
+        return plan, day
+
+    today_plan, current_day = scheduled_day(local_date.weekday())
+    display_plan = today_plan if current_day else current_plan
 
     base = {
         "timezone": timezone_name,
         "local_date": local_date.isoformat(),
-        "current_plan_id": current_plan.id if current_plan else None,
-        "current_plan": current_plan.to_dict() if current_plan else None,
+        "current_plan_id": display_plan.id if display_plan else None,
+        "current_plan": display_plan.to_dict() if display_plan else None,
         "current_day": current_day.to_dict_full() if current_day else None,
         "next_day": None,
         "week": [],
@@ -360,12 +375,12 @@ def _workout_today_payload(user):
     week = []
     upcoming_days = []
     for weekday in range(7):
-        day_id = schedule_map.get(weekday)
-        planned_day = next((day for day in current_plan.days if day.id == day_id), None) if day_id else None
+        planned_plan, planned_day = scheduled_day(weekday)
         week.append({
             "weekday": weekday,
             "label": week_labels[weekday],
             "day_id": planned_day.id if planned_day else None,
+            "plan_id": planned_plan.id if planned_day and planned_plan else None,
             "day_title": planned_day.title if planned_day else None,
             "active": weekday == local_date.weekday() and bool(planned_day),
         })
@@ -374,7 +389,7 @@ def _workout_today_payload(user):
     if not upcoming_days:
         upcoming_days = [
             day for weekday in range(7)
-            for day in [next((item for item in current_plan.days if item.id == schedule_map.get(weekday)), None)]
+            for day in [scheduled_day(weekday)[1]]
             if day
         ]
     base["week"] = week
@@ -389,7 +404,7 @@ def _workout_today_payload(user):
     utc_end = (local_start + timedelta(days=1)).astimezone(datetime_timezone.utc).replace(tzinfo=None)
     completed_session = WorkoutSession.query.filter_by(
         user_id=user.id,
-        workout_plan_id=current_plan.id,
+        workout_plan_id=display_plan.id,
         workout_day_id=current_day.id,
     ).filter(
         WorkoutSession.completed_at.isnot(None),
@@ -477,6 +492,9 @@ def _version_workout_plan_for_edit(plan):
             db.session.add(new_exercise)
             db.session.flush()
             exercise_map[old_exercise.id] = new_exercise
+    selected_id = (replacement.questionnaire_data or {}).get("starting_day_id")
+    if selected_id in day_map:
+        replacement.questionnaire_data = {**replacement.questionnaire_data, "starting_day_id": day_map[selected_id].id}
     profile = UserProfile.query.filter_by(user_id=plan.user_id).first()
     if profile:
         def remap_schedule(schedule):
@@ -486,16 +504,18 @@ def _version_workout_plan_for_edit(plan):
                     "day_id": day_map[item["day_id"]].id,
                     "day_title": day_map[item["day_id"]].title,
                     "day_code": day_map[item["day_id"]].code,
-                }
+                    **({"plan_id": replacement.id} if item.get("plan_id") == plan.id else {}),
+                } if item.get("day_id") in day_map else item
                 for item in (schedule or [])
-                if item.get("day_id") in day_map
             ]
 
         if profile.current_workout_plan_id == plan.id:
             profile.current_workout_plan_id = replacement.id
+        if profile.current_workout_schedule:
             profile.current_workout_schedule = remap_schedule(profile.current_workout_schedule)
         if profile.pending_workout_plan_id == plan.id:
             profile.pending_workout_plan_id = replacement.id
+        if profile.pending_workout_schedule:
             profile.pending_workout_schedule = remap_schedule(profile.pending_workout_schedule)
     plan.status = "archived"
     return replacement, day_map, exercise_map
@@ -563,9 +583,15 @@ def _redistribute_workout_plan_data(plan, days_per_week):
 
 
 def _apply_workout_plan_schedule(profile, plan, weekdays, timezone_name, local_date):
+    days = list(plan.days)
+    selected_id = (plan.questionnaire_data or {}).get("starting_day_id")
+    if selected_id and days:
+        start_index = next((i for i, day in enumerate(days) if day.id == selected_id), 0)
+        weekdays = sorted(weekdays, key=lambda weekday: (weekday - local_date.weekday()) % 7)
+        days = days[start_index:] + days[:start_index]
     schedule = [
         {"weekday": weekday, "day_id": day.id, "day_title": day.title, "day_code": day.code}
-        for weekday, day in zip(weekdays, plan.days)
+        for weekday, day in zip(weekdays, days)
     ]
     profile.current_workout_plan_id = plan.id
     profile.current_workout_schedule = schedule

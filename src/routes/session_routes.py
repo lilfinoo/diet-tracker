@@ -11,6 +11,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from src.models.user import (
     AchievementUnlock,
     ExerciseGoal,
+    IdempotentOperation,
     PersonalRecordEvent,
     ProfileHighlight,
     User,
@@ -30,7 +31,7 @@ from src.services.personal_records import (
     process_session_personal_records,
     rebuild_personal_records,
 )
-from src.services.workout_plans import replacement_options
+from src.services.workout_plans import exercise_catalog, replacement_options, resolve_catalog_exercise
 from src.services.workout_progress import (
     complete_exercise_goal,
     reconcile_exercise_goals,
@@ -158,6 +159,182 @@ def start_workout_session(plan_id, day_id):
             }), 409
         raise
     return jsonify({"session": session_record.to_dict()}), 201
+
+
+def _copy_last_workout(session_record):
+    previous = (WorkoutSession.query.filter_by(user_id=g.user.id, workout_day_id=session_record.workout_day_id)
+                .filter(WorkoutSession.completed_at.isnot(None))
+                .order_by(WorkoutSession.completed_at.desc(), WorkoutSession.id.desc()).first())
+    completions = {item.workout_exercise_id: item for item in previous.completions} if previous else {}
+    exercise_ids = {item.id for item in session_record.day.exercises}
+    if not exercise_ids or set(completions) != exercise_ids or any(not item.performed_sets for item in completions.values()):
+        return False
+    for item in previous.overrides:
+        fields = {field: getattr(item, field) for field in (
+            "catalog_key", "name", "movement_pattern", "primary_muscle", "equipment", "difficulty",
+            "sets", "reps", "weight", "rest_seconds", "effort_guidance", "notes",
+        )}
+        session_record.overrides.append(WorkoutSessionExerciseOverride(workout_exercise_id=item.workout_exercise_id, **fields))
+    for item in completions.values():
+        completion = WorkoutSessionExerciseCompletion(
+            workout_exercise_id=item.workout_exercise_id, exercise_name=item.exercise_name,
+            exercise_catalog_key=item.exercise_catalog_key, completion_mode=item.completion_mode,
+            planned_prescription=item.planned_prescription,
+        )
+        for performed in item.performed_sets:
+            completion.performed_sets.append(WorkoutSetPerformance(
+                set_order=performed.set_order, repetitions=performed.repetitions,
+                load_kg=performed.load_kg, is_warmup=performed.is_warmup,
+            ))
+        session_record.completions.append(completion)
+    return True
+
+
+@session_bp.route("/workout_sessions/<int:session_id>/repeat-last", methods=["POST"])
+@login_required
+def repeat_last_workout(session_id):
+    session_record = _owned_active_session(session_id)
+    if not session_record:
+        return jsonify({"error": "Sessão de treino não encontrada."}), 404
+    if session_record.completions or session_record.overrides or session_record.draft_sets:
+        return jsonify({"error": "Esta sessão já possui alterações."}), 409
+    if not _copy_last_workout(session_record):
+        return jsonify({"error": "O último treino não possui séries registradas para todos os exercícios."}), 409
+    db.session.commit()
+    return jsonify({"session": session_record.to_dict()}), 200
+
+
+@session_bp.route("/workout_plans/<int:plan_id>/days/<int:day_id>/repeat-last", methods=["GET"])
+@login_required
+def last_workout_preview(plan_id, day_id):
+    plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=g.user.id, status="published").first()
+    day = WorkoutDay.query.filter_by(id=day_id, workout_plan_id=plan.id if plan else None).first()
+    if not plan or not day:
+        return jsonify({"error": "Treino não encontrado."}), 404
+    previous = (WorkoutSession.query.filter_by(user_id=g.user.id, workout_day_id=day.id)
+                .filter(WorkoutSession.completed_at.isnot(None))
+                .order_by(WorkoutSession.completed_at.desc(), WorkoutSession.id.desc()).first())
+    completions = {item.workout_exercise_id: item for item in previous.completions} if previous else {}
+    ready = bool(day.exercises) and set(completions) == {item.id for item in day.exercises} and all(
+        item.performed_sets for item in completions.values()
+    )
+    return jsonify({
+        "available": ready,
+        "completed_at": previous.completed_at.isoformat() if previous else None,
+        "exercises": [{
+            "name": item.exercise_name,
+            "sets": [{"repetitions": performed.repetitions,
+                      "load_kg": float(performed.load_kg) if performed.load_kg is not None else None,
+                      "is_warmup": performed.is_warmup} for performed in item.performed_sets],
+        } for item in completions.values()],
+    }), 200
+
+
+def _replayed_action_after_lock():
+    key = request.headers.get("Idempotency-Key", "").strip()
+    if not key:
+        return None
+    operation = IdempotentOperation.query.filter_by(user_id=g.user.id, idempotency_key=key).first()
+    if not operation:
+        return None
+    if operation.method != request.method or operation.path != request.path:
+        return jsonify({"error": "A chave de idempotência já foi usada em outra operação."}), 409
+    return jsonify(operation.response_payload), operation.status_code
+
+
+@session_bp.route("/workout_plans/<int:plan_id>/days/<int:day_id>/repeat-last", methods=["POST"])
+@premium_required(message="Iniciar um treino requer Premium.")
+@idempotent_mutation
+def finish_last_workout(plan_id, day_id):
+    User.query.filter_by(id=g.user.id).with_for_update().first()
+    replay = _replayed_action_after_lock()
+    if replay:
+        return replay
+    plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=g.user.id, status="published").with_for_update().first()
+    day = WorkoutDay.query.filter_by(id=day_id, workout_plan_id=plan.id if plan else None).first()
+    if not plan or not day:
+        return jsonify({"error": "Treino não encontrado."}), 404
+    if WorkoutSession.query.filter_by(user_id=g.user.id, completed_at=None).first():
+        return jsonify({"error": "Finalize o treino em andamento antes de iniciar outro."}), 409
+    session_record = WorkoutSession(user_id=g.user.id, workout_plan_id=plan.id, workout_day_id=day.id, day=day)
+    db.session.add(session_record)
+    db.session.flush()
+    if not _copy_last_workout(session_record):
+        db.session.rollback()
+        return jsonify({"error": "O último treino não possui séries registradas para todos os exercícios."}), 409
+    return finish_workout_session(session_record.id, repeat_action=True)
+
+
+def _apply_calisthenics(session_record):
+    candidates = [item for item in exercise_catalog() if item["equipment"] == "bodyweight" and item["key"] != "remada_invertida"]
+    chosen = set()
+    for exercise in session_record.day.exercises:
+        source = resolve_catalog_exercise(exercise.catalog_key, exercise.name) or {}
+        available = [item for item in candidates if item["key"] not in chosen]
+        if not available:
+            return False
+        candidate = min(available, key=lambda item: (
+            item["primary_muscle"] != (source.get("primary_muscle") or exercise.primary_muscle),
+            item["movement_pattern"] != (source.get("movement_pattern") or exercise.movement_pattern),
+        ))
+        chosen.add(candidate["key"])
+        session_record.overrides.append(WorkoutSessionExerciseOverride(
+            workout_exercise_id=exercise.id, catalog_key=candidate["key"], name=candidate["name"],
+            movement_pattern=candidate["movement_pattern"], primary_muscle=candidate["primary_muscle"],
+            equipment="bodyweight", difficulty=candidate["difficulty"], sets=exercise.sets,
+            reps=exercise.reps, weight="Peso corporal", rest_seconds=exercise.rest_seconds,
+            effort_guidance=exercise.effort_guidance,
+        ))
+    return True
+
+
+@session_bp.route("/workout_sessions/<int:session_id>/calisthenics", methods=["POST"])
+@login_required
+def calisthenics_workout(session_id):
+    session_record = _owned_active_session(session_id)
+    if not session_record:
+        return jsonify({"error": "Sessão de treino não encontrada."}), 404
+    if session_record.completions or session_record.overrides or session_record.draft_sets:
+        return jsonify({"error": "Esta sessão já possui alterações."}), 409
+    if not _apply_calisthenics(session_record):
+        db.session.rollback()
+        return jsonify({"error": "Não há exercícios de peso corporal suficientes para este treino."}), 409
+    db.session.commit()
+    return jsonify({"session": session_record.to_dict()}), 200
+
+
+@session_bp.route("/workout_plans/<int:plan_id>/days/<int:day_id>/calisthenics", methods=["POST"])
+@premium_required(message="Iniciar um treino requer Premium.")
+@idempotent_mutation
+def start_calisthenics_workout(plan_id, day_id):
+    User.query.filter_by(id=g.user.id).with_for_update().first()
+    replay = _replayed_action_after_lock()
+    if replay:
+        return replay
+    plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=g.user.id, status="published").with_for_update().first()
+    day = WorkoutDay.query.filter_by(id=day_id, workout_plan_id=plan.id if plan else None).first()
+    if not plan or not day:
+        return jsonify({"error": "Treino não encontrado."}), 404
+    if not day.exercises:
+        return jsonify({"error": "Este treino não possui exercícios para iniciar."}), 400
+    if WorkoutSession.query.filter_by(user_id=g.user.id, completed_at=None).first():
+        return jsonify({"error": "Finalize o treino em andamento antes de iniciar outro."}), 409
+    session_record = WorkoutSession(user_id=g.user.id, workout_plan_id=plan.id, workout_day_id=day.id, day=day)
+    db.session.add(session_record)
+    if not _apply_calisthenics(session_record):
+        db.session.rollback()
+        return jsonify({"error": "Não há exercícios de peso corporal suficientes para este treino."}), 409
+    record_event("workout_started", user_id=g.user.id)
+    db.session.flush()
+    payload = {"session": session_record.to_dict()}
+    key = request.headers.get("Idempotency-Key", "").strip()
+    if key:
+        db.session.add(IdempotentOperation(
+            user_id=g.user.id, idempotency_key=key, method=request.method,
+            path=request.path, status_code=201, response_payload=payload,
+        ))
+    db.session.commit()
+    return jsonify(payload), 201
 
 
 @session_bp.route("/workout_sessions/<int:session_id>/exercises/<int:exercise_id>/replacement_options", methods=["POST"])
@@ -373,7 +550,7 @@ def save_session_exercise_draft(session_id, exercise_id):
 @session_bp.route("/workout_sessions/<int:session_id>/finish", methods=["POST"])
 @login_required
 @idempotent_mutation
-def finish_workout_session(session_id):
+def finish_workout_session(session_id, repeat_action=False):
     started = perf_counter()
     phases = []
 
@@ -421,17 +598,24 @@ def finish_workout_session(session_id):
             "workout_finished",
             user_id=g.user.id,
         )
-    db.session.commit()
-    mark("commit")
-    current_app.logger.info("workout_finish_phases session_id=%s newly_finished=%s phases_ms=%s", session_id, newly_finished, phases)
-    return jsonify({
+    payload = {
         "message": "Treino finalizado.",
         "session": session_record.to_dict(),
         "summary": _workout_session_summary(session_record),
         "weekly_progress": progress,
         "exercise_goals_reached": [serialize_exercise_goal(reached_goal)] if reached_goal else [],
         "achievements_unlocked": [serialize_unlock(item) for item in new_unlocks],
-    }), 200
+    }
+    key = request.headers.get("Idempotency-Key", "").strip()
+    if repeat_action and key:
+        db.session.add(IdempotentOperation(
+            user_id=g.user.id, idempotency_key=key, method=request.method,
+            path=request.path, status_code=200, response_payload=payload,
+        ))
+    db.session.commit()
+    mark("commit")
+    current_app.logger.info("workout_finish_phases session_id=%s newly_finished=%s phases_ms=%s", session_id, newly_finished, phases)
+    return jsonify(payload), 200
 
 
 @session_bp.route("/activities", methods=["GET"])
