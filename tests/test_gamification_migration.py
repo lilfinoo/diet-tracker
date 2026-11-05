@@ -37,3 +37,26 @@ def test_upgrade_downgrade_preserve_existing_users_and_enforce_daily_uniqueness(
         assert connection.exec_driver_sql('SELECT count(*) FROM user').scalar() == 1
         assert 'gamification_day' not in sa.inspect(connection).get_table_names()
     engine.dispose()
+
+
+def test_value_reward_upgrade_downgrade_preserves_existing_xp():
+    directory = Path(__file__).parents[1] / 'migrations/versions'
+    engine = sa.create_engine('sqlite://')
+    with engine.connect() as connection:
+        connection.exec_driver_sql('CREATE TABLE "user" (id CHAR(32) PRIMARY KEY)')
+        context = MigrationContext.configure(connection)
+        for name in ['c1d8f4a6b2e9_add_gamification_progress.py', 'da71c4b83920_value_based_gamification_rewards.py']:
+            spec = importlib.util.spec_from_file_location('reward_migration', directory / name)
+            migration = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(migration)
+            migration.op = Operations(context)
+            migration.upgrade()
+            if name.startswith('c1'):
+                connection.exec_driver_sql("INSERT INTO user VALUES ('12345678123456781234567812345678')")
+                connection.exec_driver_sql("INSERT INTO gamification_day (user_id, local_date, timezone, xp) VALUES ('12345678123456781234567812345678','2026-11-04','UTC',80)")
+        assert connection.exec_driver_sql('SELECT xp,rest_checkin FROM gamification_day').one() == (80, 0)
+        assert 'gamification_award' in sa.inspect(connection).get_table_names()
+        migration.downgrade()
+        assert connection.exec_driver_sql('SELECT xp FROM gamification_day').scalar() == 80
+        assert 'gamification_award' not in sa.inspect(connection).get_table_names()
+    engine.dispose()

@@ -17,6 +17,7 @@ from src.services.ai import (
     generate_workout_plan,
 )
 from src.services.analytics import record_event
+from src.services.gamification import award_plan_generation, gamification_summary
 from src.services.ai_queue import enqueue_ai_request
 from src.services.diet_plans import (
     calculate_nutrition_targets,
@@ -223,6 +224,7 @@ def create_guided_diet_plan():
         allowed = {"day_of_week", "meal_type", "description", "calories", "protein", "carbs", "fat", "notes", "items", "prep_instructions", "prep_minutes", "substitutions", "order"}
         for meal in plan_data["meals"]:
             db.session.add(DietPlanMeal(diet_plan_id=plan.id, **{key: meal[key] for key in allowed if key in meal}))
+        xp_gained = award_plan_generation(user.id, "diet", f"diet-plan:{plan.id}")
         record_event(
             "plan_generation_succeeded",
             user_id=user.id,
@@ -233,7 +235,8 @@ def create_guided_diet_plan():
         db.session.rollback()
         current_app.logger.exception("Unable to save guided diet plan")
         return jsonify({"error": "Não foi possível salvar a dieta gerada."}), 422
-    response = jsonify({"message": "Plano alimentar criado.", "plan_id": plan.id, "plan": plan.to_dict_full()})
+    response = jsonify({"message": "Plano alimentar criado.", "plan_id": plan.id, "plan": plan.to_dict_full(),
+                        "xp_gained": xp_gained, "gamification": gamification_summary(user.id)})
     response.status_code = 201
     response.headers["Location"] = f"/api/diet_plans/{plan.id}"
     return response
@@ -363,6 +366,7 @@ def create_guided_workout_plan():
             db.session.flush()
             for exercise in day_data["exercises"]:
                 db.session.add(WorkoutExercise(workout_plan_id=plan.id, workout_day_id=day.id, **{key: exercise[key] for key in exercise_fields if key in exercise}))
+        xp_gained = award_plan_generation(user.id, "workout", f"workout-plan:{plan.id}")
         record_event(
             "plan_generation_succeeded",
             user_id=user.id,
@@ -377,6 +381,8 @@ def create_guided_workout_plan():
         "message": "Plano de treino criado.",
         "plan_id": plan.id,
         "plan": plan.to_dict_full(),
+        "xp_gained": xp_gained,
+        "gamification": gamification_summary(user.id),
         "quality": contract["quality"],
         "adaptations": contract["adaptations"],
         "warnings": contract["warnings"],

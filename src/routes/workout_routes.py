@@ -10,6 +10,7 @@ from src.routes.common import (ai_consent_required, premium_required, _apply_wor
 from src.services.plan_management import create_workout_plan
 from src.services.analytics import record_event
 from src.services.workout_plans import catalog_by_key, exercise_selection_group, replacement_options, resolve_catalog_exercise, selection_exercise_catalog
+from src.services.gamification import award_rest_day_checkin, gamification_summary
 from src.services.workout_progress import user_timezone
 from src.services.ai import AIServiceError, AIQuotaExceededError, suggest_workout_changes
 from src.services.rate_limit import rate_limit
@@ -24,6 +25,16 @@ def workout_today():
     payload = _workout_today_payload(g.user)
     db.session.commit()
     return jsonify(payload), 200
+
+
+@workout_bp.route("/workouts/rest-checkin", methods=["POST"])
+@login_required
+def rest_day_checkin():
+    if _workout_today_payload(g.user).get("state") != "rest":
+        return jsonify({"error": "O dia de hoje não está marcado como descanso."}), 409
+    xp_gained = award_rest_day_checkin(g.user.id)
+    db.session.commit()
+    return jsonify({"xp_gained": xp_gained, "gamification": gamification_summary(g.user.id)}), 200
 
 
 @workout_bp.route("/workout_plans/<int:plan_id>/current", methods=["PUT"])

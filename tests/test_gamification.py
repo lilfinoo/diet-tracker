@@ -27,11 +27,11 @@ def test_actions_are_capped_per_day_and_survive_a_new_session(app, owner):
         assert gamification.record_gamification_action(owner, 'water', today) == 30
         assert gamification.record_gamification_action(owner, 'water', today) == 0
         assert gamification.record_gamification_action(owner, 'meal', today) == 20
-        assert gamification.record_gamification_action(owner, 'workout', today) == 30
+        assert gamification.record_gamification_action(owner, 'workout', today) == 100
         db.session.commit()
         db.session.remove()
         summary = gamification.gamification_summary(owner)
-        assert summary['total_xp'] == 80
+        assert summary['total_xp'] == 150
         assert summary['totalXP'] == summary['total_xp']
         assert summary['levelXP'] == summary['level_xp']
         assert summary['nextLevelXP'] == summary['next_level_xp']
@@ -108,11 +108,11 @@ def test_planned_meal_xp_is_persisted_after_the_response(app, client):
     client.post('/api/profile', json={'timezone': 'UTC'})
     first = _outcome(client, 'breakfast', 'consumed_planned', day=today)
     assert first.status_code == 201
-    assert first.json['xp_gained'] == 40
+    assert first.json['xp_gained'] == 33
     again = _outcome(client, 'breakfast', 'consumed_planned', day=today)
     assert again.status_code == 200
     assert again.json['xp_gained'] == 0
-    assert client.get('/api/progress/overview?view=summary').json['gamification']['total_xp'] == 40
+    assert client.get('/api/progress/overview?view=summary').json['gamification']['total_xp'] == 33
 
 
 @pytest.mark.parametrize('xp,level,rank', [(0, 1, 'Bronze'), (99, 1, 'Bronze'), (100, 2, 'Bronze'), (550, 5, 'Prata')])

@@ -49,7 +49,7 @@ def enqueue_ai_request(operation, payload, route_params=None):
 
     metadata = {key: str(value) for key, value in (route_params or {}).items()}
     metadata["_ai_providers"] = request.headers.get("X-AI-Providers", "")
-    request_key = request.headers.get("Idempotency-Key") if background_plan else None
+    request_key = request.headers.get("Idempotency-Key", "").strip() if background_plan or operation == "nutrition_macros" else None
     if request_key:
         # Serialize the durable receipt for concurrent retries on PostgreSQL.
         User.query.filter_by(id=g.user.id).with_for_update().first()

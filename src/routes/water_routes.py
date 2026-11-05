@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from src.models.user import IdempotentOperation, UserProfile, WaterEntry, db
 from src.routes.common import json_body, login_required
 from src.services.workout_progress import user_timezone
-from src.services.gamification import record_gamification_action
+from src.services.gamification import record_water_xp
 from src.services.achievements import evaluate_achievements, serialize_unlock
 from src.services.gamification import gamification_summary
 
@@ -93,7 +93,7 @@ def add_water():
     )
     db.session.add(entry)
     db.session.flush()
-    xp_gained = record_gamification_action(g.user.id, "water", entry.local_date, timezone_name)
+    xp_gained = record_water_xp(g.user.id, entry.local_date, f"water-entry:{entry.id}", timezone_name)
     new_unlocks = evaluate_achievements(g.user.id)
     result = {
         **_day_summary(entry.local_date),

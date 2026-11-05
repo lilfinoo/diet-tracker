@@ -44,6 +44,7 @@ class User(db.Model):
     # Relacionamentos
     gamification_profile = db.relationship("GamificationProfile", uselist=False, cascade="all, delete-orphan")
     gamification_days = db.relationship("GamificationDay", cascade="all, delete-orphan")
+    gamification_awards = db.relationship("GamificationAward", cascade="all, delete-orphan")
     diet_entries = db.relationship("DietEntry", backref="user", lazy=True, cascade="all, delete-orphan")
     water_entries = db.relationship("WaterEntry", backref="user", lazy=True, cascade="all, delete-orphan")
     measurements = db.relationship("Measurement", backref="user", lazy=True, cascade="all, delete-orphan")
@@ -684,6 +685,8 @@ class GamificationProfile(db.Model):
     active_days = db.Column(db.Integer, nullable=False, default=0)
     available_protections = db.Column(db.Integer, nullable=False, default=0)
     last_active_date = db.Column(db.Date, nullable=True)
+    last_diet_plan_xp_at = db.Column(db.DateTime, nullable=True)
+    last_workout_plan_xp_at = db.Column(db.DateTime, nullable=True)
 
 
 class GamificationDay(db.Model):
@@ -695,8 +698,19 @@ class GamificationDay(db.Model):
     meal = db.Column(db.Boolean, nullable=False, default=False)
     water = db.Column(db.Boolean, nullable=False, default=False)
     workout = db.Column(db.Boolean, nullable=False, default=False)
+    rest_checkin = db.Column(db.Boolean, nullable=False, default=False)
     first_action_bonus = db.Column(db.Boolean, nullable=False, default=False)
     return_earned = db.Column(db.Boolean, nullable=False, default=False)
+    xp = db.Column(db.Integer, nullable=False, default=0)
+
+
+class GamificationAward(db.Model):
+    __table_args__ = (db.UniqueConstraint("user_id", "action", "source_key", name="uq_gamification_award_source"),)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    action = db.Column(db.String(32), nullable=False)
+    source_key = db.Column(db.String(128), nullable=False)
+    local_date = db.Column(db.Date, nullable=False)
     xp = db.Column(db.Integer, nullable=False, default=0)
 
 

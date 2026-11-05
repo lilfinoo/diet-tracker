@@ -1,6 +1,9 @@
 from src.services.body_progress import body_summary
 import base64
+import hashlib
+import uuid
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from flask import Blueprint, abort, current_app, g, jsonify, request, send_file
 
@@ -9,13 +12,14 @@ from src.routes.common import _local_date_for_timezone, _require_lengths, ai_con
 from src.services.badges import BADGE_CODES, available_profile_items, apply_profile_highlights, serialize_badges, serialize_profile_highlights
 from src.services.ai import AIQuotaExceededError, AIResponseError, AIServiceError, AIServiceUnavailableError, calculate_nutrition
 from src.services.analytics import record_event
-from src.services.gamification import record_gamification_action
+from src.services.gamification import record_meal_xp
 from src.services.gamification import gamification_summary
 from src.services.achievements import evaluate_achievements, serialize_unlock
 from src.services.ai_queue import enqueue_ai_request
 from src.services.rate_limit import rate_limit
 from src.services.workoutx import WorkoutXServiceError, approved_media, get_cached_gif
 from src.services.workout_progress import backfill_session_weeks, user_timezone, validate_timezone
+from src.services.diet_daily import active_diet_plan
 
 
 profile_bp = Blueprint("profile", __name__)
@@ -202,7 +206,11 @@ def add_diet_entry():
     )
     db.session.add(new_entry)
     db.session.flush()
-    xp_gained = record_gamification_action(user.id, "meal", entry_date)
+    plan = active_diet_plan(user.id)
+    xp_gained = record_meal_xp(
+        user.id, entry_date, f"entry:{new_entry.id}",
+        planned_meals=plan.meals_per_day if plan else 3,
+    )
     new_unlocks = evaluate_achievements(user.id)
     record_event(
         "meal_logged",
@@ -305,6 +313,7 @@ def delete_diet_entry(entry_id):
 @profile_bp.route("/diet/ai_macros", methods=["POST"])
 @rate_limit("ai", 8, 60)
 @ai_consent_required
+@idempotent_mutation
 @premium_required(allow_trial=True, trial_kind="photos")
 def get_ai_macros():
     data = json_body()
@@ -356,7 +365,21 @@ def get_ai_macros():
         return queued
 
     try:
-        return jsonify(calculate_nutrition(description, image_bytes, mime_type)), 200
+        result = calculate_nutrition(description, image_bytes, mime_type)
+        timezone_name = user_timezone(g.user.id)
+        local_date = datetime.now(ZoneInfo(timezone_name)).date()
+        plan = active_diet_plan(g.user.id)
+        request_key = request.headers.get("Idempotency-Key", "").strip()
+        if not request_key:
+            request_key = f"ai-task:{g.ai_task_id}" if g.get("ai_task_id") else str(uuid.uuid4())
+        request_key = f"analysis:{hashlib.sha256(request_key.encode()).hexdigest()}"
+        xp_gained = record_meal_xp(
+            g.user.id, local_date, request_key,
+            planned_meals=plan.meals_per_day if plan else 3, analysis=True, timezone_name=timezone_name,
+        )
+        result.update({"xp_gained": xp_gained, "gamification": gamification_summary(g.user.id)})
+        db.session.commit()
+        return jsonify(result), 200
     except AIResponseError:
         return jsonify({"error": "A IA retornou macros incompletos. Tente novamente."}), 422
     except AIQuotaExceededError as error:

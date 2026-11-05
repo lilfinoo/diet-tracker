@@ -11,8 +11,9 @@ from src.services.diet_daily import (
     reset_daily_outcome,
     select_daily_option,
     set_daily_outcome,
+    active_diet_plan,
 )
-from src.services.gamification import record_gamification_action
+from src.services.gamification import record_meal_xp
 from src.services.gamification import gamification_summary
 from src.services.achievements import evaluate_achievements, serialize_unlock
 
@@ -95,7 +96,11 @@ def update_daily_diet_outcome(date_value, slot_key):
         xp_gained = 0
         new_unlocks = []
         if result in {"consumed_planned", "consumed_different"}:
-            xp_gained = record_gamification_action(g.user.id, "meal", _date(date_value))
+            plan = active_diet_plan(g.user.id)
+            xp_gained = record_meal_xp(
+                g.user.id, _date(date_value), f"slot:{_date(date_value)}:{slot_key}",
+                planned_meals=plan.meals_per_day if plan else 3,
+            )
             new_unlocks = evaluate_achievements(g.user.id)
         payload = {
             "state": state.to_dict(),
