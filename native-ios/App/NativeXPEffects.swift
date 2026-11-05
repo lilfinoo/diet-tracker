@@ -24,6 +24,7 @@ private struct NativeXPFlight {
     let started = Date()
     let origin: CGPoint
     let bar: CGRect
+    let nutritionTargets: [CGRect]
     let xp: Int
     let total: Int
     let floating: Bool
@@ -39,7 +40,8 @@ private struct NativeXPFlight {
     func progress(_ date: Date) -> Double {
         let time = elapsed(date)
         if reduced { return min(1, max(0, (time - 0.12) / 0.18)) }
-        return Double((0..<Self.count).filter { time >= delay($0) + 0.26 + duration($0) }.count) / Double(Self.count)
+        let xpParticles = (0..<Self.count).filter { nutritionTargets.isEmpty || $0 % 5 != 0 }
+        return Double(xpParticles.filter { time >= delay($0) + 0.26 + duration($0) }.count) / Double(xpParticles.count)
     }
     func values(_ date: Date) -> NativeXPValues { NativeXPValues(total: max(0, total - xp) + Int((Double(xp) * progress(date)).rounded())) }
     func point(_ i: Int, _ time: Double, destination: CGPoint) -> CGPoint? {
@@ -52,10 +54,13 @@ private struct NativeXPFlight {
             let t = 1 - pow(1 - age / 0.26, 3)
             return CGPoint(x: origin.x + (burst.x - origin.x) * t, y: origin.y + (burst.y - origin.y) * t)
         }
+        let target = !nutritionTargets.isEmpty && i % 5 == 0
+            ? CGPoint(x: nutritionTargets[(i / 5) % nutritionTargets.count].midX, y: nutritionTargets[(i / 5) % nutritionTargets.count].midY)
+            : destination
         let t = min(1, (age - 0.26) / duration(i)), u = t * t * (3 - 2 * t), q = 1 - u
         let bias = (seed(i, 23) - 0.5) * 100
-        return CGPoint(x: q*q*q*burst.x + 3*q*q*u*(burst.x+bias) + 3*q*u*u*(destination.x+bias*0.35) + u*u*u*destination.x,
-                       y: q*q*q*burst.y + 3*q*q*u*(burst.y-90) + 3*q*u*u*(destination.y+80) + u*u*u*destination.y)
+        return CGPoint(x: q*q*q*burst.x + 3*q*q*u*(burst.x+bias) + 3*q*u*u*(target.x+bias*0.35) + u*u*u*target.x,
+                       y: q*q*q*burst.y + 3*q*q*u*(burst.y-90) + 3*q*u*u*(target.y+80) + u*u*u*target.y)
     }
 }
 
@@ -65,6 +70,7 @@ final class NativeXPEffects: NSObject, ObservableObject {
     @Published fileprivate var flight: NativeXPFlight?
     fileprivate var activeBars: Set<UUID> = []
     fileprivate var bars: [UUID: WeakXPView] = [:]
+    fileprivate var nutritionProbes: [UUID: (Int, WeakXPView)] = [:]
     private weak var appWindow: UIWindow?
     private var overlayWindow: NativeXPWindow?
     private var touchObserver: NativeXPTouchObserver?
@@ -110,10 +116,11 @@ final class NativeXPEffects: NSObject, ObservableObject {
         window.addGestureRecognizer(observer); touchObserver = observer
         overlayWindow?.isHidden = true; overlayWindow = nil
     }
-    func captureAction(key: String) {
-        guard let lastTouch, ProcessInfo.processInfo.systemUptime - lastTouch.time < 1.5 else { return }
+    func captureAction(key: String, point: CGPoint? = nil) {
+        let origin = point ?? lastTouch.flatMap { ProcessInfo.processInfo.systemUptime - $0.time < 1.5 ? $0.point : nil }
+        guard let origin else { return }
         if actionOrigins.count > 100 { actionOrigins.removeAll() }
-        actionOrigins[key] = lastTouch.point
+        actionOrigins[key] = origin
     }
     func copyActionOrigin(from: String, to: String) { actionOrigins[to] = actionOrigins[from] }
     private func captureRequest(_ id: UUID, key: String?) {
@@ -121,6 +128,22 @@ final class NativeXPEffects: NSObject, ObservableObject {
         guard let lastTouch, ProcessInfo.processInfo.systemUptime - lastTouch.time < 1.5 else { return }
         if requestOrigins.count > 100 { requestOrigins.removeAll() }
         requestOrigins[id] = lastTouch.point
+    }
+    fileprivate func registerNutritionProbe(_ view: UIView, id: UUID, index: Int) {
+        nutritionProbes[id] = (index, WeakXPView(view))
+    }
+    fileprivate func removeNutritionProbe(_ id: UUID) { nutritionProbes[id] = nil }
+    private func visibleNutritionTargets(from origin: CGPoint, in window: UIWindow) -> [CGRect] {
+        let visible = nutritionProbes.values.compactMap { probe -> (Int, CGRect)? in
+            guard let frame = probe.1.view?.xpVisibleFrame(in: window) else { return nil }
+            return (probe.0, frame)
+        }
+        let grouped = Dictionary(grouping: visible, by: \.0)
+        return (0..<4).compactMap { index in
+            grouped[index]?.min { lhs, rhs in
+                hypot(lhs.1.midX - origin.x, lhs.1.midY - origin.y) < hypot(rhs.1.midX - origin.x, rhs.1.midY - origin.y)
+            }?.1
+        }
     }
     private func receive(_ notice: XPAwardNotice) {
         let capturedOrigin = requestOrigins.removeValue(forKey: notice.requestID)
@@ -153,10 +176,11 @@ final class NativeXPEffects: NSObject, ObservableObject {
         }
         let bounds = appWindow.bounds, top = appWindow.safeAreaInsets.top
         let visibleBar = appWindow.rootViewController?.presentedViewController == nil ? activeBars.compactMap { bars[$0]?.view?.xpVisibleFrame(in: appWindow) }.first : nil
+        let nutritionTargets = origin.map { visibleNutritionTargets(from: $0, in: appWindow) } ?? []
         let toastBar = CGRect(x: 32, y: top + 60, width: bounds.width - 64, height: 6)
         let reduced = UIAccessibility.isReduceMotionEnabled
         let next = NativeXPFlight(origin: origin ?? CGPoint(x: bounds.midX, y: bounds.height * 0.46),
-                                  bar: visibleBar ?? toastBar, xp: notice.xp, total: summary.totalXp,
+                                  bar: visibleBar ?? toastBar, nutritionTargets: nutritionTargets, xp: notice.xp, total: summary.totalXp,
                                   floating: visibleBar == nil, automatic: origin == nil, reduced: reduced, safeTop: top)
         flight = next; overlayWindow?.isHidden = false
         let token = generation
@@ -224,6 +248,24 @@ private struct NativeXPBarProbe: UIViewRepresentable {
         return view
     }
     func updateUIView(_ uiView: UIView, context: Context) { }
+}
+
+struct NativeXPNutritionProbe: UIViewRepresentable {
+    let index: Int
+    func makeUIView(context: Context) -> Probe {
+        let view = Probe(); view.isUserInteractionEnabled = false
+        NativeXPEffects.shared.registerNutritionProbe(view, id: view.id, index: index)
+        return view
+    }
+    func updateUIView(_ uiView: Probe, context: Context) {
+        NativeXPEffects.shared.registerNutritionProbe(uiView, id: uiView.id, index: index)
+    }
+    static func dismantleUIView(_ uiView: Probe, coordinator: ()) {
+        NativeXPEffects.shared.removeNutritionProbe(uiView.id)
+    }
+    final class Probe: UIView {
+        let id = UUID()
+    }
 }
 
 struct NativeXPLevelLabel: View {

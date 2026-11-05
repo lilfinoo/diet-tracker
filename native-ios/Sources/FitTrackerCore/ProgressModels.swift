@@ -7,7 +7,7 @@ public struct ProgressOverview: Decodable, Sendable {
     public let gamification: GamificationSummary?
 }
 
-public struct GamificationSummary: Decodable, Sendable {
+public struct GamificationSummary: Codable, Sendable {
     public let totalXp: Int
     public let level: Int
     public let rank: String
@@ -20,9 +20,13 @@ public struct GamificationSummary: Decodable, Sendable {
     public let availableProtections: Int
     public let today: GamificationToday
     public let days: [GamificationDaySummary]
+
+    public static let initial = GamificationSummary(totalXp: 0, level: 1, rank: "Bronze", levelXp: 0,
+        nextLevelXp: 100, nextLevel: 2, currentStreak: 0, bestStreak: 0, activeDays: 0,
+        availableProtections: 0, today: GamificationToday(qualified: false, meal: false, water: false, workout: false, xp: 0), days: [])
 }
 
-public struct GamificationToday: Decodable, Sendable {
+public struct GamificationToday: Codable, Sendable {
     public let qualified: Bool
     public let meal: Bool
     public let water: Bool
@@ -30,7 +34,7 @@ public struct GamificationToday: Decodable, Sendable {
     public let xp: Int
 }
 
-public struct GamificationDaySummary: Decodable, Sendable, Identifiable {
+public struct GamificationDaySummary: Codable, Sendable, Identifiable {
     public var id: String { date }
     public let date: String
     public let qualified: Bool

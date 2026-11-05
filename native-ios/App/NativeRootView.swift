@@ -114,7 +114,7 @@ private struct NativeTabs: View {
     init(api: FitTrackerAPI, ownerId: UUID) {
         self.ownerId = ownerId
         _diary = StateObject(wrappedValue: NativeDietStore(ownerId: ownerId))
-        _tabData = StateObject(wrappedValue: NativeTabDataStore(api: api))
+        _tabData = StateObject(wrappedValue: NativeTabDataStore(api: api, ownerId: ownerId))
         if #available(iOS 26.0, *) {
             // Let the system render its native Liquid Glass tab bar.
         } else {
@@ -194,16 +194,26 @@ final class NativeTabDataStore: ObservableObject {
     @Published private(set) var progressFetchedAt: Date?
 
     private let api: FitTrackerAPI
+    private let ownerId: UUID
     private var workoutRequest: Task<WorkoutToday, Error>?
     private var progressRequest: Task<ProgressOverview, Error>?
     private var workoutRefreshPending = false
     private var progressRefreshPending = false
 
-    init(api: FitTrackerAPI) { self.api = api; workoutWeek = WorkoutWeekDataCache(api: api) }
+    init(api: FitTrackerAPI, ownerId: UUID) {
+        self.api = api
+        self.ownerId = ownerId
+        workoutWeek = WorkoutWeekDataCache(api: api)
+        let key = "FitTrackerGamificationSummary.\(ownerId.uuidString)"
+        gamification = UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(GamificationSummary.self, from: $0) } ?? .initial
+    }
 
     func acceptGamification(_ summary: GamificationSummary?) {
         guard let summary else { return }
         gamification = summary
+        if let data = try? JSONEncoder().encode(summary) {
+            UserDefaults.standard.set(data, forKey: "FitTrackerGamificationSummary.\(ownerId.uuidString)")
+        }
     }
 
     func preload() async {

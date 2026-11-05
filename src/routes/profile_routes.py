@@ -209,7 +209,7 @@ def add_diet_entry():
     plan = active_diet_plan(user.id)
     xp_gained = record_meal_xp(
         user.id, entry_date, f"entry:{new_entry.id}",
-        planned_meals=plan.meals_per_day if plan else 3,
+        planned_meals=plan.meals_per_day if plan else 5,
     )
     new_unlocks = evaluate_achievements(user.id)
     record_event(
@@ -375,7 +375,7 @@ def get_ai_macros():
         request_key = f"analysis:{hashlib.sha256(request_key.encode()).hexdigest()}"
         xp_gained = record_meal_xp(
             g.user.id, local_date, request_key,
-            planned_meals=plan.meals_per_day if plan else 3, analysis=True, timezone_name=timezone_name,
+            planned_meals=plan.meals_per_day if plan else 5, analysis=True, timezone_name=timezone_name,
         )
         result.update({"xp_gained": xp_gained, "gamification": gamification_summary(g.user.id)})
         db.session.commit()

@@ -108,11 +108,27 @@ def test_planned_meal_xp_is_persisted_after_the_response(app, client):
     client.post('/api/profile', json={'timezone': 'UTC'})
     first = _outcome(client, 'breakfast', 'consumed_planned', day=today)
     assert first.status_code == 201
-    assert first.json['xp_gained'] == 33
+    assert first.json['xp_gained'] == 20
     again = _outcome(client, 'breakfast', 'consumed_planned', day=today)
     assert again.status_code == 200
     assert again.json['xp_gained'] == 0
-    assert client.get('/api/progress/overview?view=summary').json['gamification']['total_xp'] == 33
+    assert client.get('/api/progress/overview?view=summary').json['gamification']['total_xp'] == 20
+
+
+def test_unplanned_meals_award_20_xp_each_up_to_100_per_day(client):
+    signup(client)
+    client.post('/api/profile', json={'timezone': 'UTC'})
+    today = datetime.utcnow().date().isoformat()
+    rewards = []
+    for index in range(6):
+        response = client.post('/api/diet', json={
+            'date': today, 'meal_type': f'Refeição {index + 1}', 'description': 'Refeição registrada',
+        }, headers={'Idempotency-Key': f'unplanned-meal-{index}'})
+        assert response.status_code == 201
+        rewards.append(response.json['xp_gained'])
+    assert rewards == [20, 20, 20, 20, 20, 0]
+    summary = client.get('/api/progress/overview?view=summary').json['gamification']
+    assert summary['today']['xp'] == 100
 
 
 @pytest.mark.parametrize('xp,level,rank', [(0, 1, 'Bronze'), (99, 1, 'Bronze'), (100, 2, 'Bronze'), (550, 5, 'Prata')])

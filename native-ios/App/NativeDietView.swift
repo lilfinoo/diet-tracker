@@ -135,13 +135,13 @@ final class NativeDietStore: ObservableObject {
         catch { if !isNativeRequestCancellation(error), revisions[date, default: 0] == revision { errors[date] = RequestFailure.message(error, fallback: L("Não foi possível atualizar suas refeições agora.")) } }
     }
 
-    func setOutcome(date: String, slot: DietDaySlot, outcome: DietSlotOutcome, api: FitTrackerAPI,
+    func setOutcome(date: String, slot: DietDaySlot, outcome: DietSlotOutcome, origin: CGPoint? = nil, api: FitTrackerAPI,
                     isCurrentOwner: @escaping @MainActor () -> Bool) async {
         guard !isPending(date: date, slotKey: slot.slotKey), let day = days[date],
               day.slots.contains(where: { $0.slotKey == slot.slotKey && $0.result == "pending" }) else { return }
         if !pendingWrites.contains(date) { confirmedDays[date] = day }
         let operation = PendingOutcome(id: UUID(), date: date, slotKey: slot.slotKey, mealId: slot.selectedPlanMealId, outcome: outcome)
-        NativeXPEffects.shared.captureAction(key: operation.id.uuidString)
+        NativeXPEffects.shared.captureAction(key: operation.id.uuidString, point: origin)
         queuedOutcomes[date, default: []].append(operation)
         persistOutcomes()
         pendingWrites.insert(date)
@@ -477,6 +477,18 @@ private struct NutritionMetric: Identifiable {
     var fraction: Double { guard let value, let target, target > 0 else { return 0 }; return min(max(value / target, 0), 1) }
 }
 
+private struct NativeAnimatedNutritionNumber: View, Animatable {
+    var value: Double
+    var animatableData: Double {
+        get { value }
+        set { value = newValue }
+    }
+    var body: some View {
+        Text(value.formatted(.number.locale(NativeLocalization.locale).precision(.fractionLength(0...1))))
+            .monospacedDigit().fontWeight(.bold)
+    }
+}
+
 struct NativeNutritionView: View {
     let day: DietDayResponse
     let compact: Bool
@@ -504,7 +516,7 @@ struct NativeNutritionView: View {
             }.font(.caption).foregroundColor(.secondary)
             if compact {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: textSize.isAccessibilityCategory ? 2 : 4), alignment: .center, spacing: 12) {
-                    ForEach(metrics) { metric in
+                    ForEach(Array(metrics.enumerated()), id: \.element.id) { index, metric in
                         Button { toggle(metric.id) } label: {
                             VStack(spacing: 5) {
                                 ZStack {
@@ -512,8 +524,18 @@ struct NativeNutritionView: View {
                                     Circle().trim(from: 0, to: metric.fraction).stroke(metric.color, style: StrokeStyle(lineWidth: 4, lineCap: .round)).rotationEffect(.degrees(-90))
                                     Image(systemName: metric.icon).font(.system(size: 20)).foregroundColor(metric.color)
                                 }.frame(width: 44, height: 44)
-                                (Text(numberText(metric.value)).fontWeight(.bold).foregroundColor(metric.color) + Text(" / \(numberText(metric.target))\(metric.unit == "g" ? "g" : "")").foregroundColor(.secondary))
+                                    .background(NativeXPNutritionProbe(index: index))
+                                    .animation(.easeOut(duration: 0.55), value: metric.fraction)
+                                HStack(spacing: 0) {
+                                    if let value = metric.value {
+                                        NativeAnimatedNutritionNumber(value: value).foregroundColor(metric.color)
+                                    } else {
+                                        Text("—").fontWeight(.bold).foregroundColor(metric.color)
+                                    }
+                                    Text(" / \(numberText(metric.target))\(metric.unit == "g" ? "g" : "")").foregroundColor(.secondary)
+                                }
                                     .font(.caption2).lineLimit(1).minimumScaleFactor(0.7)
+                                    .animation(.easeOut(duration: 0.55), value: metric.value)
                                 Text(metric.id).font(.caption2).foregroundColor(.secondary).lineLimit(1).minimumScaleFactor(0.75)
                             }.frame(maxWidth: .infinity)
                         }.buttonStyle(.plain).accessibilityLabel(L("Detalhes de \(metric.id)"))
@@ -521,7 +543,7 @@ struct NativeNutritionView: View {
                     }
                 }
             } else {
-                ForEach(metrics) { metric in
+                    ForEach(Array(metrics.enumerated()), id: \.element.id) { index, metric in
                     Button { toggle(metric.id) } label: {
                         HStack(spacing: 12) {
                             Image(systemName: metric.icon).foregroundColor(metric.color).frame(width: 24)
@@ -531,7 +553,8 @@ struct NativeNutritionView: View {
                                     Capsule().fill(Color.white.opacity(0.08))
                                     Capsule().fill(metric.color).frame(width: geo.size.width * metric.fraction)
                                 }.frame(height: 4)
-                            }
+                            }.background(NativeXPNutritionProbe(index: index))
+                                .animation(.easeOut(duration: 0.55), value: metric.fraction)
                         }.font(.subheadline).padding(.vertical, 6)
                     }.buttonStyle(.plain).accessibilityLabel(L("Detalhes de \(metric.id)"))
                 }

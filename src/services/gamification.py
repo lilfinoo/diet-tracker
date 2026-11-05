@@ -87,7 +87,7 @@ def record_gamification_action(user_id, action, local_date, timezone_name=None):
     return gained
 
 
-def record_meal_xp(user_id, local_date, source_key, planned_meals=3, analysis=False, timezone_name=None):
+def record_meal_xp(user_id, local_date, source_key, planned_meals=5, analysis=False, timezone_name=None):
     """Award up to 100 meal-related XP per local day, once per confirmed source."""
     timezone_name = timezone_name or user_timezone(user_id)
     today = datetime.now(ZoneInfo(timezone_name)).date()
@@ -109,7 +109,7 @@ def record_meal_xp(user_id, local_date, source_key, planned_meals=3, analysis=Fa
     already_awarded = db.session.query(func.coalesce(func.sum(GamificationAward.xp), 0)).filter_by(
         user_id=user_id, action="meal", local_date=local_date,
     ).scalar() or 0
-    meal_share = max(1, 100 // max(1, min(10, int(planned_meals or 3))))
+    meal_share = max(1, 100 // max(1, min(10, int(planned_meals or 5))))
     requested = min(100, max(meal_share + 1, 80)) if analysis else meal_share
     gained = max(0, min(requested, 100 - int(already_awarded)))
     db.session.add(GamificationAward(user_id=user_id, action="meal", source_key=source_key,

@@ -18,6 +18,7 @@ struct NativeDietSlotView: View {
     @State private var horizontalSwipe: Bool?
     @State private var showingDescription = false
     @State private var showingDifferentMeal = false
+    @State private var globalOrigin = CGPoint.zero
 
     private var meal: DietMealAlternative? { slot.alternatives.first { $0.id == slot.selectedPlanMealId } }
     private var pending: Bool { slot.result == "pending" }
@@ -120,6 +121,10 @@ struct NativeDietSlotView: View {
         }
         .background(RoundedRectangle(cornerRadius: FitTrackerTheme.cardRadius).fill(swipeOffset < -8 ? Color.green.opacity(0.16) : Color.orange.opacity(0.16)))
         .clipShape(RoundedRectangle(cornerRadius: FitTrackerTheme.cardRadius))
+        .background(GeometryReader { proxy in
+            Color.clear.preference(key: NativeDietSlotOriginKey.self, value: proxy.frame(in: .global).origin)
+        })
+        .onPreferenceChange(NativeDietSlotOriginKey.self) { globalOrigin = $0 }
         .sheet(isPresented: $showingDifferentMeal) { NativeMealComposer(date: date, slot: slot) }
         .simultaneousGesture(DragGesture(minimumDistance: 16)
             .onChanged { value in
@@ -134,7 +139,8 @@ struct NativeDietSlotView: View {
                 defer { horizontalSwipe = nil }
                 guard pending, !busy, !diary.isPending(date: date, slotKey: slot.slotKey) else { return }
                 if horizontalSwipe == true, abs(value.translation.width) >= 85 {
-                    Task { await setOutcome(value.translation.width < 0 ? .consumedPlanned : .skipped) }
+                    let origin = CGPoint(x: globalOrigin.x + value.startLocation.x, y: globalOrigin.y + value.startLocation.y)
+                    Task { await setOutcome(value.translation.width < 0 ? .consumedPlanned : .skipped, origin: origin) }
                 } else {
                     withAnimation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.85)) { swipeOffset = 0 }
                 }
@@ -214,11 +220,11 @@ struct NativeDietSlotView: View {
         }
     }
     @MainActor
-    private func setOutcome(_ outcome: DietSlotOutcome) async {
+    private func setOutcome(_ outcome: DietSlotOutcome, origin: CGPoint? = nil) async {
         guard !busy, !diary.isPending(date: date, slotKey: slot.slotKey), let owner = session.user?.id else { return }
         busy = true
         swipeOffset = 0
-        await diary.setOutcome(date: date, slot: slot, outcome: outcome, api: session.api,
+        await diary.setOutcome(date: date, slot: slot, outcome: outcome, origin: origin, api: session.api,
             isCurrentOwner: { session.user?.id == owner })
         busy = false
     }
@@ -237,4 +243,9 @@ struct NativeDietSlotView: View {
         }
         return succeeded
     }
+}
+
+private struct NativeDietSlotOriginKey: PreferenceKey {
+    static var defaultValue = CGPoint.zero
+    static func reduce(value: inout CGPoint, nextValue: () -> CGPoint) { value = nextValue() }
 }
