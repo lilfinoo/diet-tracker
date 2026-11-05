@@ -10,6 +10,7 @@ from src.routes.common import _activity_list_item, _ensure_user_workout_history,
 from src.services.consistency import consistency_days
 from src.services.achievements import achievement_catalog, serialize_unlock
 from src.services.badges import serialize_badges, serialize_profile_highlights
+from src.services.gamification import gamification_summary
 from src.services.personal_records import current_max_load, exercise_progress, serialize_personal_record
 from src.services.workout_plans import catalog_by_key
 from src.services.workout_progress import (
@@ -233,6 +234,7 @@ def progress_overview():
         "performance": {"exercises": exercises, "recent": recent_performance},
         "weekly": weekly,
         "consistency": consistency_days(g.user.id),
+        "gamification": gamification_summary(g.user.id),
         "exercise_goal": serialize_exercise_goal(current_exercise_goal(g.user.id)),
         "recent_personal_records": [serialize_personal_record(item) for item in recent_records],
         "recent_achievements": [serialize_unlock(item) for item in recent_unlocks],

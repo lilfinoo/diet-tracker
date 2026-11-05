@@ -9,6 +9,9 @@ from src.routes.common import _local_date_for_timezone, _require_lengths, ai_con
 from src.services.badges import BADGE_CODES, available_profile_items, apply_profile_highlights, serialize_badges, serialize_profile_highlights
 from src.services.ai import AIQuotaExceededError, AIResponseError, AIServiceError, AIServiceUnavailableError, calculate_nutrition
 from src.services.analytics import record_event
+from src.services.gamification import record_gamification_action
+from src.services.gamification import gamification_summary
+from src.services.achievements import evaluate_achievements, serialize_unlock
 from src.services.ai_queue import enqueue_ai_request
 from src.services.rate_limit import rate_limit
 from src.services.workoutx import WorkoutXServiceError, approved_media, get_cached_gif
@@ -199,12 +202,21 @@ def add_diet_entry():
     )
     db.session.add(new_entry)
     db.session.flush()
+    xp_gained = record_gamification_action(user.id, "meal", entry_date)
+    new_unlocks = evaluate_achievements(user.id)
     record_event(
         "meal_logged",
         user_id=user.id,
     )
+    payload = {
+        "message": "Registro de dieta adicionado",
+        "entry": new_entry.to_dict(),
+        "xp_gained": xp_gained,
+        "gamification": gamification_summary(user.id),
+        "achievements_unlocked": [serialize_unlock(item) for item in new_unlocks],
+    }
     db.session.commit()
-    return jsonify({"message": "Registro de dieta adicionado", "entry": new_entry.to_dict()}), 201
+    return jsonify(payload), 201
 
 
 @profile_bp.route("/diet", methods=["GET"])

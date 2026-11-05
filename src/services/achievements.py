@@ -12,6 +12,7 @@ from src.models.user import (
     db,
 )
 from src.services.workout_progress import backfill_session_weeks, user_timezone, weekly_progress
+from src.services.gamification import gamification_metrics
 
 
 ACHIEVEMENTS = {
@@ -93,6 +94,88 @@ ACHIEVEMENTS = {
 ACHIEVEMENT_CATALOG = ACHIEVEMENTS
 
 
+def _add_daily_milestones(track, category, entries):
+    category_key = {
+        "sessions": "treino", "records": "recorde", "goals": "meta",
+        "weekly_streak": "consistencia", "meal_days": "alimentacao",
+        "water_days": "hidratacao", "streak_days": "sequencia",
+        "active_days": "presenca",
+    }[track]
+    for code, title, threshold, tier in entries:
+        ACHIEVEMENTS[code] = {
+            "title": title,
+            "description": f"Alcance {threshold} {category}.",
+            "category": category_key,
+            "tier": tier,
+            "track": track,
+            "threshold": threshold,
+        }
+
+
+_add_daily_milestones("sessions", "treinos concluídos", [
+    ("workout_5", "Pegando ritmo", 5, "prata"),
+    ("workout_25", "Rotina em construção", 25, "prata"),
+    ("workout_250", "Longa jornada", 250, "ouro"),
+    ("workout_500", "História de treino", 500, "platina"),
+])
+_add_daily_milestones("records", "recordes pessoais", [("records_5", "Novas marcas", 5, "bronze")])
+_add_daily_milestones("goals", "metas de carga", [("goals_5", "Metas em movimento", 5, "ouro")])
+_add_daily_milestones("weekly_streak", "semanas seguidas cumprindo a meta", [
+    ("weekly_1", "Semana cumprida", 1, "bronze"),
+    ("weekly_2", "Duas no ritmo", 2, "bronze"),
+    ("weekly_8", "Ritmo consolidado", 8, "prata"),
+    ("weekly_12", "Trimestre consistente", 12, "ouro"),
+    ("weekly_26", "Semestre de rotina", 26, "ouro"),
+])
+_add_daily_milestones("meal_days", "dias com alimentação registrada", [
+    ("meal_1", "Primeiro registro", 1, "bronze"),
+    ("meal_3", "Aprendendo a observar", 3, "bronze"),
+    ("meal_7", "Uma semana registrada", 7, "bronze"),
+    ("meal_14", "Duas semanas de atenção", 14, "prata"),
+    ("meal_30", "Mês acompanhado", 30, "prata"),
+    ("meal_60", "Rotina alimentar", 60, "ouro"),
+    ("meal_100", "Cem dias de atenção", 100, "ouro"),
+    ("meal_365", "Ano acompanhado", 365, "ouro"),
+])
+_add_daily_milestones("water_days", "dias com hidratação registrada", [
+    ("water_1", "Primeiro gole registrado", 1, "bronze"),
+    ("water_3", "Lembrando da água", 3, "bronze"),
+    ("water_7", "Água na rotina", 7, "bronze"),
+    ("water_14", "Duas semanas registradas", 14, "prata"),
+    ("water_30", "Mês de hidratação", 30, "prata"),
+    ("water_100", "Cem dias registrados", 100, "ouro"),
+])
+_add_daily_milestones("streak_days", "dias seguidos de constância", [
+    ("streak_3", "Começou o ritmo", 3, "bronze"),
+    ("streak_7", "Semana de constância", 7, "bronze"),
+    ("streak_14", "Duas semanas no ritmo", 14, "prata"),
+    ("streak_30", "Mês de constância", 30, "prata"),
+    ("streak_60", "Constância crescendo", 60, "ouro"),
+    ("streak_100", "Cem de constância", 100, "ouro"),
+    ("streak_180", "Meio ano presente", 180, "ouro"),
+    ("streak_365", "Ano de constância", 365, "ouro"),
+])
+_add_daily_milestones("active_days", "dias ativos", [
+    ("active_7", "Uma semana presente", 7, "bronze"),
+    ("active_30", "Trinta dias presentes", 30, "prata"),
+    ("active_100", "Cem dias presentes", 100, "ouro"),
+    ("active_365", "Um ano presente", 365, "ouro"),
+])
+ACHIEVEMENTS["return_after_break"] = {
+    "title": "Recomeço", "description": "Volte a registrar depois de uma pausa.",
+    "category": "presenca", "tier": "bronze", "track": "returns", "threshold": 1,
+}
+for code, title, description in [
+    ("training_journey", "Jornada de treino", "Some 30 dias ativos e conclua 10 treinos."),
+    ("meal_journey", "Jornada alimentar", "Some 60 dias ativos e registre alimentação em 30 dias."),
+    ("integrated_routine", "Rotina integrada", "Cumpra metas de treino por 8 semanas e registre alimentação e água em 30 dias."),
+]:
+    ACHIEVEMENTS[code] = {
+        "title": title, "description": description, "category": "colecao",
+        "tier": "platina", "track": "collections", "threshold": 1,
+    }
+
+
 @dataclass(frozen=True)
 class _UnlockCandidate:
     unlocked_at: datetime
@@ -123,7 +206,7 @@ def _highlighted_events(user_id):
     )
 
 
-def _consistent_candidate(user_id):
+def _consistent_candidates(user_id, thresholds=(4,)):
     goals = (
         WorkoutWeeklyGoal.query.filter_by(user_id=user_id)
         .order_by(
@@ -134,7 +217,7 @@ def _consistent_candidate(user_id):
         .all()
     )
     if not goals:
-        return None
+        return {}
 
     backfill_session_weeks(user_id, user_timezone(user_id))
     sessions = (
@@ -152,7 +235,7 @@ def _consistent_candidate(user_id):
         .all()
     )
     if not sessions:
-        return None
+        return {}
 
     sessions_by_week = defaultdict(list)
     for session in sessions:
@@ -163,6 +246,8 @@ def _consistent_candidate(user_id):
     goal_index = 0
     active_goal = None
     streak = 0
+    found = {}
+    thresholds = set(thresholds)
     while week <= last_session_week:
         while goal_index < len(goals) and goals[goal_index].effective_week_start <= week:
             active_goal = goals[goal_index]
@@ -171,16 +256,20 @@ def _consistent_candidate(user_id):
         week_sessions = sessions_by_week.get(week, [])
         if active_goal and len(week_sessions) >= active_goal.target_sessions:
             streak += 1
-            if streak == 4:
+            if streak in thresholds and streak not in found:
                 milestone_session = week_sessions[active_goal.target_sessions - 1]
-                return _UnlockCandidate(
+                found[streak] = _UnlockCandidate(
                     unlocked_at=milestone_session.completed_at,
                     workout_session_id=milestone_session.id,
                 )
         else:
             streak = 0
         week += timedelta(days=7)
-    return None
+    return found
+
+
+def _consistent_candidate(user_id, threshold=4):
+    return _consistent_candidates(user_id, (threshold,)).get(threshold)
 
 
 def _candidates(user_id):
@@ -245,9 +334,63 @@ def _candidates(user_id):
             exercise_goal_id=achieved_goal.id,
         )
 
-    consistent = _consistent_candidate(user_id)
-    if consistent:
-        candidates["consistent"] = consistent
+    weekly_thresholds = {
+        "consistent": 4, "weekly_1": 1, "weekly_2": 2,
+        "weekly_8": 8, "weekly_12": 12, "weekly_26": 26,
+    }
+    weekly_candidates = _consistent_candidates(user_id, weekly_thresholds.values())
+    for code, threshold in weekly_thresholds.items():
+        milestone = weekly_candidates.get(threshold)
+        if milestone:
+            candidates[code] = milestone
+
+    from src.models.user import GamificationDay
+    daily_rows = GamificationDay.query.filter_by(user_id=user_id).order_by(
+        GamificationDay.local_date.asc()
+    ).all()
+    daily_metrics = gamification_metrics(user_id)
+    for code, definition in ACHIEVEMENTS.items():
+        if code in candidates:
+            continue
+        track, threshold = definition.get("track"), int(definition.get("threshold") or 1)
+        if track == "sessions" and len(sessions) >= threshold:
+            session = sessions[threshold - 1]
+            candidates[code] = _UnlockCandidate(session.completed_at, workout_session_id=session.id)
+        elif track == "records" and len(events) >= threshold:
+            event = events[threshold - 1]
+            candidates[code] = _UnlockCandidate(event.achieved_at, workout_session_id=event.workout_session_id)
+        elif track == "goals" and achieved_goal and ExerciseGoal.query.filter_by(user_id=user_id, status="achieved").count() >= threshold:
+            goal = ExerciseGoal.query.filter_by(user_id=user_id, status="achieved").order_by(ExerciseGoal.achieved_at.asc()).offset(threshold - 1).first()
+            if goal:
+                candidates[code] = _UnlockCandidate(goal.achieved_at, workout_session_id=goal.achieved_session_id, exercise_goal_id=goal.id)
+        elif track in {"meal_days", "water_days", "active_days"}:
+            field = {"meal_days": "meal", "water_days": "water"}.get(track)
+            eligible = [row for row in daily_rows if (getattr(row, field) if field else row.meal or row.water or row.workout)]
+            if len(eligible) >= threshold:
+                candidates[code] = _UnlockCandidate(datetime.combine(eligible[threshold - 1].local_date, datetime.min.time()))
+        elif track == "streak_days" and daily_metrics["streak_days"] >= threshold:
+            run = 0
+            previous = None
+            for row in daily_rows:
+                active = row.meal or row.water or row.workout
+                run = run + 1 if active and previous and row.local_date == previous + timedelta(days=1) else 1 if active else 0
+                previous = row.local_date if active else None
+                if run >= threshold:
+                    candidates[code] = _UnlockCandidate(datetime.combine(row.local_date, datetime.min.time()))
+                    break
+        elif track == "returns" and daily_metrics["returns"] >= threshold:
+            row = next((row for row in daily_rows if row.return_earned), None)
+            if row:
+                candidates[code] = _UnlockCandidate(datetime.combine(row.local_date, datetime.min.time()))
+        elif track == "collections":
+            eight_week_streak = weekly_candidates.get(8) is not None
+            ready = {
+                "training_journey": daily_metrics["active_days"] >= 30 and len(sessions) >= 10,
+                "meal_journey": daily_metrics["active_days"] >= 60 and daily_metrics["meal_days"] >= 30,
+                "integrated_routine": daily_metrics["meal_days"] >= 30 and daily_metrics["water_days"] >= 30 and eight_week_streak,
+            }.get(code, False)
+            if ready and daily_rows:
+                candidates[code] = _UnlockCandidate(datetime.combine(daily_rows[-1].local_date, datetime.min.time()))
     return candidates
 
 
@@ -290,6 +433,7 @@ def serialize_unlock(unlock):
         "code": unlock.achievement_code,
         "title": definition.get("title", unlock.achievement_code),
         "description": definition.get("description", ""),
+        "tier": definition.get("tier", "bronze"),
         "unlocked_at": unlock.unlocked_at.isoformat() if unlock.unlocked_at else None,
         "workout_session_id": unlock.workout_session_id,
         "exercise_goal_id": (
@@ -319,6 +463,7 @@ def achievement_catalog(user_id):
         "records_same_session": max(records_by_session.values(), default=0),
         "goals": ExerciseGoal.query.filter_by(user_id=user_id, status="achieved").count(),
         "weekly_streak": ((weekly_progress(user_id).get("current") or {}).get("streak") or 0),
+        **gamification_metrics(user_id),
     }
 
     items = []

@@ -12,6 +12,9 @@ from src.services.diet_daily import (
     select_daily_option,
     set_daily_outcome,
 )
+from src.services.gamification import record_gamification_action
+from src.services.gamification import gamification_summary
+from src.services.achievements import evaluate_achievements, serialize_unlock
 
 
 diet_daily_bp = Blueprint("diet_daily", __name__)
@@ -89,7 +92,19 @@ def update_daily_diet_outcome(date_value, slot_key):
             meal_id=data.get("diet_plan_meal_id"),
             entry_data=entry_data,
         )
-        return jsonify({"state": state.to_dict()}), 201 if created else 200
+        xp_gained = 0
+        new_unlocks = []
+        if result in {"consumed_planned", "consumed_different"}:
+            xp_gained = record_gamification_action(g.user.id, "meal", _date(date_value))
+            new_unlocks = evaluate_achievements(g.user.id)
+        payload = {
+            "state": state.to_dict(),
+            "xp_gained": xp_gained,
+            "gamification": gamification_summary(g.user.id),
+            "achievements_unlocked": [serialize_unlock(item) for item in new_unlocks],
+        }
+        db.session.commit()
+        return jsonify(payload), 201 if created else 200
     except DietDailyError as error:
         return _error_response(error)
 

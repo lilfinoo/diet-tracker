@@ -42,6 +42,8 @@ class User(db.Model):
     ai_consent_at = db.Column(db.DateTime, nullable=True)
 
     # Relacionamentos
+    gamification_profile = db.relationship("GamificationProfile", uselist=False, cascade="all, delete-orphan")
+    gamification_days = db.relationship("GamificationDay", cascade="all, delete-orphan")
     diet_entries = db.relationship("DietEntry", backref="user", lazy=True, cascade="all, delete-orphan")
     water_entries = db.relationship("WaterEntry", backref="user", lazy=True, cascade="all, delete-orphan")
     measurements = db.relationship("Measurement", backref="user", lazy=True, cascade="all, delete-orphan")
@@ -672,6 +674,31 @@ class UserProfile(db.Model):
             "profile_missing_fields": missing,
             "profile_complete": not missing,
         }
+
+class GamificationProfile(db.Model):
+    __table_args__ = (db.CheckConstraint("available_protections BETWEEN 0 AND 2", name="ck_gamification_protections"),)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, unique=True)
+    current_streak = db.Column(db.Integer, nullable=False, default=0)
+    best_streak = db.Column(db.Integer, nullable=False, default=0)
+    active_days = db.Column(db.Integer, nullable=False, default=0)
+    available_protections = db.Column(db.Integer, nullable=False, default=0)
+    last_active_date = db.Column(db.Date, nullable=True)
+
+
+class GamificationDay(db.Model):
+    __table_args__ = (db.UniqueConstraint("user_id", "local_date", name="uq_gamification_day_user_date"),)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(UUIDType(binary=False), db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    local_date = db.Column(db.Date, nullable=False)
+    timezone = db.Column(db.String(64), nullable=False)
+    meal = db.Column(db.Boolean, nullable=False, default=False)
+    water = db.Column(db.Boolean, nullable=False, default=False)
+    workout = db.Column(db.Boolean, nullable=False, default=False)
+    first_action_bonus = db.Column(db.Boolean, nullable=False, default=False)
+    return_earned = db.Column(db.Boolean, nullable=False, default=False)
+    xp = db.Column(db.Integer, nullable=False, default=0)
+
 
 class WaterEntry(db.Model):
     __table_args__ = (

@@ -26,6 +26,7 @@ from src.models.user import (
 from src.routes.common import _activity_list_item, _ensure_user_workout_history, _owned_active_session, _performed_sets_payload, _session_exercise, _workout_session_summary, idempotent_mutation, json_body, login_required, premium_required
 from src.services.achievements import evaluate_achievements, reconcile_achievements, serialize_unlock
 from src.services.analytics import record_event
+from src.services.gamification import gamification_summary, record_gamification_action
 from src.services.personal_records import (
     ensure_personal_record_history,
     process_session_personal_records,
@@ -579,6 +580,9 @@ def finish_workout_session(session_id, repeat_action=False):
         session_record.completed_at = datetime.utcnow()
         timezone_name = confirmed_user_timezone(g.user.id) or user_timezone(g.user.id)
         snapshot_session_week(session_record, timezone=timezone_name)
+        xp_gained = record_gamification_action(
+            g.user.id, "workout", session_record.completed_local_date, timezone_name,
+        )
         mark("week_snapshot")
         process_session_personal_records(session_record)
         mark("records")
@@ -605,6 +609,8 @@ def finish_workout_session(session_id, repeat_action=False):
         "weekly_progress": progress,
         "exercise_goals_reached": [serialize_exercise_goal(reached_goal)] if reached_goal else [],
         "achievements_unlocked": [serialize_unlock(item) for item in new_unlocks],
+        "gamification": gamification_summary(g.user.id),
+        "xp_gained": xp_gained if newly_finished else 0,
     }
     key = request.headers.get("Idempotency-Key", "").strip()
     if repeat_action and key:

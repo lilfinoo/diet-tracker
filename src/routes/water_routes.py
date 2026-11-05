@@ -7,6 +7,9 @@ from sqlalchemy.exc import IntegrityError
 from src.models.user import IdempotentOperation, UserProfile, WaterEntry, db
 from src.routes.common import json_body, login_required
 from src.services.workout_progress import user_timezone
+from src.services.gamification import record_gamification_action
+from src.services.achievements import evaluate_achievements, serialize_unlock
+from src.services.gamification import gamification_summary
 
 
 water_bp = Blueprint("water", __name__)
@@ -90,7 +93,15 @@ def add_water():
     )
     db.session.add(entry)
     db.session.flush()
-    result = {**_day_summary(entry.local_date), "entry": entry.to_dict()}
+    xp_gained = record_gamification_action(g.user.id, "water", entry.local_date, timezone_name)
+    new_unlocks = evaluate_achievements(g.user.id)
+    result = {
+        **_day_summary(entry.local_date),
+        "entry": entry.to_dict(),
+        "xp_gained": xp_gained,
+        "gamification": gamification_summary(g.user.id),
+        "achievements_unlocked": [serialize_unlock(item) for item in new_unlocks],
+    }
     # Save the receipt with the entry: concurrent retries cannot create two drinks.
     db.session.add(IdempotentOperation(
         user_id=g.user.id, idempotency_key=key, method=request.method, path=request.path,
