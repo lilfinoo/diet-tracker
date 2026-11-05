@@ -106,6 +106,10 @@ def gamification_summary(user_id):
         "rank": rank_for_level(level),
         "level_xp": level_xp,
         "next_level_xp": next_level_xp,
+        # Builds 32/33 decode these acronym properties without snake-case conversion.
+        "totalXP": total_xp,
+        "levelXP": level_xp,
+        "nextLevelXP": next_level_xp,
         "next_level": level + 1,
         "current_streak": current_streak,
         "best_streak": profile.best_streak if profile else 0,

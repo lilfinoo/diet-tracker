@@ -32,6 +32,9 @@ def test_actions_are_capped_per_day_and_survive_a_new_session(app, owner):
         db.session.remove()
         summary = gamification.gamification_summary(owner)
         assert summary['total_xp'] == 80
+        assert summary['totalXP'] == summary['total_xp']
+        assert summary['levelXP'] == summary['level_xp']
+        assert summary['nextLevelXP'] == summary['next_level_xp']
         assert summary['current_streak'] == 1
         assert summary['active_days'] == 1
         assert len(summary['days']) == 28

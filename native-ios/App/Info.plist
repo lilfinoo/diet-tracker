@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.962052909671-o5ilrh1029cbodkkl4phgfobe0ibs1a5</string>
+			</array>
+		</dict>
+	</array>
+	<key>FitTrackerAPIBaseURL</key>
+	<string>$(FIT_TRACKER_API_BASE_URL)</string>
+	<key>GIDClientID</key>
+	<string>962052909671-o5ilrh1029cbodkkl4phgfobe0ibs1a5.apps.googleusercontent.com</string>
+	<key>GIDServerClientID</key>
+	<string>962052909671-3m6t5ifo07gurgh8ris841hsvc68dr79.apps.googleusercontent.com</string>
+</dict>
+</plist>
