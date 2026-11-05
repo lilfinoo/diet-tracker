@@ -337,6 +337,7 @@ struct NativeWorkoutExecutionView: View {
 
     private func enqueue(_ operation: WorkoutPendingOperation) {
         guard let storageKey, let ownerId, account.user?.id == ownerId else { return }
+        if operation.kind == .finish { NativeXPEffects.shared.captureAction(key: operation.key) }
         persist()
         WorkoutExecutionSyncCoordinator.shared.enqueue(operation, for: storageKey, api: account.api,
             ownerId: ownerId, stillOwner: { account.user?.id })

@@ -3,6 +3,18 @@ import Foundation
 import FoundationNetworking
 #endif
 
+public struct XPAwardNotice: Sendable {
+    public let xp: Int
+    public let requestID: UUID
+    public let summary: GamificationSummary?
+
+    public init(xp: Int, requestID: UUID, summary: GamificationSummary?) {
+        self.xp = xp
+        self.requestID = requestID
+        self.summary = summary
+    }
+}
+
 public enum APIError: Error, LocalizedError, Sendable {
     case http(status: Int, message: String)
     case csrfMismatch
@@ -27,17 +39,24 @@ public actor FitTrackerAPI {
     private let baseURL: URL
     private let session: URLSession
     private let language: String
+    private let xpRewardDefaults: UserDefaults
+    private var xpOwnerID: UUID?
     private var transports: [UUID: Task<(Data, URLResponse), Error>] = [:]
     private var changingAuthentication = false
     private var authenticationGeneration = 0
     private var announcedAchievements: Set<String> = []
+    private var announcedXPAwards: Set<String> = []
+    private var xpJobOrigins: [String: UUID] = [:]
     private var authenticated = false
     private var workoutSession: (response: SessionResponse, cookies: String, checkedAt: Date)?
     public nonisolated static let achievementUnlocked = Notification.Name("FitTrackerAchievementUnlocked")
     public nonisolated static let sessionExpired = Notification.Name("FitTrackerSessionExpired")
+    public nonisolated static let xpRequestStarted = Notification.Name("FitTrackerXPRequestStarted")
+    public nonisolated static let xpAwarded = Notification.Name("FitTrackerXPAwarded")
 
     /// Use the API root (for example https://host/api), not a screen URL.
-    public init(baseURL: URL, session: URLSession = FitTrackerAPI.makeSession(), language: String? = nil) {
+    public init(baseURL: URL, session: URLSession = FitTrackerAPI.makeSession(), language: String? = nil, xpRewardDefaults: UserDefaults = .standard) {
+        self.xpRewardDefaults = xpRewardDefaults
         self.baseURL = baseURL
         self.session = session
         self.language = language ?? Bundle.main.preferredLocalizations.first ?? "pt-BR"
@@ -60,6 +79,7 @@ public actor FitTrackerAPI {
         if result.loggedIn, result.user == nil || result.csrfToken?.isEmpty != false {
             throw APIError.invalidResponse
         }
+        xpOwnerID = result.loggedIn ? result.user?.id : nil
         authenticated = result.loggedIn
         workoutSession = result.loggedIn ? (result, cookieSignature(), Date()) : nil
         return result
@@ -96,7 +116,7 @@ public actor FitTrackerAPI {
 
     public func logout() async throws {
         try await beginAuthenticationChange()
-        defer { clearSessionCookies(); authenticated = false; changingAuthentication = false }
+        defer { clearSessionCookies(); authenticated = false; xpOwnerID = nil; changingAuthentication = false }
         let current = try await restoreSession()
         guard current.loggedIn else { return }
         let token = try csrfToken(for: current)
@@ -139,11 +159,20 @@ public actor FitTrackerAPI {
         // Only these read-only preflights may wait for a sleeping host or retry.
         // OAuth authorization codes and account writes must never be replayed.
         let resilientPreflight = method == "GET" && ["auth/config", "check_session"].contains(path)
+        let requestID = UUID()
+        let xpMutation = (method == "POST" && (["diet", "water", "diet/ai_macros"].contains(path) || path.hasSuffix("/finish") || planGeneration))
+            || (method == "PUT" && path.hasPrefix("diet/") && path.hasSuffix("/outcome"))
+        if xpMutation {
+            var context = ["path": path]
+            if let idempotencyKey { context["idempotencyKey"] = idempotencyKey }
+            NotificationCenter.default.post(name: Self.xpRequestStarted, object: requestID, userInfo: context)
+        }
         let (data, response) = try await send(request, generation: generation, resilientPreflight: resilientPreflight)
         guard let response = response as? HTTPURLResponse else { throw APIError.invalidResponse }
         guard (200..<300).contains(response.statusCode) else {
             if response.statusCode == 401, authenticated, !authPath {
                 authenticated = false
+                xpOwnerID = nil
                 workoutSession = nil
                 NotificationCenter.default.post(name: Self.sessionExpired, object: nil)
             }
@@ -164,6 +193,43 @@ public actor FitTrackerAPI {
         let result: Response
         do { result = try decoder.decode(type, from: allowEmptyResponse && response.statusCode == 204 ? Data("{}".utf8) : data) }
         catch { throw APIError.invalidResponse }
+        if let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if ["login", "register", "auth/google", "auth/apple"].contains(path) {
+                if payload["logged_in"] as? Bool == false { xpOwnerID = nil }
+                else if let user = payload["user"] as? [String: Any], let id = user["id"] as? String {
+                    xpOwnerID = UUID(uuidString: id)
+                }
+            }
+            let jobID = (payload["job_id"] as? String)?.lowercased()
+            if xpMutation, let jobID { xpJobOrigins[jobID] = requestID }
+            let nested = payload["result"] as? [String: Any]
+            let reward = nested ?? payload
+            if let xp = (reward["xp_gained"] as? Int) ?? (payload["xp_gained"] as? Int), xp > 0 {
+                let polledJobID = method == "GET" && path.hasPrefix("ai/tasks/")
+                    ? String(path.dropFirst("ai/tasks/".count)).lowercased() : nil
+                let origin = polledJobID.flatMap { xpJobOrigins[$0] } ?? requestID
+                let totalXP = ((reward["gamification"] as? [String: Any]) ?? (payload["gamification"] as? [String: Any]))?["total_xp"] as? Int
+                let stableKey = polledJobID.map { "job:\($0)" } ?? jobID.map { "job:\($0)" }
+                    ?? idempotencyKey.map { "\(method):\(path):\($0)" }
+                    ?? totalXP.map { "\(path):total:\($0)" }
+                let awardKey = stableKey ?? "\(method):\(path):\(requestID.uuidString)"
+                let persistedKey = xpOwnerID.flatMap { owner in
+                    stableKey.map { "\(baseURL.absoluteString)|\(owner.uuidString)|\($0)" }
+                }
+                let storedAwards = xpRewardDefaults.stringArray(forKey: "FitTrackerAnnouncedXPAwards") ?? []
+                if announcedXPAwards.insert("\(generation):\(awardKey)").inserted,
+                   persistedKey.map({ !storedAwards.contains($0) }) ?? true {
+                    if let persistedKey {
+                        xpRewardDefaults.set(Array((storedAwards + [persistedKey]).suffix(256)), forKey: "FitTrackerAnnouncedXPAwards")
+                    }
+                    let summaryData = ((reward["gamification"] as? [String: Any]) ?? (payload["gamification"] as? [String: Any]))
+                        .flatMap { try? JSONSerialization.data(withJSONObject: $0) }
+                    let summary = summaryData.flatMap { try? decoder.decode(GamificationSummary.self, from: $0) }
+                    NotificationCenter.default.post(name: Self.xpAwarded,
+                                                    object: XPAwardNotice(xp: xp, requestID: origin, summary: summary))
+                }
+            }
+        }
         if method != "GET", let envelope = try? decoder.decode(AchievementEnvelope.self, from: data) {
             for notice in envelope.achievementsUnlocked ?? [] where announcedAchievements.insert(notice.code).inserted {
                 NotificationCenter.default.post(name: Self.achievementUnlocked, object: notice)
@@ -218,6 +284,9 @@ public actor FitTrackerAPI {
         guard !changingAuthentication else { throw CancellationError() }
         changingAuthentication = true
         announcedAchievements.removeAll()
+        announcedXPAwards.removeAll()
+        xpJobOrigins.removeAll()
+        xpOwnerID = nil
         workoutSession = nil
         authenticationGeneration += 1
         let pending = Array(transports.values)

@@ -40,8 +40,8 @@ struct NativeProgressView: View {
                             NativeRecoveryCard(title: L("Vamos atualizar seu progresso?"), message: error, actionTitle: L("Tentar novamente")) { Task { await load(force: true) } }
                         }
                         if let overview = tabData.progressOverview {
-                            if let gamification = overview.gamification {
-                                NativeGamificationProgressCard(summary: gamification)
+                            if let gamification = tabData.gamification ?? overview.gamification {
+                                NativeGamificationProgressCard(summary: gamification) { section = 2 }
                             }
                             weekly(overview.weekly.current)
                             consistency(overview.consistency)
@@ -699,9 +699,11 @@ private struct NativeExerciseHistory: View {
 
 private struct NativeGamificationProgressCard: View {
     let summary: GamificationSummary
+    let action: () -> Void
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 5), count: 7)
 
     var body: some View {
+        Button(action: action) {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
                 Image(systemName: "rosette")
@@ -709,17 +711,12 @@ private struct NativeGamificationProgressCard: View {
                     .frame(width: 48, height: 48).background(Color.fitBlue.opacity(0.14), in: Circle())
                 VStack(alignment: .leading, spacing: 3) {
                     Text(L("Sua jornada")).font(.headline)
-                    Text(L("\(summary.rank) · Nível \(summary.level)")).font(.subheadline).foregroundColor(.fitBlue)
+                    NativeXPLevelLabel(summary: summary).font(.subheadline).foregroundColor(.fitBlue)
                 }
                 Spacer()
                 Text(L("\(summary.totalXp) XP")).font(.caption.weight(.semibold)).foregroundColor(.secondary)
             }
-            ProgressView(value: Double(summary.levelXp), total: Double(max(1, summary.nextLevelXp))).tint(.fitBlue)
-            HStack {
-                Text(L("\(summary.levelXp) / \(summary.nextLevelXp) XP"))
-                Spacer()
-                Text(L("Nível \(summary.nextLevel)"))
-            }.font(.caption).foregroundColor(.secondary)
+            NativeXPProgressBar(summary: summary, showsNextLevel: true)
             HStack(spacing: 12) {
                 Label("\(summary.currentStreak) \(L("dias seguidos"))", systemImage: "flame.fill").foregroundColor(.orange)
                 Spacer(minLength: 0)
@@ -739,6 +736,8 @@ private struct NativeGamificationProgressCard: View {
             }
         }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.fitSurface, in: RoundedRectangle(cornerRadius: 20))
+        }.buttonStyle(.plain)
+            .accessibilityHint(L("Abre a aba Conquistas"))
     }
 }
 

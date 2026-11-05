@@ -530,6 +530,7 @@ struct NativeMealComposer: View {
                                      carbs: try number(carbs, maximum: 5000), fat: try number(fat, maximum: 5000), notes: editingEntry?.notes)
             busy = true
             saveAttempted = true
+            NativeXPEffects.shared.captureAction(key: idempotencyKey)
             Task {
                 do {
                     if let editingEntry {
@@ -612,6 +613,8 @@ struct NativeMealComposer: View {
         error = nil
         analysisFailed = false
         let savedDraft = recoveryDraft
+        let animationKey = savedDraft?.requestKey ?? UUID().uuidString
+        NativeXPEffects.shared.captureAction(key: animationKey)
         resumingAnalysis = savedDraft != nil
         let text = description
         let photo = image.map { NutritionPhotoSource(image: $0) }
@@ -632,6 +635,7 @@ struct NativeMealComposer: View {
                 // Persist the confirmed intent before any POST can spend a credit.
                 try analysisRecovery.save(draft, owner: owner)
                 recoveryDraft = draft
+                NativeXPEffects.shared.copyActionOrigin(from: animationKey, to: draft.requestKey)
                 idempotencyKey = draft.requestKey + ".entry"
                 let response: NutritionAnalysisResponse
                 if let queuedId = draft.jobId { response = .queued(jobId: queuedId) }

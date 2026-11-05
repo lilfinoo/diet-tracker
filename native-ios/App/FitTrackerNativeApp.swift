@@ -63,7 +63,11 @@ final class NativeSession: ObservableObject {
             user = response.loggedIn ? response.user : nil
             resumeWorkoutSync()
             profile = nil
-            if user != nil { profile = try await api.getProfile() }
+            guard user != nil else { return }
+            async let loadedProfile = api.getProfile()
+            async let loadedFreeAccess = api.freeAccessStatus()
+            do { profile = try await loadedProfile } catch { }
+            do { freeAccess = try await loadedFreeAccess } catch { }
         } catch { if !isNativeRequestCancellation(error) { self.error = RequestFailure.message(error, fallback: L("Não conseguimos concluir o acesso agora. Tente novamente em instantes.")) } }
     }
 

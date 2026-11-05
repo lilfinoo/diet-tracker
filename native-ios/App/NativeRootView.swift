@@ -29,6 +29,8 @@ struct NativeRootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.fitBackground.ignoresSafeArea())
+        .background(NativeXPWindowProbe())
+        .onAppear { NativeXPEffects.shared.api = session.api }
         .overlay(alignment: .top) {
             if let ready = backgroundPlans.ready, session.user != nil, !onboarding {
                 Button {
@@ -53,6 +55,7 @@ struct NativeRootView: View {
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.4), value: session.restored)
         .onChange(of: session.user?.id) { _ in
+            NativeXPEffects.shared.reset()
             pendingFirstAction = nil
             onboarding = needsOnboarding
             showingOpeningPremium = false
@@ -62,8 +65,9 @@ struct NativeRootView: View {
             if ready { onboarding = needsOnboarding; offerPremiumOnOpening() }
         }
         .onChange(of: scenePhase) { phase in
-            if phase == .background { openingOfferedTo = nil }
+            if phase == .background { openingOfferedTo = nil; NativeXPEffects.shared.suspend() }
             if phase == .active {
+                NativeXPEffects.shared.resume()
                 Task { try? await session.refreshFreeAccess(); offerPremiumOnOpening() }
             }
         }
@@ -74,6 +78,7 @@ struct NativeRootView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: FitTrackerAPI.sessionExpired).receive(on: DispatchQueue.main)) { _ in session.invalidate() }
+
     }
 
     private var needsOnboarding: Bool {
@@ -142,6 +147,9 @@ private struct NativeTabs: View {
             NativeProfileView().tabItem { Label(L("Perfil"), systemImage: "person") }.tag(4)
         }
         .tint(FitTrackerTheme.electricBlue)
+        .onReceive(NotificationCenter.default.publisher(for: FitTrackerAPI.xpAwarded).receive(on: DispatchQueue.main)) { notification in
+            if let notice = notification.object as? XPAwardNotice { tabData.acceptGamification(notice.summary) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .nativeFirstAction)) { _ in selectedTab = 0 }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("fitTrackerNavigate"))) { notification in
             switch notification.userInfo?["tab"] as? String {
@@ -154,7 +162,9 @@ private struct NativeTabs: View {
         }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
-            await tabData.loadProgress(force: true)
+            await tabData.loadProgress(force: tabData.progressOverview != nil)
+            await tabData.loadWorkout(force: tabData.workoutToday != nil)
+            if tabData.workoutToday?.state == "rest" { try? await session.api.checkInRestDay() }
             while !Task.isCancelled, session.user?.id == ownerId {
                 await diary.resumePending(api: session.api, isCurrentOwner: { session.user?.id == ownerId })
                 do { try await Task.sleep(nanoseconds: 15_000_000_000) } catch { return }
@@ -162,7 +172,11 @@ private struct NativeTabs: View {
         }
         .environmentObject(diary)
         .environmentObject(tabData)
-        .task { await tabData.preload() }
+        .task {
+            await tabData.preload()
+            await diary.load(dietDate(Date(), timezone: session.profile?.profile?.timezone), api: session.api)
+            await NativeWaterStores.preload(session: session, owner: ownerId)
+        }
     }
 }
 
@@ -173,6 +187,7 @@ final class NativeTabDataStore: ObservableObject {
     @Published private(set) var workoutError: String?
     @Published private(set) var workoutVersion = 0
     let workoutWeek: WorkoutWeekDataCache
+    @Published private(set) var gamification: GamificationSummary?
     @Published private(set) var progressOverview: ProgressOverview?
     @Published private(set) var progressLoading = false
     @Published private(set) var progressError: String?
@@ -185,6 +200,11 @@ final class NativeTabDataStore: ObservableObject {
     private var progressRefreshPending = false
 
     init(api: FitTrackerAPI) { self.api = api; workoutWeek = WorkoutWeekDataCache(api: api) }
+
+    func acceptGamification(_ summary: GamificationSummary?) {
+        guard let summary else { return }
+        gamification = summary
+    }
 
     func preload() async {
         async let workout: Void = loadWorkout()
@@ -228,6 +248,7 @@ final class NativeTabDataStore: ObservableObject {
         progressRequest = request
         do {
             progressOverview = try await request.value
+            acceptGamification(progressOverview?.gamification)
             progressFetchedAt = Date()
         } catch { if !isNativeRequestCancellation(error) { progressError = RequestFailure.message(error, fallback: L("Seu progresso não carregou agora. Tente novamente em instantes.")) } }
         progressRequest = nil

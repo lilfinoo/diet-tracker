@@ -13,6 +13,12 @@ extension FitTrackerAPI {
         try await request("workouts/today", as: WorkoutToday.self)
     }
 
+    public func checkInRestDay() async throws {
+        let current = try await workoutSessionForMutation()
+        guard current.loggedIn, let token = current.csrfToken, !token.isEmpty else { throw APIError.invalidResponse }
+        _ = try await request("workouts/rest-checkin", method: "POST", csrfToken: token, as: GamificationAwardResponse.self)
+    }
+
     public func getPreviousWorkout(planId: Int, dayId: Int) async throws -> PreviousWorkout {
         try await request("workout_plans/\(planId)/days/\(dayId)/repeat-last", as: PreviousWorkout.self)
     }
@@ -28,5 +34,7 @@ extension FitTrackerAPI {
         try await request("activities/\(id)", as: WorkoutActivityDetail.self)
     }
 }
+
+private struct GamificationAwardResponse: Decodable { let xpGained: Int }
 
 private struct ActivityDeletionMessage: Decodable { let message: String? }

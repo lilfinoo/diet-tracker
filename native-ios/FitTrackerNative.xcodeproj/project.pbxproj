@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A13500000000000000000001 /* NativeXPEffects.swift in Sources */ = {isa = PBXBuildFile; fileRef = A13500000000000000000002 /* NativeXPEffects.swift */; };
 		000000000000000000000012 /* FitTrackerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000000000011 /* FitTrackerCore */; };
 		000000000000000000000015 /* FitTrackerNativeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000013 /* FitTrackerNativeApp.swift */; };
 		000000000000000000000016 /* NativeRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000014 /* NativeRootView.swift */; };
@@ -39,6 +40,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A13500000000000000000002 /* NativeXPEffects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeXPEffects.swift; sourceTree = "<group>"; };
 		000000000000000000000006 /* FitTrackerNative.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = FitTrackerNative.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		000000000000000000000013 /* FitTrackerNativeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FitTrackerNativeApp.swift; sourceTree = "<group>"; };
 		000000000000000000000014 /* NativeRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRootView.swift; sourceTree = "<group>"; };
@@ -121,6 +123,7 @@
 				000000000000000000000020 /* NativeDietView.swift */,
 				000000000000000000000013 /* FitTrackerNativeApp.swift */,
 				000000000000000000000014 /* NativeRootView.swift */,
+				A13500000000000000000002 /* NativeXPEffects.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -231,6 +234,7 @@
 				000000000000000000000021 /* NativeDietView.swift in Sources */,
 				000000000000000000000015 /* FitTrackerNativeApp.swift in Sources */,
 				000000000000000000000016 /* NativeRootView.swift in Sources */,
+				A13500000000000000000001 /* NativeXPEffects.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -321,7 +325,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = App/FitTrackerNative.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 35;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = X9J52U7NYL;
 				FIT_TRACKER_API_BASE_URL = "https://diet-tracker-6i67.onrender.com/api";

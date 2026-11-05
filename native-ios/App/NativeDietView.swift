@@ -141,6 +141,7 @@ final class NativeDietStore: ObservableObject {
               day.slots.contains(where: { $0.slotKey == slot.slotKey && $0.result == "pending" }) else { return }
         if !pendingWrites.contains(date) { confirmedDays[date] = day }
         let operation = PendingOutcome(id: UUID(), date: date, slotKey: slot.slotKey, mealId: slot.selectedPlanMealId, outcome: outcome)
+        NativeXPEffects.shared.captureAction(key: operation.id.uuidString)
         queuedOutcomes[date, default: []].append(operation)
         persistOutcomes()
         pendingWrites.insert(date)
@@ -267,6 +268,17 @@ struct NativeHomeView: View {
                             Image(systemName: "calendar").font(.system(size: 20)).frame(width: 44, height: 44).fitPremiumCard()
                         }.buttonStyle(.plain).foregroundColor(.white.opacity(0.85)).accessibilityLabel(L("Abrir calendário de progresso"))
                     }.padding(.bottom, 4)
+                    if let summary = tabData.gamification ?? tabData.progressOverview?.gamification {
+                        NativeGamificationHomeCard(summary: summary, action: onOpenProgress)
+                    } else if tabData.progressLoading {
+                        HStack(spacing: 10) {
+                            Image(systemName: "rosette.fill").foregroundColor(.fitBlue)
+                            Text(L("Carregando seu nível…")).font(.subheadline.weight(.semibold))
+                            Spacer()
+                            ProgressView().controlSize(.small)
+                        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.fitSurface, in: RoundedRectangle(cornerRadius: 18))
+                    }
                     if let message = diary.successMessage {
                         HStack(alignment: .top) {
                             Button { onOpenDiet() } label: { Label(message, systemImage: "checkmark.circle.fill").multilineTextAlignment(.leading) }
@@ -277,16 +289,21 @@ struct NativeHomeView: View {
                     if needsFirstAction { firstActionCard }
                     if let day = diary.days[today], !needsFirstAction {
                         NativeNutritionView(day: day, compact: true, onOpenDiary: onOpenDiet)
-                    } else if diary.loading.contains(today) { ProgressView(L("Carregando seu dia…")) }
+                    } else if diary.loading.contains(today) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(L("Alimentação")).font(FitTrackerTheme.sectionTitle)
+                            Text(L("Carregando suas refeições…")).font(.subheadline).foregroundColor(.secondary)
+                        }.frame(maxWidth: .infinity, alignment: .leading).padding(16).fitPremiumCard()
+                    } else if diary.days[today] == nil && diary.errors[today] == nil {
+                        HStack { Text(L("Alimentação de hoje")); Spacer(); ProgressView().controlSize(.small) }
+                            .font(FitTrackerTheme.sectionTitle).frame(maxWidth: .infinity, alignment: .leading).padding(16).fitPremiumCard()
+                    }
                     if let error = diary.errors[today] { diaryError(error) }
                     if !needsFirstAction { Button { showMeal = true } label: {
                         Label(L("Adicionar refeição"), systemImage: "plus").font(.body.weight(.semibold))
                             .frame(maxWidth: .infinity)
                     }.buttonStyle(FitPrimaryButtonStyle()) }
                     NativeWaterCard().id(session.user?.id)
-                    if let summary = tabData.progressOverview?.gamification {
-                        NativeGamificationHomeCard(summary: summary, action: onOpenProgress)
-                    }
                     homeSection(L("Seu treino"), action: L("Ver todos")) { showingWorkoutPlans = true }
                     NativeTodayWorkoutCard()
                     if let day = diary.days[today] {
@@ -373,17 +390,12 @@ private struct NativeGamificationHomeCard: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {
                     Image(systemName: "rosette.fill").foregroundColor(.fitBlue)
-                    Text(L("\(summary.rank) · Nível \(summary.level)")).font(.subheadline.weight(.semibold))
+                    NativeXPLevelLabel(summary: summary).font(.subheadline.weight(.semibold))
                     Spacer()
                     Text("\(summary.currentStreak) \(L("dias"))").font(.caption.weight(.semibold)).foregroundColor(.orange)
                     Image(systemName: "flame.fill").foregroundColor(.orange)
                 }
-                ProgressView(value: Double(summary.levelXp), total: Double(max(1, summary.nextLevelXp))).tint(.fitBlue)
-                HStack {
-                    Text(L("\(summary.levelXp) / \(summary.nextLevelXp) XP"))
-                    Spacer()
-                    Text(L("Ver progresso"))
-                }.font(.caption).foregroundColor(.secondary)
+                NativeXPProgressBar(summary: summary)
             }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.fitSurface, in: RoundedRectangle(cornerRadius: 18))
         }.buttonStyle(.plain).accessibilityElement(children: .ignore)
@@ -617,7 +629,7 @@ func dietDate(_ date: Date, timezone: String?) -> String {
 }
 
 @MainActor
-private enum NativeWaterStores {
+enum NativeWaterStores {
     private final class AccountStore {
         weak var session: NativeSession?
         let tracker: WaterTracker
@@ -629,6 +641,9 @@ private enum NativeWaterStores {
         let tracker = WaterTracker(api: session.api, ownerId: owner, isCurrentOwner: { [weak session] in session?.user?.id == owner })
         accounts[owner] = AccountStore(session: session, tracker: tracker)
         return tracker
+    }
+    static func preload(session: NativeSession, owner: UUID) async {
+        await tracker(for: session, owner: owner).refresh()
     }
 }
 
@@ -827,6 +842,7 @@ private struct NativeWaterContent: View {
     private func record(_ amount: Int) {
         currentTime = Date()
         water.record(amount, at: currentTime)
+        if let key = water.queue.writes.last?.entry.key { NativeXPEffects.shared.captureAction(key: key) }
     }
 
     @MainActor private func saveBottle() async {

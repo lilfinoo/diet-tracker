@@ -852,6 +852,7 @@ struct PlanGeneratorView: View {
     }
     private func generate() async {
         guard !busy else { return }
+        NativeXPEffects.shared.captureAction(key: generationKey)
         error = nil
         showingGeneration = true
         generationStarted = Date()
