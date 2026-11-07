@@ -55,7 +55,7 @@
         const offline = Boolean(state.student.is_offline);
         const isDraft = plan.status === "draft";
         return `<article class="professional-plan-card">
-            <div><span class="plan-status plan-status--${esc(plan.status)}">${esc(plan.student_declined_at ? "Recusado" : plan.student_accepted_at ? "Aceito" : plan.status === "published" ? "Aguardando aceite" : statusLabel(plan.status))}</span><small>${plan.source === "ai" ? "IA Premium" : "Manual"}</small></div>
+            <div><span class="plan-status plan-status--${esc(plan.status)}">${esc(plan.student_declined_at ? "Recusado" : plan.student_accepted_at ? "Aceito" : plan.status === "published" ? "Aguardando aceite" : statusLabel(plan.status))}</span><small>${plan.source === "ai" ? "IA" : "Manual"}</small></div>
             <h4>${esc(plan.title)}</h4>
             <p>${esc(plan.description || "Sem descrição")}</p>
             <small>${type === "diet" ? `${Number(plan.meals_count || plan.meals?.length || 0)} refeições` : `${Number(plan.days_count || plan.days_per_week || 0)} treinos · ${Number(plan.exercises_count || 0)} exercícios${plan.session_duration ? ` · ${Number(plan.session_duration)} min` : ""}`}</small>
@@ -263,7 +263,7 @@
     }
 
     function aiControlsHtml(editor) {
-        return `<div class="professional-ai-panel"><h4>Comece com IA e ajuste do seu jeito</h4><p>A geração salva um rascunho. Revise e edite cada detalhe antes de enviar ao aluno.</p>${editor.type === "workout" ? `${selectField("Equipamentos disponíveis", "editorEquipment", editor.questionnaire.equipment?.[0] || "full_gym", { full_gym: "Academia completa", dumbbell: "Halteres", bodyweight: "Peso corporal" })}<label>Limitações e cuidados<textarea id="editorLimitations" maxlength="500">${esc(editor.questionnaire.limitations || "")}</textarea></label><label>Prioridades<textarea id="editorPriorities" maxlength="500">${esc(editor.questionnaire.priorities || "")}</textarea></label>` : ""}<button type="button" class="btn-secondary" onclick="generateProfessionalPlan()"${state.student.is_offline ? " disabled" : ""}><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> Gerar rascunho com IA</button><small>${state.student.is_offline ? "Disponível após o aluno aceitar o vínculo e autorizar o uso de IA." : "Requer acesso à IA e autorização atual do aluno."}</small></div>`;
+        return `<div class="professional-ai-panel"><h4>Comece com IA e ajuste do seu jeito</h4><p>A geração salva um rascunho. Revise e edite cada detalhe antes de enviar ao aluno.</p>${editor.type === "workout" ? `${selectField("Equipamentos disponíveis", "editorEquipment", editor.questionnaire.equipment?.[0] || "full_gym", { full_gym: "Academia completa", dumbbell: "Halteres", bodyweight: "Peso corporal" })}<label>Limitações e cuidados<textarea id="editorLimitations" maxlength="500">${esc(editor.questionnaire.limitations || "")}</textarea></label><label>Prioridades<textarea id="editorPriorities" maxlength="500">${esc(editor.questionnaire.priorities || "")}</textarea></label>` : ""}<button type="button" class="btn-secondary" onclick="generateProfessionalPlan()"${state.student.is_offline ? " disabled" : ""}><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> Gerar rascunho com IA</button><small>${state.student.is_offline ? "Disponível após o aluno aceitar o vínculo e autorizar o uso de IA." : "Incluso no acesso profissional; requer autorização atual do aluno."}</small></div>`;
     }
 
     async function generateProfessionalPlan() {
