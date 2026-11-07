@@ -2245,8 +2245,8 @@
         const targets = plan.nutrition_targets || {};
         const currentAction = plan.is_current
             ? '<span class="plan-current-pill"><i class="fas fa-star" aria-hidden="true"></i> Plano atual</span>'
-            : '<button type="button" class="btn-primary plan-use-current" data-diet-action="set-current"><i class="fas fa-check" aria-hidden="true"></i> Usar este plano</button>';
-        const summary = `
+            : `<button type="button" class="btn-primary plan-use-current" data-diet-action="set-current"><i class="fas fa-check" aria-hidden="true"></i> ${plan.author_user_id && String(plan.author_user_id) !== String(window.currentUser?.id) && !plan.student_accepted_at ? "Aceitar e usar" : "Usar este plano"}</button>`;
+        const summary = `${professionalPlanNotice(plan, "diet")}
             <section class="plan-summary">
                 <div class="plan-summary__icon"><i class="fas fa-apple-alt" aria-hidden="true"></i></div>
                 <div><span>Plano alimentar</span><p>${esc(plan.description || "Uma rotina alimentar organizada para você.")}</p></div>
@@ -3496,13 +3496,14 @@
         });
     }
 
-    function professionalPlanNotice(plan) {
+    function professionalPlanNotice(plan, type = "workout") {
         if (!plan.author_user_id || String(plan.author_user_id) === String(window.currentUser?.id)) return "";
         const accepted = plan.student_accepted_at || plan.is_current;
-        const message = accepted
-            ? "Este treino já está na Home do app. Você pode continuar por lá."
+        const message = type === "diet"
+            ? accepted ? "Você já aceitou esta dieta." : "Revise a dieta e escolha Aceitar e usar para colocá-la na Home."
+            : accepted ? "Este treino já está na Home do app. Você pode continuar por lá."
             : "Revise o treino e escolha Aceitar e usar. Ao salvar os dias, ele aparece na Home do app para você continuar por lá.";
-        return `<div class="professional-delivery-note"><div><strong>Enviado por ${esc(plan.author_username || "seu profissional")}</strong><p>${message} Seu treino anterior continua salvo.${plan.supersedes_plan_id ? " Esta é uma atualização de um plano anterior." : ""}</p></div></div>`;
+        return `<div class="professional-delivery-note"><div><strong>Enviado por ${esc(plan.author_username || "seu profissional")}</strong><p>${message} Seu plano anterior continua salvo.${plan.supersedes_plan_id ? " Esta é uma atualização de um plano anterior." : ""}</p></div></div>`;
     }
 
     function renderWorkoutDetail(options = {}) {
