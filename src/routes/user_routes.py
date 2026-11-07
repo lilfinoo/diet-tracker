@@ -434,6 +434,8 @@ def _editable_workout_plan(plan_id):
     plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=g.user.id, status="published").options(
         selectinload(WorkoutPlan.days).selectinload(WorkoutDay.exercises),
     ).with_for_update().first_or_404()
+    if plan.author_user_id != plan.user_id and not plan.student_accepted_at:
+        abort(409, description="Aceite o plano do profissional antes de editar uma cópia.")
     active_session = WorkoutSession.query.filter_by(
         user_id=g.user.id,
         workout_plan_id=plan.id,
