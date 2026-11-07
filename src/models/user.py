@@ -143,14 +143,14 @@ class User(db.Model):
             subscription = self.active_subscription()
             return bool(
                 self.is_professional
-                and self.professional_scope in {"workout", "both"}
+                and self.professional_scope in {"workout", "diet", "both"}
                 and subscription
                 and subscription.plan_code in {"professional_single", "professional_complete"}
             )
         if entitlement == "workout":
             return self.has_entitlement("professional")
         if entitlement == "diet":
-            return False
+            return self.has_entitlement("professional")
         return False
 
     def has_current_ai_consent(self):
@@ -861,6 +861,8 @@ class WorkoutPlan(db.Model):
     supersedes_plan_id = db.Column(db.Integer, db.ForeignKey("workout_plan.id"), nullable=True)
     status = db.Column(db.String(20), default="published", nullable=False)
     source = db.Column(db.String(20), default="manual", nullable=False)
+    student_accepted_at = db.Column(db.DateTime, nullable=True)
+    student_declined_at = db.Column(db.DateTime, nullable=True)
     published_at = db.Column(db.DateTime, nullable=True)
     title = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text, nullable=True) # Descrição geral do plano
@@ -897,6 +899,8 @@ class WorkoutPlan(db.Model):
             "author_username": self.author.username if self.author else None,
             "status": self.status,
             "source": self.source,
+            "student_accepted_at": self.student_accepted_at.isoformat() if self.student_accepted_at else None,
+            "student_declined_at": self.student_declined_at.isoformat() if self.student_declined_at else None,
             "published_at": self.published_at.isoformat() if self.published_at else None,
             "supersedes_plan_id": self.supersedes_plan_id,
             "title": self.title,
@@ -1402,6 +1406,8 @@ class DietPlan(db.Model):
     supersedes_plan_id = db.Column(db.Integer, db.ForeignKey("diet_plan.id"), nullable=True)
     status = db.Column(db.String(20), default="published", nullable=False)
     source = db.Column(db.String(20), default="manual", nullable=False)
+    student_accepted_at = db.Column(db.DateTime, nullable=True)
+    student_declined_at = db.Column(db.DateTime, nullable=True)
     published_at = db.Column(db.DateTime, nullable=True)
     title = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text, nullable=True) # Descrição geral do plano
@@ -1442,6 +1448,8 @@ class DietPlan(db.Model):
             "author_username": self.author.username if self.author else None,
             "status": self.status,
             "source": self.source,
+            "student_accepted_at": self.student_accepted_at.isoformat() if self.student_accepted_at else None,
+            "student_declined_at": self.student_declined_at.isoformat() if self.student_declined_at else None,
             "published_at": self.published_at.isoformat() if self.published_at else None,
             "supersedes_plan_id": self.supersedes_plan_id,
             "title": self.title,
@@ -1637,13 +1645,6 @@ class ProfessionalStudentRelationship(db.Model):
             name="ck_professional_student_status",
         ),
         db.Index("ix_professional_student_professional_status", "professional_user_id", "status"),
-        db.Index(
-            "uq_professional_student_active_student",
-            "student_user_id",
-            unique=True,
-            postgresql_where=db.text("status = 'active'"),
-            sqlite_where=db.text("status = 'active'"),
-        ),
         db.Index(
             "uq_professional_student_open_pair",
             "professional_user_id",
