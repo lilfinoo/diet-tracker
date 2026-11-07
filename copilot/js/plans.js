@@ -1657,9 +1657,12 @@
         const dayCount = Array.isArray(workoutCurrentPlan.days) ? workoutCurrentPlan.days.length : Number(workoutCurrentPlan.days_count || workoutCurrentPlan.days_per_week || 3);
         const selectedCount = selected.size;
         const isValidSelection = selectedCount > 0;
-        if (title) title.textContent = workoutTodayState?.current_plan_id === workoutCurrentPlan.id ? "Ajustar agenda" : "Definir plano principal";
+        const isIncomingProfessionalPlan = workoutCurrentPlan.author_user_id && String(workoutCurrentPlan.author_user_id) !== String(window.currentUser?.id) && !workoutCurrentPlan.student_accepted_at && !workoutCurrentPlan.is_current;
+        if (title) title.textContent = isIncomingProfessionalPlan ? "Aceitar treino do profissional" : workoutTodayState?.current_plan_id === workoutCurrentPlan.id ? "Ajustar agenda" : "Definir plano principal";
         if (subtitle) {
-            subtitle.textContent = workoutTodayState?.current_plan_id === workoutCurrentPlan.id
+            subtitle.textContent = isIncomingProfessionalPlan
+                ? "Ao salvar os dias, este treino vira o principal e aparece na Home do app. Seu treino anterior continua salvo."
+                : workoutTodayState?.current_plan_id === workoutCurrentPlan.id
                 ? "A nova seleção vale imediatamente e atualiza o treino de hoje."
                 : "Escolha os dias da semana deste treino para começar hoje.";
         }
@@ -1685,6 +1688,7 @@
         `;
         const saveButton = byId("workoutCurrentModal").querySelector("[data-workout-current-save]");
         if (saveButton) {
+            saveButton.textContent = isIncomingProfessionalPlan ? "Aceitar e continuar no app" : "Salvar agenda";
             saveButton.disabled = !isValidSelection;
             saveButton.setAttribute("aria-disabled", String(!isValidSelection));
         }
@@ -3492,6 +3496,15 @@
         });
     }
 
+    function professionalPlanNotice(plan) {
+        if (!plan.author_user_id || String(plan.author_user_id) === String(window.currentUser?.id)) return "";
+        const accepted = plan.student_accepted_at || plan.is_current;
+        const message = accepted
+            ? "Este treino já está na Home do app. Você pode continuar por lá."
+            : "Revise o treino e escolha Aceitar e usar. Ao salvar os dias, ele aparece na Home do app para você continuar por lá.";
+        return `<div class="professional-delivery-note"><div><strong>Enviado por ${esc(plan.author_username || "seu profissional")}</strong><p>${message} Seu treino anterior continua salvo.${plan.supersedes_plan_id ? " Esta é uma atualização de um plano anterior." : ""}</p></div></div>`;
+    }
+
     function renderWorkoutDetail(options = {}) {
         const details = byId("viewWorkoutPlanDetails");
         if (!details) return;
@@ -3536,7 +3549,7 @@
         ].filter(Boolean);
         const currentAction = plan.is_current
             ? '<span class="plan-current-pill"><i class="fas fa-star" aria-hidden="true"></i> Plano atual</span>'
-            : '<button type="button" class="btn-primary plan-use-current" data-workout-action="use-current-plan"><i class="fas fa-check" aria-hidden="true"></i> Usar este plano</button>';
+            : `<button type="button" class="btn-primary plan-use-current" data-workout-action="use-current-plan"><i class="fas fa-check" aria-hidden="true"></i> ${plan.author_user_id && String(plan.author_user_id) !== String(window.currentUser?.id) && !plan.student_accepted_at && !plan.is_current ? "Aceitar e usar" : "Usar este plano"}</button>`;
         const editContext = editing ? `
             <section class="workout-plan-edit-context" aria-labelledby="workoutPlanEditTitle">
                 <div><span>Modo de edição</span><h3 id="workoutPlanEditTitle" tabindex="-1">Editar estrutura do plano</h3><p>Adicione, remova ou substitua exercícios. As mudanças valem para as próximas sessões.</p></div>
@@ -3550,7 +3563,7 @@
                 <strong>${esc(contextualDay.title || contextualDay.code || "Treino programado")}</strong>
                 ${contextualDay.focus ? `<small>${esc(contextualDay.focus)}</small>` : ""}
             </section>` : "";
-        const summary = `
+        const summary = `${professionalPlanNotice(plan)}
             <section class="workout-plan-overview${editing ? " is-editing" : ""}">
                 <div class="workout-plan-overview__icon"><i class="fas fa-dumbbell" aria-hidden="true"></i></div>
                 <div class="workout-plan-overview__copy"><span>${plan.is_current ? "Plano atual" : "Plano de treino"}</span><h3>${esc(plan.title || "Plano de treino")}</h3><p>${esc(plan.description || "Uma rotina criada para sua evolução.")}</p>${summaryMeta.length ? `<div class="workout-summary__meta">${summaryMeta.join("")}</div>` : ""}</div>
