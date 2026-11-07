@@ -403,13 +403,13 @@ def update_professional_status(user_id):
     user = db.get_or_404(User, user_id)
     previous_scope = user.professional_scope
     if enabled:
-        if data.get("professional_scope", "workout") != "workout":
-            return jsonify({"error": "Somente o acesso profissional de treinos está disponível."}), 400
+        if data.get("professional_scope", "both") not in {"workout", "diet", "both"}:
+            return jsonify({"error": "Escopo profissional inválido."}), 400
         try:
             end = _admin_grant_end(data)
         except ValueError as error:
             return jsonify({"error": str(error)}), 400
-        user.professional_scope = "workout"
+        user.professional_scope = "both"
         _upsert_admin_grant(user, "professional", "professional_single", end)
     else:
         _revoke_admin_grants(user, "professional")
