@@ -4,7 +4,7 @@ from flask import Blueprint, current_app, g, jsonify
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
-from src.models.user import ChatMessage, DietAdherenceDay, DietMealCheckIn, DietMealDailyState, DietPlan, DietPlanMeal, UserProfile, WorkoutDay, WorkoutExercise, WorkoutPlan, db
+from src.models.user import ProfessionalStudentRelationship, ChatMessage, DietAdherenceDay, DietMealCheckIn, DietMealDailyState, DietPlan, DietPlanMeal, UserProfile, WorkoutDay, WorkoutExercise, WorkoutPlan, db
 from src.routes.common import ai_consent_required, chat_plan_intent, coerce_numbers, idempotent_mutation, json_body, login_required, page_query, premium_required
 from src.services.ai import (
     AIQuotaExceededError,
@@ -445,11 +445,20 @@ def get_diet_plan_details(plan_id):
 @login_required
 def set_current_diet_plan(plan_id):
     plan = DietPlan.query.filter_by(id=plan_id, user_id=g.user.id, status="published").first_or_404()
+    if plan.author_user_id != g.user.id and not plan.student_accepted_at:
+        relationship = ProfessionalStudentRelationship.query.filter_by(
+            professional_user_id=plan.author_user_id, student_user_id=g.user.id, status="active",
+        ).first()
+        if not relationship:
+            return jsonify({"error": "O vínculo com o profissional precisa estar ativo para aceitar este plano."}), 409
     profile = UserProfile.query.filter_by(user_id=g.user.id).first()
     if not profile:
         profile = UserProfile(user_id=g.user.id)
         db.session.add(profile)
     profile.current_diet_plan_id = plan.id
+    if plan.author_user_id != g.user.id:
+        plan.student_accepted_at = datetime.utcnow()
+        plan.student_declined_at = None
     record_event(
         "plan_set_current",
         user_id=g.user.id,
@@ -485,6 +494,8 @@ def delete_diet_plan(plan_id):
 @login_required
 def update_diet_plan_meal(plan_id, meal_id):
     plan = DietPlan.query.filter_by(id=plan_id, user_id=g.user.id, status="published").first_or_404()
+    if plan.author_user_id != g.user.id and not plan.student_accepted_at:
+        return jsonify({"error": "Aceite o plano profissional antes de editar.", "code": "plan_acceptance_required"}), 409
     meal = DietPlanMeal.query.filter_by(id=meal_id, diet_plan_id=plan.id).first_or_404()
     data = coerce_numbers(json_body(), ("calories", "protein", "carbs", "fat"))
     if "description" in data:
@@ -522,6 +533,8 @@ def update_diet_plan_meal(plan_id, meal_id):
 @premium_required
 def suggest_diet_day(plan_id):
     plan = DietPlan.query.filter_by(id=plan_id, user_id=g.user.id, status="published").first_or_404()
+    if plan.author_user_id != g.user.id and not plan.student_accepted_at:
+        return jsonify({"error": "Aceite o plano profissional antes de editar.", "code": "plan_acceptance_required"}), 409
     data = json_body()
     try:
         day_index = int(data.get("day"))
@@ -580,6 +593,8 @@ def suggest_diet_day(plan_id):
 @login_required
 def replace_diet_day(plan_id, day_index):
     plan = DietPlan.query.filter_by(id=plan_id, user_id=g.user.id, status="published").first_or_404()
+    if plan.author_user_id != g.user.id and not plan.student_accepted_at:
+        return jsonify({"error": "Aceite o plano profissional antes de editar.", "code": "plan_acceptance_required"}), 409
     if day_index not in {1, 2, 3}:
         return jsonify({"error": "Escolha um dia entre 1 e 3."}), 400
     data = json_body()
