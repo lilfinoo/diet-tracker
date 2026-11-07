@@ -144,9 +144,12 @@ def create_diet_plan(
     status="published",
     source="manual",
     supersedes_plan_id=None,
+    relationship=None,
+    roster_relationship=None,
 ):
     plan = DietPlan(
         user_id=owner.id if owner else None,
+        professional_student_relationship_id=roster_relationship.id if roster_relationship else None,
         author_user_id=author.id,
         published_by_user_id=author.id if status == "published" else None,
         published_at=datetime.utcnow() if status == "published" else None,
@@ -168,6 +171,8 @@ def create_diet_plan(
     db.session.add(plan)
     db.session.flush()
     _replace_diet_meals(plan, plan_data["meals"])
+    if relationship:
+        add_audit(author, owner, relationship, "diet_plan.created", "diet_plan", plan.id)
     return plan
 
 
@@ -215,7 +220,7 @@ def publish_plan(plan, actor, owner, relationship, resource_type):
     plan.published_at = datetime.utcnow()
     plan.published_by_user_id = actor.id
     plan.professional_verified_fingerprint = snapshot_fingerprint(plan_snapshot(plan))
-    if plan.supersedes_plan_id:
+    if plan.supersedes_plan_id and actor.id == owner.id:
         model = WorkoutPlan if resource_type == "workout_plan" else DietPlan
         previous = db.session.get(model, plan.supersedes_plan_id)
         if previous and previous.user_id == owner.id:
