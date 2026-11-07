@@ -25,7 +25,7 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="/styles.css?v=20261029-professional">
     <link rel="stylesheet" href="/fluid.css?v=20260828-achievements">
-    <link rel="stylesheet" href="/professional.css?v=20261029-guided-catalog">
+    <link rel="stylesheet" href="/professional.css?v=20261107-companion">
 </head>
 <body data-auth-state="unknown">
     <div id="appBootScreen" role="status" aria-live="polite">
@@ -508,14 +508,15 @@
                 <div id="professionalTab" class="tab-content hidden">
                     <section id="professionalDashboard">
                         <div class="content-header professional-heading">
-                            <div class="content-heading"><span class="content-kicker">Área profissional</span><h2>Seus alunos</h2><p>Acompanhe seus alunos. Monte, revise e envie treinos.</p></div>
+                            <div class="content-heading"><span class="content-kicker">Área profissional</span><h2>Seus alunos</h2><p>Acompanhe seus alunos. Monte, revise e envie treinos e dietas.</p></div>
                             <div class="professional-create-actions"><button type="button" class="btn-primary" onclick="openOfflineStudent()"><i class="fas fa-user-plus"></i> Novo aluno</button><button type="button" class="btn-secondary" onclick="openProfessionalInvite()"><i class="fas fa-link"></i> Convite avulso</button></div>
                         </div>
                         <div class="professional-workflow" aria-label="Como funciona o acompanhamento">
                             <article><span>1</span><div><strong>Cadastre seu aluno</strong><p>Comece pelo perfil, mesmo sem conta no app.</p></div></article>
-                            <article><span>2</span><div><strong>Monte o treino</strong><p>Organize os dias e a prescrição de cada exercício.</p></div></article>
+                            <article><span>2</span><div><strong>Monte os planos</strong><p>Crie treinos e dietas manualmente ou com IA e revise os detalhes.</p></div></article>
                             <article><span>3</span><div><strong>Envie para o app</strong><p>Com o convite aceito, o aluno recebe o plano.</p></div></article>
                         </div>
+                        <div id="professionalIncomingRequests" class="professional-companion-list" aria-live="polite"></div>
                         <div id="professionalStats" class="stats-grid"></div>
                         <div id="professionalStudents" class="professional-student-grid" aria-live="polite"></div>
                     </section>
@@ -542,6 +543,7 @@
 
                         <div id="profileAuthenticatedContent">
                             <nav class="profile-shortcuts" aria-label="Assinatura e rede">
+                                <button type="button" onclick="openProfessionalCompanion()"><span class="profile-shortcut-icon"><i data-lucide="users" aria-hidden="true"></i></span><strong>Meu acompanhamento</strong><span class="profile-shortcut-caption">Profissionais e planos recebidos</span></button>
                                 <button type="button" id="profileProfessionalDashboard" class="hidden" onclick="showTab('professional')"><span class="profile-shortcut-icon"><i data-lucide="briefcase-business" aria-hidden="true"></i></span><strong>Área profissional</strong><span class="profile-shortcut-caption">Alunos e planos<i data-lucide="chevron-right" aria-hidden="true"></i></span></button>
                                 <button type="button" onclick="openPlansModal()"><span class="profile-shortcut-icon"><i data-lucide="credit-card" aria-hidden="true"></i></span><strong>Planos e assinatura</strong><span class="profile-shortcut-caption">Gerenciar plano<i data-lucide="chevron-right" aria-hidden="true"></i></span></button>
                             </nav>
@@ -990,6 +992,16 @@
             </div>
         </div>
 
+        <div id="professionalCompanionModal" class="modal plan-modal" role="dialog" aria-modal="true" aria-labelledby="professionalCompanionTitle">
+            <div class="modal-content">
+                <div class="modal-header"><h3 id="professionalCompanionTitle">Meu acompanhamento</h3><button type="button" class="btn-close" aria-label="Fechar" onclick="closeAppModal(document.getElementById('professionalCompanionModal'))">&times;</button></div>
+                <p id="professionalCompanionMessage" role="status" aria-live="polite"></p>
+                <h4>Meus profissionais</h4><div id="professionalCompanionLinks" class="professional-companion-list"></div>
+                <h4>Encontrar profissional</h4><form class="professional-companion-search" onsubmit="searchProfessionalProfiles(event)"><label for="professionalCompanionQuery">Usuário ou código</label><input id="professionalCompanionQuery" type="search" maxlength="100" required placeholder="@usuario ou código"><button class="btn-secondary" type="submit">Buscar</button></form><div id="professionalCompanionResults" class="professional-companion-list" aria-live="polite"></div>
+                <h4>Planos para revisar</h4><div id="professionalCompanionInbox" class="professional-companion-list"></div>
+            </div>
+        </div>
+
         <div id="professionalPlanEditorModal" class="modal plan-modal" role="dialog" aria-modal="true" aria-labelledby="professionalPlanEditorTitle">
             <div class="modal-content professional-editor-sheet">
                 <div class="modal-header"><div><span id="professionalPlanEditorKicker" class="content-kicker">Rascunho</span><h3 id="professionalPlanEditorTitle">Editor de plano</h3></div><button type="button" class="btn-close" onclick="closeProfessionalPlanEditor()" aria-label="Fechar">&times;</button></div>
@@ -1030,9 +1042,11 @@
     <script defer src="/js/diet-share.js?v=20260926-diet-transparent"></script>
     <script defer src="/js/workout-share.js?v=20260926-home-share"></script>
     <script defer src="/js/plans.js?v=20261107-professional-accept"></script>
-    <script defer src="/js/professional.js?v=20261029-guided-catalog"></script>
+    <script defer src="/js/professional.js?v=20261107-companion"></script>
+    <script defer src="/js/professional-companion.js?v=20261107-companion"></script>
     <script defer src="/js/home-refresh.js?v=20260921-home-refresh"></script>
     <script defer src="/js/progress.js?v=20260919-progress"></script>
     <script defer src="/js/social.js?v=20260919-camera"></script>
 </body>
 </html>
+
