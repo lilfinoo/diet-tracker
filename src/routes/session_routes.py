@@ -119,12 +119,16 @@ def get_active_workout_session(plan_id, day_id):
 
 
 @session_bp.route("/workout_plans/<int:plan_id>/days/<int:day_id>/sessions", methods=["POST"])
-@premium_required(message="Iniciar um treino requer Premium.")
+@login_required
 def start_workout_session(plan_id, day_id):
     plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=g.user.id, status="published").with_for_update().first()
     day = WorkoutDay.query.filter_by(id=day_id, workout_plan_id=plan.id if plan else None).first()
     if not plan or not day:
         return jsonify({"error": "Treino não encontrado."}), 404
+    if plan.author_user_id in (None, g.user.id) and not g.user.has_entitlement("premium"):
+        return jsonify({"error": "Iniciar um treino requer Premium.", "code": "premium_required"}), 403
+    if plan.author_user_id != plan.user_id and not plan.student_accepted_at:
+        return jsonify({"error": "Aceite o plano do profissional antes de iniciar o treino."}), 409
     if not day.exercises:
         return jsonify({"error": "Este treino não possui exercícios para iniciar."}), 400
     active = WorkoutSession.query.filter_by(user_id=g.user.id, completed_at=None).first()
@@ -212,6 +216,8 @@ def last_workout_preview(plan_id, day_id):
     day = WorkoutDay.query.filter_by(id=day_id, workout_plan_id=plan.id if plan else None).first()
     if not plan or not day:
         return jsonify({"error": "Treino não encontrado."}), 404
+    if plan.author_user_id != plan.user_id and not plan.student_accepted_at:
+        return jsonify({"error": "Aceite o plano do profissional antes de iniciar o treino."}), 409
     previous = (WorkoutSession.query.filter_by(user_id=g.user.id, workout_day_id=day.id)
                 .filter(WorkoutSession.completed_at.isnot(None))
                 .order_by(WorkoutSession.completed_at.desc(), WorkoutSession.id.desc()).first())
@@ -255,6 +261,8 @@ def finish_last_workout(plan_id, day_id):
     day = WorkoutDay.query.filter_by(id=day_id, workout_plan_id=plan.id if plan else None).first()
     if not plan or not day:
         return jsonify({"error": "Treino não encontrado."}), 404
+    if plan.author_user_id != plan.user_id and not plan.student_accepted_at:
+        return jsonify({"error": "Aceite o plano do profissional antes de iniciar o treino."}), 409
     if WorkoutSession.query.filter_by(user_id=g.user.id, completed_at=None).first():
         return jsonify({"error": "Finalize o treino em andamento antes de iniciar outro."}), 409
     session_record = WorkoutSession(user_id=g.user.id, workout_plan_id=plan.id, workout_day_id=day.id, day=day)
@@ -316,6 +324,8 @@ def start_calisthenics_workout(plan_id, day_id):
     day = WorkoutDay.query.filter_by(id=day_id, workout_plan_id=plan.id if plan else None).first()
     if not plan or not day:
         return jsonify({"error": "Treino não encontrado."}), 404
+    if plan.author_user_id != plan.user_id and not plan.student_accepted_at:
+        return jsonify({"error": "Aceite o plano do profissional antes de iniciar o treino."}), 409
     if not day.exercises:
         return jsonify({"error": "Este treino não possui exercícios para iniciar."}), 400
     if WorkoutSession.query.filter_by(user_id=g.user.id, completed_at=None).first():
