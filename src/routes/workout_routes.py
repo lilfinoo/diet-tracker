@@ -1,11 +1,12 @@
 import uuid
+from datetime import datetime
 import hashlib
 import json
 
 from flask import Blueprint, abort, g, jsonify
 from sqlalchemy.orm import selectinload
 
-from src.models.user import WorkoutDay, WorkoutExercise, WorkoutPlan, WorkoutSession, UserProfile, db
+from src.models.user import ProfessionalStudentRelationship, WorkoutDay, WorkoutExercise, WorkoutPlan, WorkoutSession, UserProfile, db
 from src.routes.common import (ai_consent_required, premium_required, _apply_workout_plan_schedule, _editable_workout_plan, _get_or_create_profile, _local_date_for_timezone, _plan_catalog, _prescription, _redistribute_workout_plan_data, _set_catalog_exercise, _workout_questionnaire_for_plan, _workout_today_payload, _version_workout_plan_for_edit, json_body, login_required, page_query)
 from src.services.plan_management import create_workout_plan
 from src.services.analytics import record_event
@@ -38,7 +39,7 @@ def rest_day_checkin():
 
 
 @workout_bp.route("/workout_plans/<int:plan_id>/current", methods=["PUT"])
-@premium_required(message="Aplicar um plano de treino requer Premium.")
+@login_required
 def set_current_workout_plan(plan_id):
     user = g.user
     data = json_body()
@@ -57,6 +58,14 @@ def set_current_workout_plan(plan_id):
         selectinload(WorkoutPlan.days).selectinload(WorkoutDay.exercises),
         selectinload(WorkoutPlan.exercises),
     ).first_or_404()
+    if plan.author_user_id != user.id and not plan.student_accepted_at:
+        relationship = ProfessionalStudentRelationship.query.filter_by(
+            professional_user_id=plan.author_user_id, student_user_id=user.id, status="active",
+        ).first()
+        if not relationship:
+            return jsonify({"error": "O vínculo com o profissional precisa estar ativo para aceitar este plano."}), 409
+    if plan.author_user_id in (None, user.id) and not user.has_entitlement("premium"):
+        return jsonify({"error": "Aplicar um plano de treino requer Premium.", "code": "premium_required"}), 403
     if len(weekdays) != len(plan.days):
         return jsonify({"error": "Escolha um dia para cada etapa do plano."}), 400
     if WorkoutSession.query.filter_by(user_id=user.id, completed_at=None).first():
@@ -64,6 +73,9 @@ def set_current_workout_plan(plan_id):
 
     was_unconfigured = profile.current_workout_plan_id is None
     _apply_workout_plan_schedule(profile, plan, weekdays, timezone_name, local_date)
+    if plan.author_user_id != user.id:
+        plan.student_accepted_at = datetime.utcnow()
+        plan.student_declined_at = None
     message = "Plano principal definido para hoje." if was_unconfigured else "Agenda atualizada."
 
     record_event(
@@ -85,6 +97,8 @@ def set_current_workout_plan(plan_id):
 @login_required
 def select_first_workout_day(plan_id):
     plan = WorkoutPlan.query.filter_by(id=plan_id, user_id=g.user.id, status="published").first_or_404()
+    if plan.author_user_id != plan.user_id and not plan.student_accepted_at:
+        return jsonify({"error": "Aceite o plano do profissional antes de alterar a agenda."}), 409
     day = next((item for item in plan.days if item.id == json_body().get("day_id")), None)
     if not day:
         return jsonify({"error": "Treino inválido."}), 400
@@ -115,6 +129,8 @@ def select_first_workout_day(plan_id):
 def set_workout_for_today_weekday():
     data = json_body()
     plan = WorkoutPlan.query.filter_by(id=data.get("plan_id"), user_id=g.user.id, status="published").first_or_404()
+    if plan.author_user_id != plan.user_id and not plan.student_accepted_at:
+        return jsonify({"error": "Aceite o plano do profissional antes de alterar a agenda."}), 409
     day = next((item for item in plan.days if item.id == data.get("day_id")), None)
     if not day:
         return jsonify({"error": "Treino inválido."}), 400
@@ -152,6 +168,8 @@ def adapt_current_workout_plan(plan_id):
         selectinload(WorkoutPlan.days).selectinload(WorkoutDay.exercises),
         selectinload(WorkoutPlan.exercises),
     ).first_or_404()
+    if plan.author_user_id != plan.user_id and not plan.student_accepted_at:
+        return jsonify({"error": "Aceite o plano do profissional antes de alterar a agenda."}), 409
     if WorkoutSession.query.filter_by(user_id=user.id, completed_at=None).first():
         return jsonify({"error": "Finalize o treino em andamento antes de trocar o plano principal."}), 409
 
