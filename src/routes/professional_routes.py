@@ -89,17 +89,6 @@ def professional_required(function):
     return decorated_function
 
 
-def professional_premium_required(function):
-    @wraps(function)
-    @professional_required
-    def decorated_function(*args, **kwargs):
-        if not g.user.has_entitlement("premium"):
-            return jsonify({"error": "Este recurso de IA exige plano Premium do profissional."}), 403
-        return function(*args, **kwargs)
-
-    return decorated_function
-
-
 def professional_scope_required(scope):
     def decorator(function):
         @wraps(function)
@@ -756,7 +745,6 @@ def create_manual_workout(student_id):
 @rate_limit("professional_ai", 8, 60)
 @professional_scope_required("workout")
 @ai_consent_required
-@professional_premium_required
 def generate_professional_workout(student_id):
     student, relationship = _student_context(student_id)
     if getattr(student, "is_offline", False):
@@ -1165,7 +1153,6 @@ def create_manual_diet(student_id):
 @rate_limit("professional_ai", 8, 60)
 @professional_scope_required("diet")
 @ai_consent_required
-@professional_premium_required
 def generate_professional_diet(student_id):
     student, relationship = _student_context(student_id)
     if getattr(student, "is_offline", False):
@@ -1262,7 +1249,6 @@ def update_professional_diet(student_id, plan_id):
 @rate_limit("professional_ai", 8, 60)
 @professional_scope_required("diet")
 @ai_consent_required
-@professional_premium_required
 def suggest_professional_diet_day(student_id, plan_id):
     student, _ = _student_context(student_id)
     if getattr(student, "is_offline", False):
