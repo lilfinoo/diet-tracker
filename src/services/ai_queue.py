@@ -9,7 +9,8 @@ from werkzeug.exceptions import HTTPException
 from sqlalchemy import and_, or_
 
 from src.celery_app import celery_app
-from src.models.user import AITask, ChatMessage, DietPlan, User, WorkoutPlan, db
+from src.models.user import AITask, ChatMessage, DietPlan, ProfessionalStudentRelationship, User, WorkoutPlan, db
+from src.legal import PROFESSIONAL_SHARING_VERSION
 
 
 def plan_background_ready():
@@ -104,7 +105,9 @@ def _handler_for(operation):
         suggest_diet_day,
     )
     from src.routes.profile_routes import get_ai_macros
-    from src.routes.professional_routes import generate_professional_workout
+    from src.routes.professional_routes import (
+        generate_professional_workout, generate_professional_diet, suggest_professional_diet_day,
+    )
 
     return {
         "chat": chat,
@@ -112,6 +115,8 @@ def _handler_for(operation):
         "diet_plan": create_guided_diet_plan,
         "workout_plan": create_guided_workout_plan,
         "professional_workout_plan": generate_professional_workout,
+        "professional_diet_plan": generate_professional_diet,
+        "professional_diet_day": suggest_professional_diet_day,
         "diet_day": suggest_diet_day,
     }.get(operation)
 
@@ -121,7 +126,7 @@ def _existing_result(task):
         message = ChatMessage.query.filter_by(ai_task_id=task.id).first()
         if message:
             return {"response": message.response, "action": None}, 200
-    elif task.operation == "diet_plan":
+    elif task.operation in {"diet_plan", "professional_diet_plan"}:
         plan = DietPlan.query.filter_by(ai_task_id=task.id).first()
         if plan:
             return {
@@ -178,10 +183,24 @@ def execute_ai_job(self, task_id):
         task = db.session.get(AITask, uuid.UUID(str(task_id)))
         if task is None or task.status in {"succeeded", "failed"}:
             return
-        if task.operation == "professional_workout_plan":
+        if task.operation in {"professional_workout_plan", "professional_diet_plan", "professional_diet_day"}:
             user = db.session.get(User, task.user_id)
-            if not user or user.is_banned or not user.has_current_ai_consent() or not user.has_entitlement("workout"):
+            if not user or user.is_banned or not user.has_current_ai_consent() or not user.has_entitlement("professional"):
                 _fail(task, "A autorização profissional para executar esta tarefa não está mais válida.", 403)
+                return
+            try:
+                student_id = uuid.UUID(str((task.route_params or {}).get("student_id")))
+            except ValueError:
+                _fail(task, "Aluno não encontrado.", 404)
+                return
+            student = db.session.get(User, student_id)
+            relationship = ProfessionalStudentRelationship.query.filter_by(
+                professional_user_id=task.user_id, student_user_id=student_id, status="active",
+            ).first()
+            if (not student or student.is_banned or not student.has_current_ai_consent()
+                    or not relationship or not relationship.data_sharing_consented_at
+                    or relationship.data_sharing_consent_version != PROFESSIONAL_SHARING_VERSION):
+                _fail(task, "A autorização do aluno para executar esta tarefa não está mais válida.", 403)
                 return
 
         existing = _existing_result(task)
