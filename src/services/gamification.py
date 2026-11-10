@@ -251,6 +251,12 @@ def gamification_summary(user_id):
         GamificationDay.local_date >= today - timedelta(days=27),
     ).order_by(GamificationDay.local_date.asc()).all()
     by_date = {item.local_date: item for item in recent}
+    from src.services.diet_daily import active_diet_plan
+    plan = active_diet_plan(user_id)
+    meal_xp = db.session.query(func.coalesce(func.sum(GamificationAward.xp), 0)).filter_by(
+        user_id=user_id, action="meal", local_date=today,
+    ).scalar() or 0
+    meal_share = max(1, 100 // max(1, min(10, int(plan.meals_per_day or 5) if plan else 5)))
     return {
         "total_xp": total_xp,
         "level": level,
@@ -267,6 +273,12 @@ def gamification_summary(user_id):
         "active_days": profile.active_days if profile else 0,
         "available_protections": profile.available_protections if profile else 0,
         "today": {
+            "date": today.isoformat(),
+            "meal_xp": int(meal_xp),
+            "meal_awarded_sources": [award.source_key for award in GamificationAward.query.filter_by(
+                user_id=user_id, action="meal", local_date=today,
+            ).all()],
+            "meal_xp_per_meal": meal_share,
             "qualified": bool(today_row and (today_row.meal or today_row.water or today_row.workout or today_row.rest_checkin or today_row.xp > 0)),
             "meal": bool(today_row and today_row.meal),
             "water": bool(today_row and today_row.water),
