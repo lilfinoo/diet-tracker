@@ -263,7 +263,7 @@
     }
 
     function aiControlsHtml(editor) {
-        return `<div class="professional-ai-panel"><h4>Comece com IA e ajuste do seu jeito</h4><p>A geração salva um rascunho. Revise e edite cada detalhe antes de enviar ao aluno.</p>${editor.type === "workout" ? `${selectField("Equipamentos disponíveis", "editorEquipment", editor.questionnaire.equipment?.[0] || "full_gym", { full_gym: "Academia completa", dumbbell: "Halteres", bodyweight: "Peso corporal" })}<label>Limitações e cuidados<textarea id="editorLimitations" maxlength="500">${esc(editor.questionnaire.limitations || "")}</textarea></label><label>Prioridades<textarea id="editorPriorities" maxlength="500">${esc(editor.questionnaire.priorities || "")}</textarea></label>` : ""}<button type="button" class="btn-secondary" onclick="generateProfessionalPlan()"${state.student.is_offline ? " disabled" : ""}><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> Gerar rascunho com IA</button><small>${state.student.is_offline ? "Disponível após o aluno aceitar o vínculo e autorizar o uso de IA." : "Incluso no acesso profissional; requer autorização atual do aluno."}</small></div>`;
+        return `<div class="professional-ai-panel"><h4>Comece com IA e ajuste do seu jeito</h4><p>A geração salva um rascunho. Revise e edite cada detalhe antes de enviar ao aluno.</p>${editor.type === "workout" ? `${selectField("Divisão do treino", "editorSplit", editor.questionnaire.split_type || "full_body", { full_body: "Full body", upper_lower: "Upper / Lower", abc: "ABC", abcd: "ABCD", abcde: "ABCDE" })}<small>A divisão deve ser compatível com a quantidade de treinos por semana.</small>${selectField("Equipamentos disponíveis", "editorEquipment", editor.questionnaire.equipment?.[0] || "full_gym", { full_gym: "Academia completa", dumbbell: "Halteres", bodyweight: "Peso corporal" })}<label>Limitações e cuidados<textarea id="editorLimitations" maxlength="500">${esc(editor.questionnaire.limitations || "")}</textarea></label><label>Prioridades<textarea id="editorPriorities" maxlength="500">${esc(editor.questionnaire.priorities || "")}</textarea></label>` : ""}<button type="button" class="btn-secondary" onclick="generateProfessionalPlan()"${state.student.is_offline ? " disabled" : ""}><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> Gerar rascunho com IA</button><small>${state.student.is_offline ? "Disponível após o aluno aceitar o vínculo e autorizar o uso de IA." : "Incluso no acesso profissional; requer autorização atual do aluno."}</small></div>`;
     }
 
     async function generateProfessionalPlan() {
@@ -276,7 +276,15 @@
             days_per_week: Number(byId("editorDays").value), session_duration: Number(byId("editorDuration").value),
             equipment: [byId("editorEquipment").value], limitations: byId("editorLimitations").value.trim(), priorities: byId("editorPriorities").value.trim()
         };
-        if (editor.type === "workout") questionnaire.split_type = { 1: "full_body", 2: "full_body", 3: "abc", 4: "abcd", 5: "abcde", 6: "abc", 7: "full_body" }[questionnaire.days_per_week];
+        if (editor.type === "workout") {
+            questionnaire.split_type = byId("editorSplit").value || "full_body";
+            const validSplits = { 1: ["full_body"], 2: ["full_body", "upper_lower"], 3: ["full_body", "upper_lower", "abc"], 4: ["full_body", "upper_lower", "abc", "abcd"], 5: ["full_body", "upper_lower", "abc", "abcd", "abcde"], 6: ["full_body", "upper_lower", "abc", "abcd", "abcde"], 7: ["full_body"] };
+            if (!validSplits[questionnaire.days_per_week]?.includes(questionnaire.split_type)) {
+                byId("professionalPlanEditorMessage").textContent = "Essa divisão não combina com a quantidade de treinos por semana. Escolha outra divisão ou frequência.";
+                byId("editorSplit").focus();
+                return;
+            }
+        }
         if (editor.supersedesPlanId) questionnaire.supersedes_plan_id = editor.supersedesPlanId;
         state.saving = true; setSaving(true);
         byId("professionalPlanEditorMessage").textContent = "Gerando rascunho com IA. Aguarde e mantenha esta tela aberta…";
