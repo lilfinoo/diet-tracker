@@ -64,7 +64,7 @@ def set_current_workout_plan(plan_id):
         ).first()
         if not relationship:
             return jsonify({"error": "O vínculo com o profissional precisa estar ativo para aceitar este plano."}), 409
-    if plan.author_user_id in (None, user.id) and not user.has_entitlement("premium"):
+    if plan.author_user_id in (None, user.id) and plan.source != "manual" and not user.has_entitlement("premium"):
         return jsonify({"error": "Aplicar um plano de treino requer Premium.", "code": "premium_required"}), 403
     if len(weekdays) != len(plan.days):
         return jsonify({"error": "Escolha um dia para cada etapa do plano."}), 400
