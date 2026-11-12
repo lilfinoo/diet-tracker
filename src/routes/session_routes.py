@@ -125,7 +125,7 @@ def start_workout_session(plan_id, day_id):
     day = WorkoutDay.query.filter_by(id=day_id, workout_plan_id=plan.id if plan else None).first()
     if not plan or not day:
         return jsonify({"error": "Treino não encontrado."}), 404
-    if plan.author_user_id in (None, g.user.id) and not g.user.has_entitlement("premium"):
+    if plan.author_user_id in (None, g.user.id) and plan.source != "manual" and not g.user.has_entitlement("premium"):
         return jsonify({"error": "Iniciar um treino requer Premium.", "code": "premium_required"}), 403
     if plan.author_user_id != plan.user_id and not plan.student_accepted_at:
         return jsonify({"error": "Aceite o plano do profissional antes de iniciar o treino."}), 409
