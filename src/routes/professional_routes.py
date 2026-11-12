@@ -33,6 +33,7 @@ from src.services.ai import (
     AIServiceError,
     generate_workout_plan,
     generate_diet_plan,
+    classify_exercise_catalog_key,
 )
 from src.services.plan_management import (
     add_audit,
@@ -61,6 +62,25 @@ from src.services.workout_plans import (
 
 
 professional_bp = Blueprint("professional", __name__)
+
+
+@professional_bp.route("/professional/exercises/match", methods=["POST"])
+@rate_limit("professional_ai", 8, 60)
+@ai_consent_required
+def match_professional_exercise():
+    if not g.user.has_entitlement("professional"):
+        return jsonify({"error": "A área profissional exige acesso profissional aprovado e ativo."}), 403
+    name = str(json_body().get("name") or "").strip()
+    if not 2 <= len(name) <= 100:
+        return jsonify({"error": "Informe o nome do exercício (2 a 100 caracteres)."}), 400
+    try:
+        key = classify_exercise_catalog_key(name)
+    except AIQuotaExceededError as error:
+        return jsonify({"error": str(error)}), 429
+    except AIServiceError:
+        current_app.logger.exception("Professional exercise matching failed")
+        return jsonify({"error": "Não foi possível identificar o exercício agora."}), 503
+    return jsonify({"catalog_key": key}), 200
 
 
 @professional_bp.errorhandler(400)
