@@ -417,12 +417,58 @@
     function workoutExerciseHtml(exercise, exerciseIndex) {
         return `<div class="professional-exercise-row" data-exercise-source="${esc(JSON.stringify(exercise))}">
             <div class="professional-exercise-heading"><span class="professional-exercise-number">${exerciseIndex + 1}</span><div><strong>${esc(exercise.name)}</strong><small>${esc(exercise.primary_muscle || "Exercício do plano")} · ${esc(equipmentLabels[String(exercise.equipment).toLowerCase()] || exercise.equipment || "Sem equipamento informado")}</small></div>
-                <div class="professional-exercise-actions"><button type="button" class="btn-secondary" onclick="moveProfessionalExercise(this, -1)" aria-label="Mover ${esc(exercise.name)} para cima"><i class="fas fa-arrow-up" aria-hidden="true"></i></button><button type="button" class="btn-secondary" onclick="moveProfessionalExercise(this, 1)" aria-label="Mover ${esc(exercise.name)} para baixo"><i class="fas fa-arrow-down" aria-hidden="true"></i></button><button type="button" class="btn-secondary professional-remove" onclick="removeProfessionalExercise(this)" aria-label="Remover ${esc(exercise.name)}"><i class="fas fa-trash" aria-hidden="true"></i></button></div>
+                <div class="professional-exercise-actions"><button type="button" class="btn-secondary" onclick="editProfessionalExercise(this)" aria-label="Editar ${esc(exercise.name)}"><i class="fas fa-pen" aria-hidden="true"></i> Editar</button><button type="button" class="btn-secondary" onclick="moveProfessionalExercise(this, -1)" aria-label="Mover ${esc(exercise.name)} para cima"><i class="fas fa-arrow-up" aria-hidden="true"></i></button><button type="button" class="btn-secondary" onclick="moveProfessionalExercise(this, 1)" aria-label="Mover ${esc(exercise.name)} para baixo"><i class="fas fa-arrow-down" aria-hidden="true"></i></button><button type="button" class="btn-secondary professional-remove" onclick="removeProfessionalExercise(this)" aria-label="Remover ${esc(exercise.name)}"><i class="fas fa-trash" aria-hidden="true"></i></button></div>
             </div>
             <select class="exercise-key" hidden><option value="${esc(exercise.catalog_key)}" data-exercise-name="${esc(exercise.name)}" selected>${esc(exercise.name)}</option></select>
             <div class="professional-prescription"><label>Séries<input class="exercise-sets" type="number" min="1" max="10" step="1" required value="${esc(exercise.sets ?? 3)}"></label><label>Repetições<input class="exercise-reps" maxlength="30" value="${esc(exercise.reps ?? "8-12")}" placeholder="Ex.: 8-12" required></label><label>Descanso (s)<input class="exercise-rest" type="number" min="0" max="600" step="1" required value="${esc(exercise.rest_seconds ?? 60)}"></label><label><span>Carga <small>Opcional</small></span><input class="exercise-weight" maxlength="50" value="${esc(exercise.weight || "")}" placeholder="Ex.: 20 kg"></label></div>
             <label class="professional-exercise-note"><span>Orientação de execução <small>Opcional</small></span><input class="exercise-notes" maxlength="500" value="${esc(exercise.notes || "")}" placeholder="Ex.: Controle a descida e evite compensar com o tronco."></label>
         </div>`;
+    }
+
+    function editProfessionalExercise(button) {
+        const row = button.closest(".professional-exercise-row");
+        const existing = row.querySelector(".professional-exercise-edit");
+        if (existing) { existing.remove(); return; }
+        row.insertAdjacentHTML("beforeend", `<div class="professional-exercise-edit"><label>Nome do exercício<input class="exercise-search" maxlength="100" placeholder="Digite para buscar no catálogo"></label><p>Escolha o exercício correspondente para mostrar o GIF ao aluno.</p><div class="exercise-matches"></div><button type="button" class="btn-secondary" onclick="suggestProfessionalExercise(this)">Buscar sugestão com IA</button><button type="button" class="btn-secondary" onclick="editProfessionalExercise(this)">Cancelar</button></div>`);
+        const input = row.querySelector(".exercise-search");
+        input.value = row.querySelector("strong").textContent;
+        input.addEventListener("input", () => renderExerciseMatches(row));
+        renderExerciseMatches(row); input.focus();
+    }
+
+    function renderExerciseMatches(row, suggestedKey = null) {
+        const name = row.querySelector(".exercise-search").value.trim();
+        const query = searchText(name);
+        const matches = suggestedKey ? state.exercises.filter(item => item.catalog_key === suggestedKey) : query ? state.exercises.filter(item => searchText(`${item.name} ${asArray(item.aliases).join(" ")}`).includes(query)).slice(0, 15) : [];
+        const results = row.querySelector(".exercise-matches");
+        results.innerHTML = matches.length ? matches.map(item => `<button type="button" class="btn-secondary" data-key="${esc(item.catalog_key)}">${esc(item.name)}</button>`).join("") : "<p>Nenhum resultado. Tente outro nome ou peça uma sugestão à IA.</p>";
+        results.querySelectorAll("button").forEach(button => button.addEventListener("click", () => {
+            const exercise = state.exercises.find(item => item.catalog_key === button.dataset.key);
+            const select = row.querySelector(".exercise-key");
+            if (!exercise || name.length < 2) { showToast("Informe o nome do exercício.", "error"); return; }
+            if (Array.from(row.closest(".professional-editor-day").querySelectorAll(".exercise-key")).some(item => item !== select && item.value === exercise.catalog_key)) { showToast("Esse exercício já está neste treino.", "error"); return; }
+            select.innerHTML = `<option value="${esc(exercise.catalog_key)}" data-exercise-name="${esc(name)}" selected>${esc(name)}</option>`;
+            row.dataset.exerciseSource = JSON.stringify({ ...exercise, name, preserve_name: true });
+            row.querySelector("strong").textContent = name;
+            row.querySelector("small").textContent = `GIF: ${exercise.name}`;
+            row.querySelector(".professional-exercise-edit").remove();
+            state.editor.dirty = true; filterProfessionalExercises();
+        }));
+    }
+
+    async function suggestProfessionalExercise(button) {
+        const row = button.closest(".professional-exercise-row");
+        const name = row.querySelector(".exercise-search").value.trim();
+        if (name.length < 2) { showToast("Informe o nome do exercício.", "error"); return; }
+        const editor = state.editor; button.disabled = true;
+        try {
+            const result = await api("/professional/exercises/match", { method: "POST", body: { name } });
+            if (state.editor !== editor || !row.querySelector(".exercise-search") || row.querySelector(".exercise-search").value.trim() !== name) return;
+            if (!state.exercises.some(item => item.catalog_key === result.catalog_key)) { showToast("A IA não encontrou uma correspondência segura. Tente outro nome.", "error"); return; }
+            renderExerciseMatches(row, result.catalog_key);
+            showToast("Confira a sugestão e selecione-a se o movimento estiver correto.");
+        } catch (error) { showToast(error.message, "error"); }
+        finally { button.disabled = false; }
     }
 
     function selectField(label, id, selected, options, attributes = "") {
@@ -588,6 +634,10 @@
     }
 
     function validateProfessionalEditor() {
+        if (state.editor.type === "workout" && byId("professionalWorkoutDays").querySelector(".professional-exercise-edit")?.classList?.contains("professional-exercise-edit")) {
+            byId("professionalPlanEditorMessage").textContent = "Conclua ou cancele a edição do exercício antes de salvar.";
+            return false;
+        }
         const payload = collectEditorPayload();
         if (state.editor.type === "diet") {
             const valid = Boolean(payload.title && payload.meals.length && payload.meals.every(meal => meal.description && meal.meal_type && [meal.calories, meal.protein, meal.carbs, meal.fat].every(value => Number.isFinite(value) && value >= 0)));
@@ -763,7 +813,7 @@
     window.ProfessionalWorkspace = { hasAccess, sessionChanged, canCloseEditor: canCloseProfessionalEditor, editorStep: () => state.editor?.step || 0 };
 
 
-    Object.assign(window, { loadProfessionalDashboard, openProfessionalStudent, openOfflineStudent, closeOfflineStudent, saveOfflineStudent, openProfessionalInviteForStudent, openProfessionalInvite, closeProfessionalInvite, generateProfessionalInvite, copyProfessionalInvite, shareProfessionalInvite, revokeProfessionalStudent, createManualProfessionalPlan, generateProfessionalPlan, addProfessionalMeal, removeProfessionalMeal, editProfessionalPlan, setProfessionalEditorStep, selectProfessionalDay, refreshProfessionalDayTabs, filterProfessionalExercises, showMoreProfessionalExercises, focusProfessionalCatalog, moveProfessionalExercise, addProfessionalExercise, removeProfessionalExercise, professionalEditorDaysChanged, saveProfessionalEditor, closeProfessionalPlanEditor, openProfessionalPlan, publishProfessionalPlan });
+    Object.assign(window, { loadProfessionalDashboard, openProfessionalStudent, openOfflineStudent, closeOfflineStudent, saveOfflineStudent, openProfessionalInviteForStudent, openProfessionalInvite, closeProfessionalInvite, generateProfessionalInvite, copyProfessionalInvite, shareProfessionalInvite, revokeProfessionalStudent, createManualProfessionalPlan, generateProfessionalPlan, addProfessionalMeal, removeProfessionalMeal, editProfessionalPlan, editProfessionalExercise, suggestProfessionalExercise, setProfessionalEditorStep, selectProfessionalDay, refreshProfessionalDayTabs, filterProfessionalExercises, showMoreProfessionalExercises, focusProfessionalCatalog, moveProfessionalExercise, addProfessionalExercise, removeProfessionalExercise, professionalEditorDaysChanged, saveProfessionalEditor, closeProfessionalPlanEditor, openProfessionalPlan, publishProfessionalPlan });
     byId("professionalPlanEditorForm")?.addEventListener("submit", saveProfessionalEditor);
     byId("professionalPlanEditorForm")?.addEventListener("input", (event) => {
         if (state.editor && !state.saving && !["professionalExerciseSearch", "professionalMuscleFilter"].includes(event?.target?.id)) {
