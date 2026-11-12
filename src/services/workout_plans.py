@@ -996,7 +996,7 @@ def normalize_manual_workout(data, questionnaire):
             used_keys.add(stable_key)
             normalized_exercises.append({
                 "catalog_key": stable_key,
-                "name": custom_name if is_custom else catalog_item["name"],
+                "name": custom_name if 2 <= len(custom_name) <= 100 else catalog_item["name"],
                 "movement_pattern": "custom" if is_custom else catalog_item["movement_pattern"],
                 "primary_muscle": str(item.get("primary_muscle") or "")[:50] or None if is_custom else catalog_item["primary_muscle"],
                 "equipment": str(item.get("equipment") or "")[:50] or None if is_custom else catalog_item["equipment"],
