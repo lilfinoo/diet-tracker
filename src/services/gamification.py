@@ -279,6 +279,12 @@ def gamification_summary(user_id):
                 user_id=user_id, action="meal", local_date=today,
             ).all()],
             "meal_xp_per_meal": meal_share,
+            "water_xp": int(db.session.query(func.coalesce(func.sum(GamificationAward.xp), 0)).filter_by(
+                user_id=user_id, action="water", local_date=today,
+            ).scalar() or 0),
+            "water_awarded_sources": [award.source_key for award in GamificationAward.query.filter_by(
+                user_id=user_id, action="water", local_date=today,
+            ).all()],
             "qualified": bool(today_row and (today_row.meal or today_row.water or today_row.workout or today_row.rest_checkin or today_row.xp > 0)),
             "meal": bool(today_row and today_row.meal),
             "water": bool(today_row and today_row.water),
